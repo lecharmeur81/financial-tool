@@ -1,0 +1,22 @@
+{
+ "code": 0,
+ "message": "success",
+ "data": [
+  {
+   "date": "2026-09-01",
+   "ticker": "TSTC",
+   "btc_holding": 10000,
+   "btc_acq": -300,
+   "acq_cost": 33000000,
+   "avg_btc_cost": 110000
+  },
+  {
+   "date": "2026-04-01",
+   "ticker": "TSTC",
+   "btc_holding": 10300,
+   "btc_acq": 10300,
+   "acq_cost": 618000000,
+   "avg_btc_cost": 60000
+  }
+ ]
+}

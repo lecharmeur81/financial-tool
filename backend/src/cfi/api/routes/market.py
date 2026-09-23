@@ -13,9 +13,10 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
+from cfi.api.params import aware
 from cfi.core.config import Settings
-from cfi.core.errors import DataValidationError, ServiceUnavailableError
-from cfi.core.time import ensure_utc, utc_now
+from cfi.core.errors import ServiceUnavailableError
+from cfi.core.time import utc_now
 from cfi.market.queries import MarketQueries
 from cfi.market.service import MAX_BARS, MarketService
 
@@ -207,19 +208,10 @@ def _service(request: Request) -> MarketService:
     return MarketService(MarketQueries(engine), settings.market_provider_ids)
 
 
-def _aware(value: datetime | None, name: str) -> datetime | None:
-    if value is None:
-        return None
-    try:
-        return ensure_utc(value, field=name)
-    except ValueError as exc:
-        raise DataValidationError(f"'{name}' must include a time zone offset (e.g. Z).") from exc
-
-
 def _as_of(value: datetime | None) -> datetime:
     now = utc_now()
-    aware = _aware(value, "as_of")
-    return now if aware is None else min(aware, now)
+    given = aware(value, "as_of")
+    return now if given is None else min(given, now)
 
 
 @router.get("/catalog", response_model=Catalog)
@@ -246,8 +238,8 @@ async def bars(
         timeframe=timeframe,
         venue_id=venue,
         as_of=_as_of(as_of),
-        start=_aware(start, "start"),
-        end=_aware(end, "end"),
+        start=aware(start, "start"),
+        end=aware(end, "end"),
         limit=limit,
     )
     return BarsResponse(**data)

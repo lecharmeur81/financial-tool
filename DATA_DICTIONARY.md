@@ -161,6 +161,7 @@ schemas exist and are empty; no tables have been created yet. **HT** = Timescale
 | Table | Purpose | Key columns (plus provenance) |
 |---|---|---|
 | `series` | Series registry (§2a) | see §2a |
+| `institutional_flow` (HT [`event_time`], **implemented** Phase 6) | Flows and holdings of identified institutional vehicles/entities (§5b) | `entity_type` (`etf_group`, `etf_fund`, `public_company`, `public_company_group`), `evidence_class` (`direct` or `attributed` — `inferred` is rejected), `entity_name`, `flow_usd` / `flow_native` (positive = capital entering the entity), `holdings_usd` / `holdings_native`, `cum_flow_usd`, `value_traded_usd`, `premium_discount` (ratio), `unit_cost_usd`. USD columns in the series unit (`usd`); `*_native` in units of the asset. Any field not reported is NULL; a missing row has no flow and no holdings with `quality_status = missing` |
 | `observation` (HT [`event_time`]) | Generic scalar series: ETF flows/holdings, stablecoin supply, exchange reserves, macro, sentiment, on-chain aggregates | `value` |
 | `market_bar` (HT [`event_time`], **implemented**) | OHLCV bars; `event_time` = bar open | `open`, `high`, `low`, `close` (unit = series unit, the quote currency), `volume_base` (base asset), `volume_quote` (quote currency; NULL when the venue does not report it), `trade_count` (NULL when not reported). A missing bar has all prices and volumes NULL with `quality_status = missing` |
 | `funding_rate` (HT) | Perpetual funding | `rate`, `interval_hours`, `rate_per_8h`, `mark_price`, `index_price`, `is_predicted` |
@@ -244,10 +245,10 @@ Evidence class indicates how directly the dataset tells us *who* is acting.
 | Market | Spot OHLCV per venue — **implemented (Phase 5)** | 1m–1d | n/a | 5 |
 | Market | Last trade price, market capitalisation — **implemented (Phase 5)** | event, 1d | n/a | 5 |
 | Market | Spot volume by venue (venue share metric) | 1h–1d | inferred (venue mix) | later (L2) |
-| Institutional | Spot ETF daily net flows, holdings, AUM | 1d | direct | 5 |
+| Institutional | Spot ETF daily net flows, holdings, AUM — **implemented (Phase 6)**: US, BTC/ETH/SOL/XRP, total and per fund | 1d | direct | 6 |
 | Institutional | CME futures OI & volume | 1d | inferred (regulated venue) | 5 |
 | Institutional | Regulatory position filings (e.g. quarterly holdings) | 1q, lagged | direct, heavily lagged | 5 |
-| Institutional | Public company / treasury holdings | event | direct (filings) / attributed | 5 |
+| Institutional | Public company / treasury holdings — **implemented (Phase 6)**: BTC purchases per company; BTC/ETH/SOL totals | event | attributed (disclosures compiled by a provider) | 6 |
 | Institutional | Cross-venue premium (e.g. US-regulated vs offshore spot) | 1m–1h | inferred | 5 |
 | Whale | Large on-chain transfers | event | inferred (size) / attributed (labels) | 6 |
 | Whale | Balances by holder-size band | 1d | inferred | 6 |
@@ -286,6 +287,67 @@ are never combined. `pit_reliability` is `native` when a value was stored within
 knowable, otherwise `backfilled_latest`. `transformations` records every conversion (epoch → UTC, field re-ordering,
 time truncation, alignment to the daily grid).
 
+## 5b. Institutional datasets (implemented in Phase 6)
+
+All rows live in `obs.institutional_flow`. Availability rules are conservative estimates; a value received earlier is
+dated by its receipt time (`known_when_received`), and `available_at_estimated = true` in both cases.
+
+| Dataset ID | Subject (`subject_ref`) | Entity / evidence | Values | Provider | `available_at` | Freshness |
+|---|---|---|---|---|---|---|
+| `institutional.etf_flow.us_spot.1d` | `US-SPOT-ETF:<A>` | `etf_group` / direct | `flow_usd` (net inflow), `holdings_usd` (total net assets), `cum_flow_usd`, `value_traded_usd` | SoSoValue `/etfs/summary-history` | next US trading day 18:00 New York | calendar-aware (read); engine limit 5 d |
+| `institutional.etf_fund_flow.us_spot.1d` | `ETF:<TICKER>` | `etf_fund` / direct | as above per fund, plus `premium_discount` | SoSoValue `/etfs`, `/etfs/{ticker}/history` | same | same |
+| `institutional.treasury_purchase.btc` | `COMPANY:<TICKER>` | `public_company` / attributed | `flow_native` (BTC acquired, negative = sold), `flow_usd` (cost, signed like the coins), `unit_cost_usd`, `holdings_native` (holdings after) | SoSoValue BTC Treasuries | purchase date + 7 days | last successful sweep ≤ 36 h (no engine check) |
+| `institutional.treasury_holdings.public_companies` | `PUBLIC-COMPANIES:<A>` | `public_company_group` / attributed | `holdings_native`, `holdings_usd` | CoinGecko `/companies/public_treasury/{coin}` | receipt time (no timestamp in the response) | 26 h |
+
+`<A>` ∈ {BTC, ETH, SOL, XRP} for ETF data; {BTC, ETH, SOL} for holdings totals; BTC only for purchases.
+`event_time`: ETF rows and purchases = the date (US trading date for ETFs) as a 00:00 UTC label; holdings = receipt
+time. ETF figures settle T+1: the current day's row without figures is skipped as not final; an older row without
+figures is stored as explicit missing. Consistency checks mark rows `suspect` (kept): negative holdings or value
+traded, flow in USD and coins with opposite signs, unit cost differing from cost ÷ coins by more than 2 %.
+
+### Read-time aggregations (Phase 6)
+
+| Metric ID | Definition | Evidence category |
+|---|---|---|
+| `etf_net_flow.us_spot.1d.v1` | Reported daily total net flow (USD) | observed |
+| `etf_net_flow.us_spot.1w.v1` | Σ daily net flow over the trading days (Mon–Sun week) with data; net assets = last day with data | metric |
+| `etf_net_flow.us_spot.1mo.v1` | same per calendar month | metric |
+| `treasury_net_acquisitions.btc.{1w,1mo}.v1` | Σ BTC acquired (net) and Σ reported cost of purchases dated in the bucket | metric |
+| `treasury_reported_holdings.btc.v1` | Σ each tracked company's holdings after its latest reported purchase | metric |
+
+Per bucket every US trading day is counted once as **present**, **missing** (due, within stored history, no value),
+**not loaded** (before stored history) or **not due** (not public yet). Bucket status: `complete`, `partial`,
+`in_progress`, `not_due`, `not_loaded`, `no_data`.
+
+### Institutional Flow Score v1 (`institutional_flow_score.v1`, calculated metric — ADR-0048)
+
+```
+metric_id:        etf_net_flow_5d_pct_aum.v1   (weight 0.35, reference scale 1.0 %)
+formula:          Σ daily net flow (USD) over the last 5 US trading days ÷ total ETF net assets (USD)
+                  on the last day with data in the window × 100
+metric_id:        etf_net_flow_20d_pct_aum.v1  (weight 0.30, reference scale 3.0 %)
+formula:          same over 20 US trading days
+metric_id:        etf_flow_day_balance_10d.v1  (weight 0.15, no scale — already −1 … +1)
+formula:          (days with net inflow − days with net outflow) ÷ days with data, last 10 US trading days
+metric_id:        treasury_net_acquisitions_30d_pct.v1 (weight 0.20, reference scale 2.0 %; BTC only)
+formula:          Σ BTC acquired (net) in purchases dated within the last 30 days and public by as_of
+                  ÷ Σ each tracked company's latest reported BTC holdings × 100
+window end:       the later of the latest trading day due by as_of and the latest day already received
+sub_score:        clip(metric ÷ reference scale, −1, +1), 4 decimals
+score:            100 × Σ(weight × sub_score) ÷ Σ(weights of available components), 1 decimal
+missing_policy:   a component with < 90 % of its window present is excluded (never filled); if the available
+                  weight is < 0.5 the result is "Insufficient data"
+point_in_time:    inputs with available_at <= as_of and ingested_at <= knowledge_time
+bands:            ≥ +50 strong net inflow · ≥ +15 net inflow · ≥ −15 balanced · ≥ −50 net outflow · below:
+                  strong net outflow (descriptive only)
+caveats:          ETF flows are fund flows, not proof of institutional buyers; parameters are judgments,
+                  published and versioned, not fitted
+owner_phase:      6
+status:           implemented
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.
@@ -316,7 +378,7 @@ exact inputs depend on verified provider data.
 
 | Metric (planned) | Definition | Phase |
 |---|---|---|
-| ETF net flow (USD / coin) | Creations − redemptions per fund per day; aggregated across funds | 5 |
+| ETF net flow (USD / coin) | Creations − redemptions per fund per day; aggregated across funds — **implemented (Phase 6, USD)** | 6 |
 | ETF flow z-score | Net flow vs. rolling distribution of past flows (point-in-time window) | 5/12 |
 | Exchange netflow | Inflow − outflow for labelled exchange addresses; positive = coins moving onto exchanges | 6 |
 | Exchange reserve change | Δ balance held on labelled exchange addresses | 6 |

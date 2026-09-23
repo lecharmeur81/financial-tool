@@ -73,3 +73,59 @@ def test_downgrade_refuses_when_data_exists_then_round_trips(test_database_url: 
         assert _scalar(url, "SELECT to_regclass('obs.observation')::text") is None
         command.upgrade(alembic_config(), "head")
         assert _scalar(url, "SELECT version_num FROM alembic_version") == head_revision()
+
+
+def _flow_series(url: str) -> None:
+    _execute(
+        url,
+        "INSERT INTO ops.dataset (dataset_id, metric, unit, period, availability_rule,"
+        " freshness_limit_seconds, conflict_tolerance, revisable, expect_continuous, description,"
+        " updated_at, kind) VALUES ('institutional.etf_flow.us_spot.1d', 'etf_flow', 'usd', '1d',"
+        " '{}', 60, 0, true, false, 'test', now(), 'flow')",
+    )
+    _execute(
+        url,
+        "INSERT INTO obs.series (dataset_id, metric, asset, subject_ref, period, unit, created_at)"
+        " VALUES ('institutional.etf_flow.us_spot.1d', 'etf_flow', 'BTC', 'US-SPOT-ETF:BTC',"
+        " '1d', 'usd', now())",
+    )
+
+
+def test_institutional_downgrade_refuses_when_flows_exist(test_database_url: str) -> None:
+    url = test_database_url
+    _empty_all(url)
+    _flow_series(url)
+    _execute(
+        url,
+        "INSERT INTO obs.institutional_flow (series_id, event_time, available_at,"
+        " available_at_estimated, ingested_at, entity_type, evidence_class, flow_usd,"
+        " source_provider, original_source, revision, pit_reliability, quality_status)"
+        " SELECT series_id, '2026-09-04', now(), true, now(), 'etf_group', 'direct', 1,"
+        " 'sosovalue', 'sosovalue', 0, 'native', 'ok' FROM obs.series",
+    )
+    with _pointing_at(url):
+        with pytest.raises(RuntimeError, match=r"obs\.institutional_flow"):
+            command.downgrade(alembic_config(), "0003")
+        assert _scalar(url, "SELECT count(*) FROM obs.institutional_flow") == 1
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == head_revision()
+    _empty_all(url)
+
+
+def test_institutional_flow_rejects_inferred_labels_and_silent_missing(
+    test_database_url: str,
+) -> None:
+    url = test_database_url
+    _empty_all(url)
+    _flow_series(url)
+    base = (
+        "INSERT INTO obs.institutional_flow (series_id, event_time, available_at,"
+        " available_at_estimated, ingested_at, entity_type, evidence_class, flow_usd,"
+        " source_provider, original_source, revision, pit_reliability, quality_status)"
+        " SELECT series_id, '2026-09-04', now(), true, now(), 'etf_group', {cls}, {flow},"
+        " 'p', 'p', 0, 'native', {status} FROM obs.series"
+    )
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _execute(url, base.format(cls="'inferred'", flow="1", status="'ok'"))
+    with pytest.raises(psycopg.errors.CheckViolation):  # no values but not marked missing
+        _execute(url, base.format(cls="'direct'", flow="NULL", status="'ok'"))
+    _empty_all(url)

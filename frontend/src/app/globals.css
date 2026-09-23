@@ -443,3 +443,62 @@ a {
     height: 360px;
   }
 }
+
+/* --- Institutional capital (Phase 6) ----------------------------------------------------- */
+.score-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.score-value {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.component-details {
+  border-top: 1px solid var(--border);
+  padding: 8px 0;
+  font-size: 14px;
+}
+
+.component-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.facts.compact {
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.note-list {
+  margin: 4px 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.flow-chart {
+  height: 300px;
+  margin: 12px 0;
+}
+
+.tile-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.tile-link:hover,
+.tile-link.active {
+  border-color: var(--accent);
+}
+
+.tile-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

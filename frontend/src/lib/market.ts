@@ -141,7 +141,7 @@ export type ApiResult<T> =
 
 const TIMEOUT_MS = 8000;
 
-async function getJson<T>(
+export async function getJson<T>(
   path: string,
   params: Record<string, string> = {},
   fetchImpl: typeof fetch = fetch,

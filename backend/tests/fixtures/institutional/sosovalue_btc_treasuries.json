@@ -1,0 +1,21 @@
+{
+ "code": 0,
+ "message": "success",
+ "data": [
+  {
+   "ticker": "TSTA",
+   "name": "Test Treasury Co A",
+   "list_location": "US"
+  },
+  {
+   "ticker": "TSTB",
+   "name": "Test Treasury Co B",
+   "list_location": "US"
+  },
+  {
+   "ticker": "TSTC",
+   "name": "Test Treasury Co C",
+   "list_location": "JP"
+  }
+ ]
+}

@@ -10,8 +10,9 @@
       → freshness (stale check; ``ingest`` jobs only)
       → quality findings + job_run finish
 
-The same pipeline stores scalar observations (``obs.observation``) and OHLCV bars
-(``obs.market_bar``); the dataset's ``kind`` selects the store.
+The same pipeline stores scalar observations (``obs.observation``), OHLCV bars
+(``obs.market_bar``) and institutional flows (``obs.institutional_flow``); the dataset's ``kind``
+selects the store.
 
 Nothing is silently dropped or repaired: every skipped, rejected, missing, suspect, stale or
 conflicting item is counted on the job run and (except not-yet-final records, which are simply
@@ -53,7 +54,7 @@ from cfi.ingestion.detection import (
     split_batch,
 )
 from cfi.ingestion.repository import IngestionRepository
-from cfi.ingestion.stores import BarStore, GapContext, ObservationStore, RecordStore
+from cfi.ingestion.stores import BarStore, FlowStore, GapContext, ObservationStore, RecordStore
 from cfi.providers.base import FetchWindow, NormaliseContext, ProviderAdapter, RequestSpec
 from cfi.providers.http import ProviderHttpClient
 
@@ -109,6 +110,7 @@ class IngestionEngine:
         self._stores: dict[str, RecordStore[ObservedRecord]] = {
             "scalar": ObservationStore(repo.engine),  # type: ignore[dict-item]
             "bar": BarStore(repo.engine),  # type: ignore[dict-item]
+            "flow": FlowStore(repo.engine),  # type: ignore[dict-item]
         }
         self._series_cache: dict[SeriesKey, int] = {}
         self._series_template: dict[int, ObservedRecord] = {}
@@ -167,7 +169,7 @@ class IngestionEngine:
             received: dict[int, set[datetime]] = defaultdict(set)
             await self._fetch_all(dataset, adapter, client, window, result, received)
             await self._completeness(dataset, adapter, window, result, received)
-            if job_type == "ingest":
+            if job_type == "ingest" and dataset.check_freshness:
                 await self._freshness(dataset, adapter, result, received)
             result.status = "partial" if result.rejected else "succeeded"
         except CFIError as exc:
@@ -239,7 +241,7 @@ class IngestionEngine:
                 raw, archived, dataset.dataset_id, result.job_run_id
             )
             try:
-                records = adapter.parse(raw)
+                records = adapter.parse_page(spec, raw)
                 next_spec = adapter.next_request(spec, raw, records)
             except SchemaMismatchError as exc:
                 await self.repo.mark_payload(payload_id, raw.received_at, False, exc.detail)

@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import make_url
 
 from cfi.core.config import Settings
+from cfi.institutional.universe import all_datasets as institutional_datasets
 from cfi.market.universe import all_datasets
 from cfi.worker.runtime import WorkerRuntime
 from tests.integration.conftest import requires_services
@@ -35,10 +36,25 @@ def test_disabled_provider_is_not_ingested() -> None:
 
 
 def test_runtime_registers_every_enabled_dataset(test_settings: Settings) -> None:
-    runtime = WorkerRuntime(test_settings)
+    # explicit provider lists: the test must not depend on the user's .env choices
+    settings = test_settings.model_copy(
+        update={
+            "market_providers": "coinbase,kraken,binance,okx,bybit,coingecko",
+            "institutional_providers": "sosovalue,coingecko",
+        }
+    )
+    runtime = WorkerRuntime(settings)
     try:
         ctx = runtime.run(runtime.context())
-        assert set(ctx.clients) == {"coinbase", "kraken", "binance", "okx", "bybit", "coingecko"}
+        assert set(ctx.clients) == {
+            "coinbase",
+            "kraken",
+            "binance",
+            "okx",
+            "bybit",
+            "coingecko",
+            "sosovalue",
+        }
         assert runtime.run(runtime.context()) is ctx  # one context per process
     finally:
         runtime.run(runtime.aclose())
@@ -47,7 +63,39 @@ def test_runtime_registers_every_enabled_dataset(test_settings: Settings) -> Non
     with psycopg.connect(url.render_as_string(hide_password=False)) as conn:
         datasets = {r[0] for r in conn.execute("SELECT dataset_id FROM ops.dataset")}
         links = conn.execute("SELECT count(*) FROM ops.dataset_provider").fetchone()
-    expected = {d.dataset_id for d in all_datasets()}
+    expected = {d.dataset_id for d in all_datasets()} | {
+        d.dataset_id for d in institutional_datasets()
+    }
     assert expected <= datasets  # (Coinbase 4h is derived at read time; Kraken supplies usd 4h)
     assert links is not None
     assert links[0] >= len(expected)
+
+
+def test_institutional_jobs_are_scheduled_on_the_right_queues() -> None:
+    from cfi.worker import app as worker
+
+    entries = {
+        k: v for k, v in worker.app.conf.beat_schedule.items() if k.startswith("institutional:")
+    }
+    assert "institutional.ingest" in worker.app.tasks
+    expected = {"sosovalue": "backfill", "coingecko": "ingest"}  # one SoSoValue process
+    for key, entry in entries.items():  # entries depend on CFI_INSTITUTIONAL_PROVIDERS
+        assert entry["options"]["queue"] == expected[key.split(":")[1]]
+    assert all(v["options"]["expires"] == v["schedule"] for v in entries.values())
+
+
+def test_institutional_task_skips_disabled_provider_and_missing_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cfi.worker import app as worker
+
+    monkeypatch.setattr(
+        worker,
+        "settings",
+        worker.settings.model_copy(update={"institutional_providers": "sosovalue,coingecko"}),
+    )
+    result = worker.institutional_ingest_task.run("not-enabled", "x")
+    assert result == {"skipped": "provider not-enabled is disabled"}
+    monkeypatch.delenv("CFI_PROVIDER_SOSOVALUE_API_KEY", raising=False)
+    result = worker.institutional_ingest_task.run("sosovalue", "institutional.etf_flow.us_spot.1d")
+    assert result == {"skipped": "provider sosovalue has no API key configured"}

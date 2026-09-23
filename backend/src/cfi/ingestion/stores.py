@@ -3,9 +3,10 @@
 The ingestion engine is the same for every family; only these few operations differ:
 
 - ``ObservationStore`` → ``obs.observation`` (one scalar ``value``);
-- ``BarStore``         → ``obs.market_bar`` (OHLCV).
+- ``BarStore``         → ``obs.market_bar`` (OHLCV);
+- ``FlowStore``        → ``obs.institutional_flow`` (flows and holdings of identified entities).
 
-Both tables share the provenance columns and the natural key
+All tables share the provenance columns and the natural key
 (``series_id``, ``event_time``, ``source_provider``, ``revision``). Stores only ever *insert*
 (append-only; a changed value becomes a new revision).
 """
@@ -24,7 +25,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.db import tables as t
 from cfi.domain.enums import PitReliability, QualityStatus
-from cfi.domain.observation import CanonicalBar, CanonicalObservation, ObservedRecord
+from cfi.domain.observation import (
+    CanonicalBar,
+    CanonicalFlow,
+    CanonicalObservation,
+    ObservedRecord,
+)
 
 
 class RecordStore[R: ObservedRecord](Protocol):
@@ -161,7 +167,7 @@ class _TableStore:
         stmt = select(func.max(tb.c.event_time)).where(
             tb.c.series_id == series_id,
             tb.c.source_provider == provider_id,
-            tb.c[self.conflict_column].is_not(None),
+            tb.c.quality_status != "missing",
         )
         async with self.engine.connect() as conn:
             value: datetime | None = (await conn.execute(stmt)).scalar()
@@ -229,4 +235,72 @@ class BarStore(_TableStore):
             low=None,
             close=None,
             volume_base=None,
+        )
+
+
+FLOW_VALUE_COLUMNS = (
+    "flow_usd",
+    "flow_native",
+    "holdings_usd",
+    "holdings_native",
+    "cum_flow_usd",
+    "value_traded_usd",
+    "premium_discount",
+    "unit_cost_usd",
+)
+
+
+class FlowStore(_TableStore):
+    table = t.institutional_flow
+    value_columns = FLOW_VALUE_COLUMNS
+    conflict_column = "flow_usd"
+
+    async def latest_from_others(
+        self, series_id: int, event_times: Sequence[datetime], provider_id: str
+    ) -> dict[datetime, list[tuple[str, Decimal | None]]]:
+        """Compared value: the flow in USD, or coin holdings when no flow is reported (same
+        rule as :attr:`CanonicalFlow.conflict_value`)."""
+        if not event_times:
+            return {}
+        tb = self.table
+        value = func.coalesce(tb.c.flow_usd, tb.c.holdings_native).label("v")
+        stmt = (
+            select(tb.c.event_time, tb.c.source_provider, value)
+            .distinct(tb.c.event_time, tb.c.source_provider)
+            .where(
+                tb.c.series_id == series_id,
+                tb.c.source_provider != provider_id,
+                tb.c.event_time.in_(list(event_times)),
+            )
+            .order_by(tb.c.event_time, tb.c.source_provider, tb.c.revision.desc())
+        )
+        async with self.engine.connect() as conn:
+            rows = (await conn.execute(stmt)).all()
+        out: dict[datetime, list[tuple[str, Decimal | None]]] = {}
+        for r in rows:
+            out.setdefault(r.event_time, []).append((r.source_provider, r.v))
+        return out
+
+    async def insert(self, rows: Sequence[tuple[int, CanonicalFlow]]) -> int:
+        return await self._insert(
+            [
+                {
+                    **_provenance(sid, f),
+                    "entity_type": f.entity_type,
+                    "evidence_class": str(f.evidence_class),
+                    "entity_name": f.entity_name,
+                    **{c: getattr(f, c) for c in FLOW_VALUE_COLUMNS},
+                }
+                for sid, f in rows
+            ]
+        )
+
+    def missing(
+        self, template: CanonicalFlow, event_time: datetime, gap: GapContext
+    ) -> CanonicalFlow:
+        return CanonicalFlow(
+            **_missing_provenance(template, event_time, gap),
+            entity_type=template.entity_type,
+            evidence_class=template.evidence_class,
+            entity_name=template.entity_name,
         )

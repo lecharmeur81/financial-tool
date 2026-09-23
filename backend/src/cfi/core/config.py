@@ -56,9 +56,18 @@ class Settings(BaseSettings):
     # Optional override of history depth per timeframe, e.g. "1m=7,1h=365" (days).
     market_backfill_days: str = ""
 
+    # Institutional capital (Phase 6). Comma-separated provider IDs the workers ingest from.
+    # SoSoValue needs a free API key (CFI_PROVIDER_SOSOVALUE_API_KEY); without it, its jobs are
+    # skipped and the dashboard says so.
+    institutional_providers: str = "sosovalue,coingecko"
+
     @property
     def market_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.market_providers.split(",") if p.strip()]
+
+    @property
+    def institutional_provider_ids(self) -> list[str]:
+        return [p.strip() for p in self.institutional_providers.split(",") if p.strip()]
 
     @property
     def market_backfill_overrides(self) -> dict[str, int]:

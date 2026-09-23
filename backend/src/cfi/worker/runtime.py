@@ -16,8 +16,10 @@ from cfi.db.engine import create_engine
 from cfi.ingestion.archive import FileSystemArchive
 from cfi.ingestion.engine import IngestionEngine
 from cfi.ingestion.repository import IngestionRepository, RepositoryRecorder
+from cfi.institutional import sources as institutional
 from cfi.market.jobs import JobContext
 from cfi.market.sources import ADAPTERS, PRIORITY, datasets_for
+from cfi.providers.base import ProviderAdapter
 from cfi.providers.http import ProviderHttpClient
 
 
@@ -35,14 +37,26 @@ class WorkerRuntime:
             db = create_engine(self.settings)
             repo = IngestionRepository(db)
             engine = IngestionEngine(repo, FileSystemArchive(self.settings.raw_archive_dir))
-            clients = {}
+            clients: dict[str, ProviderHttpClient] = {}
+
+            def client_for(adapter: ProviderAdapter) -> None:
+                # one client (rate limiter, circuit breaker) per provider, shared by all its data
+                if adapter.provider_id not in clients:
+                    clients[adapter.provider_id] = ProviderHttpClient(
+                        adapter.capabilities, recorder=RepositoryRecorder(repo)
+                    )
+
             for provider_id in self.settings.market_provider_ids:
                 adapter = ADAPTERS[provider_id]
-                clients[provider_id] = ProviderHttpClient(
-                    adapter.capabilities, recorder=RepositoryRecorder(repo)
-                )
+                client_for(adapter)
                 for dataset in datasets_for(provider_id):
                     await engine.register(dataset, adapter, PRIORITY[provider_id])
+            for item in institutional.sources_for(self.settings.institutional_provider_ids):
+                adapter = institutional.ADAPTERS[item.provider_id]
+                client_for(adapter)
+                await engine.register(
+                    item.dataset, adapter, institutional.PRIORITY[item.provider_id]
+                )
             self._context = JobContext(engine=engine, db=db, clients=clients)
         return self._context
 

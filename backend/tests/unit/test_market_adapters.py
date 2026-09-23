@@ -254,6 +254,8 @@ def test_coingecko_latest_market_caps_for_all_assets_in_one_request() -> None:
     records = adapter.parse(raw("coingecko", spec, body, t))
     ctx = NormaliseContext(MARKET_CAP_USD, t, None)
     btc, xrp = (adapter.normalise(r, ctx) for r in records)
+    assert isinstance(btc, CanonicalObservation)
+    assert isinstance(xrp, CanonicalObservation)
     assert btc.value == Decimal("1691500000000.5")
     assert btc.subject_ref == "BTC"
     assert btc.available_at_estimated is False

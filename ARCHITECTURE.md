@@ -180,7 +180,9 @@ Each subsection states the design. Rationale, alternatives, trade-offs, and futu
   high-volume families switch to `double precision` with the exact string kept in L0 (ADR-0044).
 - **Migrations** with Alembic only; additive by default; destructive steps need explicit approval (R10).
 - **Implemented:** `obs.series`, `obs.observation` (Phase 4), `obs.market_bar` (Phase 5, 30-day chunks, no compression
-  yet). The other typed tables and the `selected_observation` view are still planned.
+  yet), `obs.institutional_flow` (Phase 6, 180-day chunks; ETF flows and treasury flows/holdings with entity type and
+  evidence class — `inferred` rejected by a database check). The other typed tables and the `selected_observation`
+  view are still planned.
 
 ### 5.2 Time-series strategy — ADR-0020
 
@@ -239,6 +241,12 @@ Detection rules as built:
 job types, bar record family (`obs.market_bar`), per-subject job runs, `ops.backfill_state` checkpoints. Market-data
 behaviour as built:
 
+**Implemented in Phase 6** (ADR-0048): third record family (`CanonicalFlow` → `obs.institutional_flow`), adapter hook
+`parse_page(spec, raw)` so a listing page can pass names to the pages that follow it in the same job, availability rule
+`next_us_trading_day` with `known_when_received`, US trading calendar (`cfi/core/calendars.py`), per-dataset
+`check_freshness` (off for sporadic events), Celery task `institutional.ingest` (SoSoValue on the `backfill` queue,
+CoinGecko holdings on `ingest`; queued once when beat starts).
+
 | Situation | What happens |
 |---|---|
 | Current, unfinished bar (or CoinGecko's running value) | Skipped and counted (`job_run.skipped`); fetched again once final (period end + 60 s) |
@@ -290,6 +298,10 @@ in-process until workers share them via Redis. Mock providers for tests only: `c
   start, end, `as_of`), `/market/overview` — evidence envelope with source, units, derivation, quality (missing /
   not-loaded / suspect / conflicting / revised), freshness and last ingestion run. The OpenAPI-generated TypeScript
   client is not built yet (types are hand-written in `frontend/src/lib/market.ts`).
+- **Implemented in Phase 6:** `GET /api/v1/institutional/catalog`, `/overview`, `/etf-flows` (asset, interval
+  1d/1w/1mo, start, end), `/etf-funds`, `/treasury`, `/score` — all take `as_of` (cut-off on `available_at`) and
+  `knowledge_time` (cut-off on `ingested_at`). Every metric carries source, timestamp, unit, calculation, freshness and
+  data quality, its evidence category and evidence class. Types hand-written in `frontend/src/lib/institutional.ts`.
 
 ### 5.6 Background jobs — ADR-0023
 
@@ -683,7 +695,8 @@ Phases 0–5 are defined by the user's guide; later phase numbers in `CLAUDE.md`
 | Infrastructure (Compose, DB, migrations baseline, CI, tooling) | 3 — done |
 | Ingestion engine, provider client layer, dataset registry, quality detection | 4 — done |
 | Market data: OHLCV, last trade, market cap, workers, market API, Market page | 5 — done |
-| Institutional, whale, derivatives, liquidity, retail, macro, market-structure datasets and metrics | 6+ (to be issued) |
+| Institutional capital: ETF flows (BTC, ETH, SOL, XRP), treasuries, Institutional Flow Score, Flows page | 6 — done |
+| Whale, derivatives, liquidity, retail, macro, market-structure datasets and metrics | 7+ (to be issued) |
 | Divergence, regime, similarity, backtesting, red-team, anomaly, rotation | 12–18 |
 | AI analyst (snapshot, prompts, validator, evals) | 19 |
 | Daily intelligence, alerts, paper trading, decision journal | 20–23 |

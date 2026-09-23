@@ -109,6 +109,31 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
       failures) or remove them from `CFI_MARKET_PROVIDERS`? Hosting location (B6) decides this in production.
 - [ ] **Display time zone (B8).** The Market page shows UTC; Asia/Manila display not built yet.
 
+## Phase 6 — Institutional capital (built 2026-09-24; see PROGRESS.md)
+
+- [x] `obs.institutional_flow`, SoSoValue + CoinGecko treasury adapters, jobs, aggregation, score, API, Flows page.
+- [x] US spot ETF flows for BTC, ETH, **SOL and XRP** (added at the user's request, 2026-09-24).
+- [ ] **User:** register a free SoSoValue API key (https://sosovalue.com/developer/dashboard; approval required) and
+      put it in `.env` as `CFI_PROVIDER_SOSOVALUE_API_KEY`. Without it the ETF and purchase jobs are skipped.
+- [ ] **User:** run the tests and `docker compose up --build` on Windows; check the Flows page with real data.
+- [ ] After the first real run: copy one real SoSoValue payload from the raw archive into the test fixtures (with its
+      capture date) and confirm the documented shapes (date format of `start_date`/`end_date`, number formats).
+
+### Decisions needed from the user (Phase 6)
+
+- [ ] **SoSoValue terms.** No API terms, licence or attribution rules are published in its documentation
+      (`terms_verified = false`). Options: (a) use it for personal decision support as now; (b) ask SoSoValue for
+      written terms; (c) disable it (`CFI_INSTITUTIONAL_PROVIDERS=coingecko`).
+- [ ] **Score parameters (v1).** Weights 0.35 / 0.30 / 0.15 / 0.20, reference scales 1 % / 3 % / — / 2 %, band edges
+      ±15 / ±50, minimum coverage 90 %, minimum weight 0.5 are judgment parameters. Approve, or name changes (a change
+      creates v2).
+- [ ] **Single source for ETF flows.** SoSoValue only; no second free source verified. Accept, or evaluate issuer
+      files / a paid source later (B2 budget is $0).
+- [ ] **Not tracked yet:** CoinShares weekly fund flows (no API), 13F holdings, Hong Kong ETFs (available from
+      SoSoValue — enable?), ETH/SOL/XRP treasury purchases (no free source).
+- [ ] **Availability estimates.** ETF: next US trading day 18:00 New York; purchases: date + 7 days. Review once native
+      receipt times show when the data really appears.
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.
@@ -134,7 +159,7 @@ against official documentation before any adapter is written.
 |---|---|
 | Spot / perps / funding / OI / liquidations | Exchange public APIs (e.g. Binance, Bybit, OKX, Coinbase, Kraken, Deribit); aggregators (e.g. Coinglass, Kaiko, Amberdata, CoinAPI) |
 | Options | Deribit public API; options analytics vendors (e.g. Laevitas, Amberdata) |
-| ETF flows / holdings | Issuer websites and filings; aggregators; SEC EDGAR |
+| ETF flows / holdings | **Implemented (Phase 6): SoSoValue OpenAPI.** Still candidates: issuer websites and filings; SEC EDGAR |
 | On-chain / exchange flows / whales | Glassnode, CryptoQuant, Coin Metrics, Santiment, Arkham, Nansen; self-hosted node / public explorers for raw data |
 | Stablecoins | DefiLlama; issuer transparency pages; on-chain supply queries |
 | Macro | FRED (St. Louis Fed); other official statistical releases |

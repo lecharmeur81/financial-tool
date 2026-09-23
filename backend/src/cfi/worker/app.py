@@ -14,6 +14,8 @@ from celery import Celery, signals
 
 from cfi.core.config import get_settings
 from cfi.core.logging import configure_logging, get_logger
+from cfi.institutional.jobs import ingest_source
+from cfi.institutional.sources import credential_configured, source, sources_for
 from cfi.market.jobs import backfill_days, backfill_step, ingest_latest
 from cfi.market.sources import ADAPTERS, datasets_for
 from cfi.market.universe import ASSET_SYMBOLS, dataset_by_id
@@ -35,7 +37,7 @@ app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_default_queue="ingest",
-    beat_schedule=beat_schedule(settings.market_provider_ids),
+    beat_schedule=beat_schedule(settings.market_provider_ids, settings.institutional_provider_ids),
 )
 
 BACKFILL_BUDGET_SECONDS = 45.0
@@ -64,6 +66,38 @@ def ingest_latest_task(provider_id: str, dataset_id: str) -> dict[str, Any]:
         ctx = await rt.context()
         results = await ingest_latest(ctx, ADAPTERS[provider_id], dataset_by_id(dataset_id))
         return {"runs": [(r.subject, r.status, r.inserted, r.missing) for r in results]}
+
+    return rt.run(go())
+
+
+@signals.beat_init.connect
+def _kick_institutional(**_: Any) -> None:
+    """Beat's first run of an interval entry comes one interval after start (hours for
+    institutional data), so each institutional job is also queued once when beat starts."""
+    for item in sources_for(settings.institutional_provider_ids):
+        app.send_task(
+            "institutional.ingest",
+            args=(item.provider_id, item.dataset.dataset_id),
+            queue=item.queue,
+            expires=item.interval_seconds,
+        )
+
+
+@app.task(name="institutional.ingest", time_limit=1800, soft_time_limit=1700)
+def institutional_ingest_task(provider_id: str, dataset_id: str) -> dict[str, Any]:
+    """One institutional dataset from one provider, every configured subject. Skipped (not
+    failed) when the provider is disabled or its API key is not configured."""
+    if provider_id not in settings.institutional_provider_ids:
+        return {"skipped": f"provider {provider_id} is disabled"}
+    if not credential_configured(provider_id):
+        log.warning("institutional_skipped_no_credential", provider=provider_id)
+        return {"skipped": f"provider {provider_id} has no API key configured"}
+    rt = runtime()
+
+    async def go() -> dict[str, Any]:
+        ctx = await rt.context()
+        results = await ingest_source(ctx, source(provider_id, dataset_id))
+        return {"runs": [(r.subject, r.status, r.inserted, r.revisions) for r in results]}
 
     return rt.run(go())
 

@@ -323,7 +323,7 @@ Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 | 3 | Foundation (infrastructure) | 17 | Anomaly engine |
 | 4 | Data ingestion engine | 18 | Capital rotation |
 | 5 | Market data | 19 | Claude AI Analyst |
-| 6 | Whale data | 20 | Daily intelligence |
+| 6 | Institutional capital | 20 | Daily intelligence |
 | 7 | Derivatives | 21 | Alerts |
 | 8 | Liquidity | 22 | Paper trading |
 | 9 | Retail | 23 | Decision journal |
@@ -332,9 +332,10 @@ Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 | 12 | Divergence engine | 26 | Production |
 | 13 | Regime engine | 27 | Real-time intelligence |
 
-Phases 0–5 follow the user's guide: 0 project foundation, 1 master engineering rules (Part B), 2 architecture,
-3 application foundation (infrastructure), 4 data ingestion engine, 5 market data. Phase numbers from 6 onward are
-**provisional** until the user issues each phase ("Institutional data", previously listed as 5, is not yet re-scheduled).
+Phases 0–6 follow the user's guide: 0 project foundation, 1 master engineering rules (Part B), 2 architecture,
+3 application foundation (infrastructure), 4 data ingestion engine, 5 market data, 6 institutional capital. Phase
+numbers from 7 onward are **provisional** until the user issues each phase ("Whale data", previously listed as 6, is
+not yet re-scheduled).
 
 **Testing rule:** integration tests that write data run only in the separate `<database>_test` database, which the test
 suite creates and migrates itself. Never point data-writing tests at the development or production database.

@@ -1,0 +1,16 @@
+{
+ "code": 0,
+ "message": "success",
+ "data": [
+  {
+   "ticker": "TSTF",
+   "name": "Test Fund Bitcoin Trust F",
+   "exchange": "NASDAQ"
+  },
+  {
+   "ticker": "TSTG",
+   "name": "Test Fund Bitcoin Trust G",
+   "exchange": "NYSE"
+  }
+ ]
+}

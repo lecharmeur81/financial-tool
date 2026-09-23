@@ -1,4 +1,5 @@
-"""CoinGecko public / Demo API — market capitalisation (optional free Demo key).
+"""CoinGecko public / Demo API — market capitalisation and listed-company treasury holdings
+(optional free Demo key).
 
 Verified 2026-09-23 against the official documentation (docs.coingecko.com, v3.0.1):
 - base URL ``https://api.coingecko.com/api/v3``; Demo key in header ``x-cg-demo-api-key``
@@ -9,6 +10,13 @@ Verified 2026-09-23 against the official documentation (docs.coingecko.com, v3.0
 - ``GET /coins/{id}/market_chart?vs_currency=usd&days=&interval=daily`` →
   ``{"market_caps": [[<epoch ms>, value], …], …}``; daily points are at 00:00 UTC and the last
   completed day is available from 00:10 UTC; Demo history is limited to the past 365 days.
+
+- ``GET /companies/public_treasury/{coin_id}`` (verified 2026-09-24, Demo/keyless available;
+  updated every 5 minutes) → ``{"total_holdings", "total_value_usd", "market_cap_dominance",
+  "companies": [{"name", "symbol", "country", "total_holdings", "total_entry_value_usd",
+  "total_current_value_usd", "percentage_of_total_supply"}]}``. Only the totals are stored as
+  observations; the full company list stays in the raw archive. The response carries no
+  timestamp: ``event_time`` is the time the snapshot was received.
 
 Terms (https://www.coingecko.com/en/api_terms, brand attribution guide): attribution such as
 "Data provided by CoinGecko" with a link must be shown next to the data; the terms discourage
@@ -22,11 +30,17 @@ import math
 import re
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from cfi.core.errors import DataValidationError, NotYetFinalError, ProviderNotConfiguredError
 from cfi.core.time import from_epoch
-from cfi.domain.enums import AuthType, PitReliability, QualityStatus
-from cfi.domain.observation import CanonicalObservation
+from cfi.domain.enums import AuthType, EvidenceClass, PitReliability, QualityStatus
+from cfi.domain.observation import CanonicalFlow, CanonicalObservation
+from cfi.institutional.universe import (
+    TREASURY_HOLDING_ASSETS,
+    TREASURY_HOLDINGS_COMPANIES,
+    companies_group_ref,
+)
 from cfi.market.universe import MARKET_CAP_USD, MARKET_CAP_USD_1D
 from cfi.providers.base import (
     AuthSpec,
@@ -46,6 +60,7 @@ API_KEY_ENV = "CFI_PROVIDER_COINGECKO_API_KEY"
 COIN_IDS: dict[str, str] = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "XRP": "ripple"}
 SIMPLE_PRICE_PATH = "/simple/price"
 _CHART_PATH = re.compile(r"^/coins/(?P<coin>[a-z0-9-]+)/market_chart$")
+_TREASURY_PATH = re.compile(r"^/companies/public_treasury/(?P<coin>[a-z0-9-]+)$")
 DAILY_ALIGNMENT_TOLERANCE = timedelta(minutes=5)
 MAX_DAYS = 365
 ATTRIBUTION = {"text": "Data provided by CoinGecko", "url": "https://www.coingecko.com"}
@@ -54,7 +69,13 @@ CAPABILITIES = ProviderCapabilities(
     provider_id=PROVIDER_ID,
     display_name="CoinGecko",
     base_url="https://api.coingecko.com/api/v3",
-    datasets=frozenset({MARKET_CAP_USD.dataset_id, MARKET_CAP_USD_1D.dataset_id}),
+    datasets=frozenset(
+        {
+            MARKET_CAP_USD.dataset_id,
+            MARKET_CAP_USD_1D.dataset_id,
+            TREASURY_HOLDINGS_COMPANIES.dataset_id,
+        }
+    ),
     auth=AuthSpec(AuthType.API_KEY_HEADER, "x-cg-demo-api-key", API_KEY_ENV, optional=True),
     rate_limit=RateLimitSpec(5, 60.0),
     timeout_seconds=15.0,
@@ -62,7 +83,8 @@ CAPABILITIES = ProviderCapabilities(
     original_source="coingecko",
     terms_verified=False,
     notes=(
-        "Market capitalisation computed and published by CoinGecko. Attribution required next to "
+        "Market capitalisation computed and published by CoinGecko; listed-company treasury "
+        "totals compiled by CoinGecko from company disclosures. Attribution required next to "
         "the data. Terms discourage storing data (refresh stored data at least every 24 h); "
         "retention decision pending with the user. Demo history limited to 365 days."
     ),
@@ -86,6 +108,14 @@ class CoinGecko(ProviderAdapter):
             raise ProviderNotConfiguredError(
                 f"CoinGecko: unsupported subject {window.subject!r}.", provider_id=PROVIDER_ID
             )
+        if dataset_id == TREASURY_HOLDINGS_COMPANIES.dataset_id:
+            if window.subject not in TREASURY_HOLDING_ASSETS:
+                raise ProviderNotConfiguredError(
+                    f"CoinGecko: no listed-company treasury data configured for "
+                    f"{window.subject!r}.",
+                    provider_id=PROVIDER_ID,
+                )
+            return RequestSpec(f"/companies/public_treasury/{COIN_IDS[window.subject]}")
         if dataset_id == MARKET_CAP_USD.dataset_id:
             ids = [COIN_IDS[window.subject]] if window.subject else [COIN_IDS[a] for a in COIN_IDS]
             return RequestSpec(
@@ -134,6 +164,24 @@ class CoinGecko(ProviderAdapter):
                     )
                 )
             return records
+        treasury = _TREASURY_PATH.match(raw.endpoint)
+        if treasury is not None:
+            if not isinstance(data, dict) or not isinstance(data.get("companies"), list):
+                raise schema_error(raw, "expected an object with a 'companies' list")
+            for key in ("total_holdings", "total_value_usd"):
+                if key not in data:
+                    raise schema_error(raw, f"treasury response lacks {key!r}")
+            return [
+                ProviderRecord(
+                    PROVIDER_ID,
+                    TREASURY_HOLDINGS_COMPANIES.dataset_id,
+                    {
+                        "coin_id": treasury["coin"],
+                        "total_holdings": data["total_holdings"],
+                        "total_value_usd": data["total_value_usd"],
+                    },
+                )
+            ]
         chart = _CHART_PATH.match(raw.endpoint)
         if chart is None:
             raise schema_error(raw, "unexpected endpoint")
@@ -152,10 +200,14 @@ class CoinGecko(ProviderAdapter):
             )
         return records
 
-    def normalise(self, record: ProviderRecord, ctx: NormaliseContext) -> CanonicalObservation:
+    def normalise(
+        self, record: ProviderRecord, ctx: NormaliseContext
+    ) -> CanonicalObservation | CanonicalFlow:
         p = record.payload
         dataset = ctx.dataset
         asset = _asset_for(str(p["coin_id"]))
+        if dataset.dataset_id == TREASURY_HOLDINGS_COMPANIES.dataset_id:
+            return _treasury_totals(p, ctx, asset)
         transformations: list[str] = []
         if dataset.dataset_id == MARKET_CAP_USD.dataset_id:
             updated = p["last_updated_at"]
@@ -220,3 +272,37 @@ def _align_to_midnight(reported: datetime) -> datetime:
             "not a 00:00 UTC daily snapshot"
         )
     return nearest
+
+
+def _treasury_totals(p: Any, ctx: NormaliseContext, asset: str) -> CanonicalFlow:
+    """Totals across the listed companies CoinGecko tracks for one coin (a snapshot)."""
+    dataset = ctx.dataset
+    coins = None if p["total_holdings"] is None else to_decimal(p["total_holdings"], "holdings")
+    value = None if p["total_value_usd"] is None else to_decimal(p["total_value_usd"], "value")
+    available_at, estimated = dataset.available_at(ctx.ingested_at, None, ctx.ingested_at)
+    missing = coins is None and value is None
+    return CanonicalFlow(
+        dataset_id=dataset.dataset_id,
+        metric=dataset.metric,
+        asset=asset,
+        subject_ref=companies_group_ref(asset),
+        venue=None,
+        period=dataset.period,
+        unit=dataset.unit,
+        event_time=ctx.ingested_at,
+        available_at=available_at,
+        available_at_estimated=estimated,
+        ingested_at=ctx.ingested_at,
+        entity_type="public_company_group",
+        evidence_class=EvidenceClass.ATTRIBUTED,
+        entity_name="Listed companies tracked by CoinGecko",
+        holdings_native=coins,
+        holdings_usd=value,
+        source_provider=PROVIDER_ID,
+        original_source=CAPABILITIES.original_source,
+        raw_ref=ctx.raw_ref,
+        quality_status=QualityStatus.MISSING if missing else QualityStatus.OK,
+        quality_note="provider returned no totals" if missing else None,
+        pit_reliability=PitReliability.NATIVE,
+        transformations=("event_time: snapshot receipt time (the response has no timestamp)",),
+    )

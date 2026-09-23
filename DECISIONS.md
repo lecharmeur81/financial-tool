@@ -877,3 +877,82 @@ the user's decision; exchange terms not yet reviewed.
 **Future implications.** Order-book, trades and derivatives datasets reuse the bar store pattern; cross-venue metrics
 (premiums, venue share) belong to later metric phases (L2), not here.
 
+
+---
+
+## ADR-0048 — Phase 6 institutional capital: sources, storage, aggregation, transparent score
+**Status:** Accepted (implemented in Phase 6; within approved ADR-0006, 0017, 0018, 0021, 0022, 0023, 0032, 0039, 0040)
+
+**Decision.**
+- **What counts as "institutional" here.** Institutional *channels* with identified actors only: US spot ETFs
+  (direct evidence: fund creations/redemptions) and listed-company treasuries (attributed evidence: company
+  disclosures compiled by a provider). No wallet is labelled institutional; `obs.institutional_flow` rejects
+  `inferred` labels at the database level. ETF flows prove fund flows, not who bought the fund shares (end investors
+  include retail); this is stated next to every score.
+- **Sources (free; verified against official documentation on 2026-09-24):**
+  - **SoSoValue OpenAPI** (free key, 20 requests/min, 100,000/month): US spot ETF daily totals
+    (`/etfs/summary-history`) and per-fund history (`/etfs`, `/etfs/{ticker}/history`) for **BTC, ETH, SOL and XRP**,
+    and listed-company bitcoin purchase history (`/btc-treasuries`, `/btc-treasuries/{ticker}/purchase-history`).
+    The ETF endpoints serve **only the most recent month**; older history builds up natively as the system runs.
+    API terms are not published in the documentation → `terms_verified = false`, user decision pending.
+  - **CoinGecko** public treasury (`/companies/public_treasury/{coin}`, keyless): totals held by listed companies for
+    BTC, ETH, SOL (snapshots; the response has no timestamp, so the receipt time is used and recorded).
+  - **Not tracked (recorded, shown in the UI):** global fund flows (CoinShares weekly reports — no free API), 13F
+    holdings (quarterly, lagged), Hong Kong ETFs (available, not configured), dated treasury purchases for ETH/SOL/XRP
+    (no verified free source), ETF history older than one month.
+- **Storage:** `obs.institutional_flow` hypertable (180-day chunks, migration 0004) — a third record family
+  (`CanonicalFlow`) in the same engine: flow and holdings columns in USD and in coins, cumulative flow, value traded,
+  premium/discount, unit cost, plus `entity_type`, `evidence_class`, `entity_name`; same provenance columns and
+  natural key; append-only revisions; database checks for missing-means-null and allowed evidence classes.
+  Sign convention: positive = capital entering the entity. A reported sale's cost is signed like the coins
+  (transformation recorded).
+- **Point in time.** ETF rows are labelled with the US trading date (00:00 UTC label). New availability rule
+  `next_us_trading_day`: figures for day D are treated as public at 18:00 New York time on the next US trading day
+  (NYSE calendar with rule-based holidays, verified against nyse.com for 2026–2028, plus listed special closures).
+  Purchases: date + 7 days. Both are conservative *estimates*; `known_when_received` dates a value by its receipt time
+  when it arrives earlier (it evidently was public then). Receipt times of native rows will calibrate these rules.
+  Documented T+1 behaviour: the current day's row without settled figures is skipped (not final); an older row
+  without figures is stored as explicit missing. Sporadic event datasets opt out of engine freshness checks
+  (`check_freshness = False`); their freshness is the age of the last successful sweep.
+- **Reads:** two cut-offs per ADR-0018 — `as_of` on `available_at` and `knowledge_time` on `ingested_at` (both default
+  to now). Aggregation (daily, weekly Monday–Sunday, calendar month) happens at read time from daily rows; every
+  trading day is accounted for as present, missing, not loaded (before stored history) or not due. Sums cover present
+  days only and partial buckets say so. Daily totals are cross-checked against the sum of per-fund flows.
+- **Institutional Flow Score v1** (evidence category: calculated metric — not a statistical signal, forecast or
+  advice), per asset with US spot ETFs:
+
+  | Component | Metric | Reference scale | Weight |
+  |---|---|---|---|
+  | ETF net flow, 5 trading days | Σ flow ÷ net assets (last day with data) × 100 | 1.0 % | 0.35 |
+  | ETF net flow, 20 trading days | same | 3.0 % | 0.30 |
+  | Inflow vs outflow days, 10 trading days | (in − out) ÷ days with data | — (already ±1) | 0.15 |
+  | Listed-company net BTC acquisitions, 30 days (BTC only) | Σ BTC acquired ÷ Σ latest reported holdings × 100 | 2.0 % | 0.20 |
+
+  Sub-score = metric ÷ scale, capped to ±1; score = 100 × Σ(weight × sub-score) ÷ Σ(available weights). A component
+  covering < 90 % of its window is excluded (never filled); below 0.5 available weight the score is "Insufficient data".
+  Bands (flow direction only): ≥ +50 strong net inflow, ≥ +15 net inflow, ≥ −15 balanced, ≥ −50 net outflow, below
+  that strong net outflow. Weights, scales and bands are **judgment parameters chosen by design, published, not fitted
+  to price outcomes**; any change creates a new version. Every component shows its value, unit, calculation with the
+  numbers used, source, timestamp, freshness and data quality.
+- **Jobs:** Celery task `institutional.ingest` per (provider, dataset). All SoSoValue work runs on the `backfill` queue
+  so one process owns its 20/min budget; listing pages and the per-fund/per-company pages that follow run as one
+  ingestion job (every page archived). Jobs are skipped — not failed — when the provider is disabled or its key is
+  missing; beat queues each institutional job once at start-up (an interval entry would first run hours later).
+- **API / UI:** `GET /api/v1/institutional/{catalog, overview, etf-flows, etf-funds, treasury, score}`; the Flows page
+  shows overview tiles for BTC, ETH, SOL, XRP, the score with every component, the flow chart and table
+  (daily/weekly/monthly), per-fund breakdown, treasuries, and a coverage-and-limits section.
+
+**Reason.** The user asked for institutional capital "where reliable data is available", a transparent score with
+visible components, and no assumption that large wallets are institutional (R5). Free sources only (B2).
+
+**Alternatives considered.** Scraping Farside or issuer CSVs (terms risk, brittle); percentile-vs-history
+normalisation (needs years of history the free API does not serve; planned once native history exists); a fitted or
+AI-generated score (opaque — rejected by the user); storing each ETF field as a separate scalar series (loses the
+row-level consistency checks and doubles the queries).
+
+**Trade-offs.** One month of ETF history at start, so 20-day and history-based views fill in over time; SoSoValue is a
+single source for ETF flows (no cross-provider conflict check yet); treasury purchase sweeps take several minutes at
+20 requests/min; the score's parameters are judgments the user should review.
+
+**Future implications.** v2 of the score can replace fixed reference scales with percentiles over native history; the
+divergence engine (institutional vs retail) consumes the score's components with their evidence classes.

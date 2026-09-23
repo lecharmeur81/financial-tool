@@ -1,0 +1,292 @@
+{
+ "code": 0,
+ "message": "success",
+ "data": [
+  {
+   "date": "2026-08-03",
+   "ticker": "TSTF",
+   "net_inflow": -180000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-04",
+   "ticker": "TSTF",
+   "net_inflow": -120000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-05",
+   "ticker": "TSTF",
+   "net_inflow": 60000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-06",
+   "ticker": "TSTF",
+   "net_inflow": 30000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-07",
+   "ticker": "TSTF",
+   "net_inflow": -30000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-10",
+   "ticker": "TSTF",
+   "net_inflow": 60000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-11",
+   "ticker": "TSTF",
+   "net_inflow": -30000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-12",
+   "ticker": "TSTF",
+   "net_inflow": 30000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-13",
+   "ticker": "TSTF",
+   "net_inflow": -60000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-14",
+   "ticker": "TSTF",
+   "net_inflow": 60000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-17",
+   "ticker": "TSTF",
+   "net_inflow": 120000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-18",
+   "ticker": "TSTF",
+   "net_inflow": -60000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-19",
+   "ticker": "TSTF",
+   "net_inflow": 60000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-20",
+   "ticker": "TSTF",
+   "net_inflow": 0,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-21",
+   "ticker": "TSTF",
+   "net_inflow": -60000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-24",
+   "ticker": "TSTF",
+   "net_inflow": 180000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-25",
+   "ticker": "TSTF",
+   "net_inflow": -120000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-26",
+   "ticker": "TSTF",
+   "net_inflow": 60000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-27",
+   "ticker": "TSTF",
+   "net_inflow": 0,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-28",
+   "ticker": "TSTF",
+   "net_inflow": 60000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-08-31",
+   "ticker": "TSTF",
+   "net_inflow": 120000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-09-01",
+   "ticker": "TSTF",
+   "net_inflow": 180000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-09-02",
+   "ticker": "TSTF",
+   "net_inflow": -60000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-09-03",
+   "ticker": "TSTF",
+   "net_inflow": 240000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-09-04",
+   "ticker": "TSTF",
+   "net_inflow": 120000000,
+   "cum_inflow": null,
+   "net_assets": 60000000000,
+   "currency_share": 0.6,
+   "prem_dsc": 0.0005,
+   "value_traded": 1000000000,
+   "volume": "1000000000"
+  },
+  {
+   "date": "2026-09-08",
+   "ticker": "TSTF",
+   "net_inflow": null,
+   "cum_inflow": null,
+   "net_assets": null,
+   "currency_share": null,
+   "prem_dsc": null,
+   "value_traded": 900000000,
+   "volume": "900000000"
+  }
+ ]
+}

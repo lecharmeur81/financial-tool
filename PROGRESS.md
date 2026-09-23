@@ -2,8 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 5 — Market data → ✅ complete in Claude's workspace; awaiting the user's Docker run with real providers and commit
-**Next phase:** 6 — to be defined by the user (do not start automatically)
+**Current phase:** 6 — Institutional capital → ✅ built; awaiting the user's Windows check and commit
+**Next phase:** 7 — to be defined by the user (do not start automatically)
 
 ---
 
@@ -16,31 +16,32 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 2 | Architecture | ✅ Complete (checklist Part A approved 2026-09-23) |
 | 3 | Foundation (infrastructure) | ✅ Complete — verified on Windows |
 | 4 | Data ingestion engine | ✅ Complete — verified on Windows (`69b5442`) |
-| 5 | Market data | ✅ Complete — Windows run with real providers pending |
-| 6 | Whale data | ⏳ Not started |
-| 7 | Derivatives | ⏳ Not started |
-| 8 | Liquidity | ⏳ Not started |
-| 9 | Retail | ⏳ Not started |
-| 10 | Macro | ⏳ Not started |
-| 11 | Market structure | ⏳ Not started |
-| 12 | Divergence engine | ⏳ Not started |
-| 13 | Regime engine | ⏳ Not started |
-| 14 | Historical similarity | ⏳ Not started |
-| 15 | Backtesting | ⏳ Not started |
-| 16 | Quant red-team | ⏳ Not started |
-| 17 | Anomaly engine | ⏳ Not started |
-| 18 | Capital rotation | ⏳ Not started |
-| 19 | Claude AI Analyst | ⏳ Not started |
-| 20 | Daily intelligence | ⏳ Not started |
-| 21 | Alerts | ⏳ Not started |
-| 22 | Paper trading | ⏳ Not started |
-| 23 | Decision journal | ⏳ Not started |
-| 24 | Executive dashboard | ⏳ Not started |
-| 25 | Security + AI + stress testing | ⏳ Not started |
-| 26 | Production | ⏳ Not started |
-| 27 | Real-time intelligence | ⏳ Not started |
+| 5 | Market data | ✅ Complete — verified on Windows with real data (`6ad4eaf`) |
+| 6 | Institutional capital | ✅ Built — Windows check and commit pending |
+| — | Whale data | ⏳ Not started |
+| — | Derivatives | ⏳ Not started |
+| — | Liquidity | ⏳ Not started |
+| — | Retail | ⏳ Not started |
+| — | Macro | ⏳ Not started |
+| — | Market structure | ⏳ Not started |
+| — | Divergence engine | ⏳ Not started |
+| — | Regime engine | ⏳ Not started |
+| — | Historical similarity | ⏳ Not started |
+| — | Backtesting | ⏳ Not started |
+| — | Quant red-team | ⏳ Not started |
+| — | Anomaly engine | ⏳ Not started |
+| — | Capital rotation | ⏳ Not started |
+| — | Claude AI Analyst | ⏳ Not started |
+| — | Daily intelligence | ⏳ Not started |
+| — | Alerts | ⏳ Not started |
+| — | Paper trading | ⏳ Not started |
+| — | Decision journal | ⏳ Not started |
+| — | Executive dashboard | ⏳ Not started |
+| — | Security + AI + stress testing | ⏳ Not started |
+| — | Production | ⏳ Not started |
+| — | Real-time intelligence | ⏳ Not started |
 
-Phases 6–27 are provisional until the user issues them. "Institutional data" (previously listed as 5) is not yet re-scheduled.
+Phases 0–6 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
 
 ---
 
@@ -298,4 +299,72 @@ point-in-time leakage test, derived 4h), OKX/Bybit/Kraken formats and error payl
   provider's published limit).
 - Times on the Market page are UTC (Asia/Manila display not built). Quality findings grow quickly (retention to add).
 
-**Git commit:** pending — user to commit as `[P5] market data layer`.
+**Windows check (user, 2026-09-23):** `docker compose exec api pytest` → 164 passed. Real data on the Market page: Coinbase
+BTC-USD 1h candles (about 84–86k USD), 300 of 300 expected bars, 2 years of hourly history loaded; last trade and CoinGecko
+market cap fresh. Provider health: Coinbase, Kraken, Binance, OKX, CoinGecko succeeding; **Bybit answered HTTP 403 on every
+request** (location blocked), so it was removed from `CFI_MARKET_PROVIDERS` in the user's `.env` (adapter kept; can be re-enabled).
+
+**Git commit:** `6ad4eaf` — `[P5] market data layer`.
+
+---
+
+### 2026-09-24 — Phase 6: Institutional capital
+
+**What changed**
+- **Sources** (verified against official docs on 2026-09-24, $0): **SoSoValue OpenAPI** (free key, 20 req/min,
+  100k/month) — US spot ETF daily totals and per-fund history for **BTC, ETH, SOL and XRP** (SOL and XRP confirmed at
+  the user's request mid-phase), and listed-company bitcoin purchase history; **CoinGecko** public treasury — BTC, ETH,
+  SOL holdings of listed companies. Not available from a verified free source (shown in the UI): CoinShares weekly fund
+  flows, 13F holdings, ETH/SOL/XRP treasury purchases, ETF history older than one month. No wallet is ever labelled
+  institutional.
+- **Storage:** migration `0004` — `obs.institutional_flow` hypertable (flows/holdings in USD and coins, cumulative flow,
+  value traded, premium/discount, unit cost, entity type, evidence class; `inferred` labels and silent missing values
+  rejected by database checks); `ops.dataset.kind` now also `flow`.
+- **Engine:** third record family (`CanonicalFlow`); adapter hook `parse_page` (listing → per-fund/per-company pages in
+  one job, every page archived); availability rule `next_us_trading_day` + `known_when_received`; US trading calendar
+  (NYSE holidays verified for 2026–2028); `check_freshness` off for sporadic events. T+1 settlement: the current day is
+  skipped as not final, older gaps are explicit missing rows; changed values become revisions.
+- **Aggregation:** daily / weekly (Mon–Sun) / monthly at read time with `as_of` and `knowledge_time`; each trading day
+  counted as present, missing, not loaded or not due; per-fund reconciliation with the total.
+- **Institutional Flow Score v1** (calculated metric): four published components (5-day and 20-day ETF flow as % of net
+  assets, 10-day inflow/outflow day balance, 30-day listed-company BTC acquisitions), fixed weights and reference
+  scales, capped sub-scores, missing components excluded with renormalised weights, "Insufficient data" below half the
+  weight. Every component shows value, unit, calculation with the numbers, source, timestamp, freshness, data quality.
+- **Workers:** Celery task `institutional.ingest` (SoSoValue on the `backfill` queue, CoinGecko on `ingest`), skipped
+  when the provider is disabled or has no key, queued once when beat starts.
+- **API:** `/api/v1/institutional/catalog`, `/overview`, `/etf-flows`, `/etf-funds`, `/treasury`, `/score`.
+- **Flows page:** tiles for BTC, ETH, SOL, XRP; score card with every component; net-flow chart and table (daily /
+  weekly / monthly); per-fund breakdown; treasuries (holdings, purchases, largest holders); coverage and limits.
+- **Test fix (latent since Phase 5):** the worker-runtime test assumed the default provider lists, so it would have
+  failed once a provider is removed in `.env` (as done for Bybit). It now sets its provider lists explicitly; the suite
+  passes with reduced lists too.
+- **Historical fixtures:** `backend/tests/fixtures/institutional/` — synthetic values in the documented response shapes,
+  with hand-derived expected results (README there).
+- **Docs:** ADR-0048, DATA_DICTIONARY §4/§5/§5b/§7, ARCHITECTURE §5.1/5.3/5.5/§11, CLAUDE.md §C3 (6 = Institutional
+  capital), README, TODO, THIRD_PARTY_NOTICES.md, `.env.example`, `compose.yaml`.
+
+**Tests run (Claude's workspace: PostgreSQL 17 + TimescaleDB 2.30.1, Redis 8.8, Python 3.12, Node 22)**
+
+| Check | Result |
+|---|---|
+| Backend `uv run pytest` (unit + integration + API) | 228 passed |
+| Backend without database/Redis | 157 passed, 71 skipped |
+| `ruff format --check` / `ruff check` / `mypy` (strict) | clean |
+| Frontend `pnpm test` / `lint` / `format:check` / `typecheck` / `build` | 46 passed / clean / clean / clean / built |
+| Running stack (API + built frontend + Playwright) | Flows page renders for BTC, SOL (weekly) and XRP (monthly); no browser console errors — **with the synthetic fixtures, dates shifted to the current week, in a scratch database** (this workspace cannot reach SoSoValue) |
+
+Covered by tests: calendar vs published NYSE holidays; documented example payloads; T+1 skip vs explicit missing;
+listing chains and purchase pagination (no loop when a parameter is ignored); sale sign; suspect unit cost kept;
+idempotent re-runs and revisions; weekly/monthly totals; missing vs not loaded vs not due; score values for BTC 69.5,
+ETH 71.9, XRP 71.9, SOL 85.0 (20-day component excluded) and 58.5 with a missing day; point-in-time leakage (rows
+published after `as_of` or stored after `knowledge_time` never change the score); invalid key → recorded auth failure;
+downgrade refuses to delete institutional data.
+
+**Known limitations**
+- No real SoSoValue data seen yet: this workspace cannot reach it and a personal key is needed.
+- ETF history from the API is one month; 20-day and history-based views fill in as the system runs.
+- SoSoValue is the only ETF source (no cross-provider check); its API terms are not published.
+- Score parameters are judgments awaiting the user's review; availability times are estimates.
+
+**Git commit:** pending — `[P6] institutional capital`.
+

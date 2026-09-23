@@ -193,6 +193,37 @@ market_bar = Table(
     schema="obs",
 )
 
+institutional_flow = Table(
+    "institutional_flow",
+    metadata,
+    Column("series_id", BigInteger, primary_key=True),
+    Column("event_time", TS, primary_key=True),
+    Column("available_at", TS, nullable=False),
+    Column("available_at_estimated", Boolean, nullable=False),
+    Column("ingested_at", TS, nullable=False),
+    Column("entity_type", Text, nullable=False),
+    Column("evidence_class", Text, nullable=False),
+    Column("entity_name", Text),
+    Column("flow_usd", Numeric),
+    Column("flow_native", Numeric),
+    Column("holdings_usd", Numeric),
+    Column("holdings_native", Numeric),
+    Column("cum_flow_usd", Numeric),
+    Column("value_traded_usd", Numeric),
+    Column("premium_discount", Numeric),
+    Column("unit_cost_usd", Numeric),
+    Column("source_provider", Text, primary_key=True),
+    Column("original_source", Text, nullable=False),
+    Column("raw_ref", BigInteger),
+    Column("revision", Integer, primary_key=True),
+    Column("pit_reliability", Text, nullable=False),
+    Column("quality_status", Text, nullable=False),
+    Column("quality_note", Text),
+    Column("confidence", Numeric),
+    Column("transformations", ARRAY(Text), nullable=False),
+    schema="obs",
+)
+
 backfill_state = Table(
     "backfill_state",
     metadata,

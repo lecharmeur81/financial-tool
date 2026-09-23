@@ -6,10 +6,11 @@
 
 ## Status
 
-**Phase 5 — Market data.** Spot OHLCV (1m–1d), last trade and market capitalisation for BTC, ETH, SOL and XRP
-from free public sources (Coinbase Exchange, Kraken, Binance, OKX, Bybit, CoinGecko), ingested by background
-workers into TimescaleDB and shown on the **Market** page with source, freshness and missing-data warnings.
-Observed data only — no signals or recommendations yet. See [`PROGRESS.md`](PROGRESS.md).
+**Phase 6 — Institutional capital.** US spot ETF flows for BTC, ETH, SOL and XRP (total and per fund; daily,
+weekly, monthly), listed-company bitcoin purchases and treasury holdings, and a transparent **Institutional Flow
+Score** whose every component is shown — on the **Flows** page. Phase 5 added market data (spot OHLCV, last trade,
+market cap) on the **Market** page. Descriptive only — no forecasts, signals or recommendations. See
+[`PROGRESS.md`](PROGRESS.md).
 
 ## What it is
 
@@ -89,7 +90,8 @@ AI-assisted analysis (Claude)
    ```
    First start downloads images and builds; later starts are fast.
 4. Open:
-   - Frontend: http://localhost:3000 (Market shows charts; Settings shows live system status)
+   - Frontend: http://localhost:3000 (Market shows charts; Flows shows institutional capital; Settings shows
+     live system status)
    - API docs: http://localhost:8000/api/docs
    - Readiness: http://localhost:8000/health/ready
 
@@ -111,6 +113,11 @@ Service layout: `db` (PostgreSQL 17 + TimescaleDB 2.30.1) · `redis` (Redis 8.8)
 Market-data providers are chosen in `.env` (`CFI_MARKET_PROVIDERS`). Several exchanges are blocked by Internet
 providers in some countries (e.g. the Philippines); a blocked provider shows up as failed ingestion runs in
 `http://localhost:8000/api/v1/ingestion/runs` and as warnings on the Market page — remove it from the list if needed.
+Institutional data (Phase 6): ETF flows and bitcoin treasury purchases come from SoSoValue, which needs a **free API
+key** — register at https://sosovalue.com/developer/dashboard, wait for approval, and put the key in `.env` as
+`CFI_PROVIDER_SOSOVALUE_API_KEY` (never commit it). Without a key those jobs are skipped and the Flows page says so.
+After adding the key run `docker compose up -d`: it recreates the services with the new setting, and `beat` queues
+every institutional job once when it starts (no need to wait hours for the schedule).
 Third-party attributions: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## Disclaimer

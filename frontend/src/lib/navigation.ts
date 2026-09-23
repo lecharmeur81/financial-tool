@@ -28,8 +28,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/flows",
     label: "Flows",
     description:
-      "Institutional flows (ETFs, regulated venues), whale activity, and exchange inflows/outflows — with evidence class shown for every actor label.",
-    plannedPhase: "5–6",
+      "Institutional capital: US spot ETF flows (BTC, ETH, SOL, XRP), corporate treasuries and the transparent Institutional Flow Score — with evidence class shown for every actor label. Whale and exchange flows later.",
+    plannedPhase: "6 (institutional capital); whale and exchange flows later",
   },
   {
     href: "/derivatives",

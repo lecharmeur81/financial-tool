@@ -168,6 +168,13 @@ class ProviderAdapter(ABC):
     def parse(self, raw: RawResponse) -> Sequence[ProviderRecord]:
         """Validate and split a raw response. Raise ``SchemaMismatchError`` on unexpected shape."""
 
+    def parse_page(self, spec: RequestSpec, raw: RawResponse) -> Sequence[ProviderRecord]:
+        """Parse one page, with the request that produced it. Default: :meth:`parse`.
+
+        Override when records need context carried in ``spec.state`` (e.g. the fund names read
+        from a listing page earlier in the same run)."""
+        return self.parse(raw)
+
     @abstractmethod
     def normalise(self, record: ProviderRecord, ctx: NormaliseContext) -> ObservedRecord:
         """Convert one provider record into the canonical model (units, symbols, UTC).

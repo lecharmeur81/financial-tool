@@ -1,0 +1,97 @@
+{
+ "code": 0,
+ "message": "success",
+ "data": [
+  {
+   "date": "2026-09-08",
+   "total_net_inflow": null,
+   "total_value_traded": 15000000,
+   "total_net_assets": null,
+   "cum_net_inflow": null
+  },
+  {
+   "date": "2026-09-04",
+   "total_net_inflow": 2000000,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 511000000
+  },
+  {
+   "date": "2026-09-03",
+   "total_net_inflow": 4000000,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 509000000
+  },
+  {
+   "date": "2026-09-02",
+   "total_net_inflow": -1000000,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 505000000
+  },
+  {
+   "date": "2026-09-01",
+   "total_net_inflow": 3000000,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 506000000
+  },
+  {
+   "date": "2026-08-31",
+   "total_net_inflow": 2000000,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 503000000
+  },
+  {
+   "date": "2026-08-28",
+   "total_net_inflow": 1000000,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 501000000
+  },
+  {
+   "date": "2026-08-27",
+   "total_net_inflow": 0,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 500000000
+  },
+  {
+   "date": "2026-08-26",
+   "total_net_inflow": 1000000,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 500000000
+  },
+  {
+   "date": "2026-08-25",
+   "total_net_inflow": -2000000,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 499000000
+  },
+  {
+   "date": "2026-08-24",
+   "total_net_inflow": 3000000,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 501000000
+  },
+  {
+   "date": "2026-08-21",
+   "total_net_inflow": -1000000,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 498000000
+  },
+  {
+   "date": "2026-08-20",
+   "total_net_inflow": 0,
+   "total_value_traded": 20000000,
+   "total_net_assets": 1000000000,
+   "cum_net_inflow": 499000000
+  }
+ ]
+}

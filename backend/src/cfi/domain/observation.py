@@ -17,7 +17,9 @@ Fields follow DATA_DICTIONARY.md §2 and CLAUDE.md R3. Every record answers:
 Two record families share this provenance (ADR-0017):
 
 - :class:`CanonicalObservation` — one scalar ``value`` (stored in ``obs.observation``);
-- :class:`CanonicalBar` — an OHLCV bar (stored in ``obs.market_bar``).
+- :class:`CanonicalBar` — an OHLCV bar (stored in ``obs.market_bar``);
+- :class:`CanonicalFlow` — capital flow / holdings of an identified institutional vehicle or
+  entity (stored in ``obs.institutional_flow``).
 
 Invariants enforced here:
 - all timestamps are timezone-aware and converted to UTC;
@@ -33,7 +35,7 @@ from decimal import Decimal
 from typing import Self
 
 from cfi.core.time import ensure_utc
-from cfi.domain.enums import PitReliability, QualityStatus
+from cfi.domain.enums import EvidenceClass, PitReliability, QualityStatus
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -214,3 +216,119 @@ class CanonicalBar(ObservedRecord):
         if self.trade_count is not None and self.trade_count < 0:
             problems.append("negative trade count")
         return problems
+
+
+ENTITY_TYPES = frozenset({"etf_group", "etf_fund", "public_company", "public_company_group"})
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CanonicalFlow(ObservedRecord):
+    """Capital flow and holdings of one identified entity (an ETF, a group of ETFs, a listed
+    company, or all tracked listed companies) for one ``event_time``.
+
+    Sign convention: a positive flow is capital entering the entity (ETF creations, coins
+    acquired); a negative flow is capital leaving it (redemptions, coins sold).
+
+    ``unit`` is the unit of every ``*_usd`` column (``usd``); ``*_native`` columns are in units of
+    ``asset``. ``premium_discount`` is a ratio (0.001 = 0.1 %). Any field the provider does not
+    report is ``None`` — never estimated. A missing record has no flow and no holdings.
+
+    ``entity_type`` / ``evidence_class`` state *who* the flow is attributed to and how directly
+    that is evidenced (R5). An ETF flow is direct evidence of ETF creations/redemptions — not of
+    who bought the ETF shares (end investors include retail).
+    """
+
+    entity_type: str
+    evidence_class: EvidenceClass
+    entity_name: str | None = None
+    flow_usd: Decimal | None = None
+    flow_native: Decimal | None = None
+    holdings_usd: Decimal | None = None
+    holdings_native: Decimal | None = None
+    cum_flow_usd: Decimal | None = None
+    value_traded_usd: Decimal | None = None
+    premium_discount: Decimal | None = None
+    unit_cost_usd: Decimal | None = None
+
+    def __post_init__(self) -> None:
+        if self.entity_type not in ENTITY_TYPES:
+            raise ValueError(f"unknown entity_type {self.entity_type!r}")
+        if self.evidence_class is EvidenceClass.INFERRED:
+            raise ValueError("inferred actor labels are not accepted as institutional flow (R5)")
+        ObservedRecord.__post_init__(self)
+
+    @property
+    def is_missing(self) -> bool:
+        return all(
+            v is None
+            for v in (self.flow_usd, self.flow_native, self.holdings_usd, self.holdings_native)
+        )
+
+    def comparable(self) -> object:
+        return (
+            self.flow_usd,
+            self.flow_native,
+            self.holdings_usd,
+            self.holdings_native,
+            self.cum_flow_usd,
+            self.value_traded_usd,
+            self.premium_discount,
+            self.unit_cost_usd,
+        )
+
+    @property
+    def conflict_value(self) -> Decimal | None:
+        return self.flow_usd if self.flow_usd is not None else self.holdings_native
+
+    def describe(self) -> str:
+        if self.is_missing:
+            return "missing"
+        parts = [
+            f"{name}={value}"
+            for name, value in (
+                ("flow_usd", self.flow_usd),
+                ("flow_native", self.flow_native),
+                ("holdings_usd", self.holdings_usd),
+                ("holdings_native", self.holdings_native),
+            )
+            if value is not None
+        ]
+        return " ".join(parts)
+
+    def consistency_problems(self) -> list[str]:
+        """Sanity checks. Violations mark the record ``suspect`` (kept, flagged), never fixed."""
+        if self.is_missing:
+            return []
+        problems = []
+        for name in ("holdings_usd", "holdings_native", "value_traded_usd"):
+            value = getattr(self, name)
+            if value is not None and value < 0:
+                problems.append(f"negative {name}")
+        if (
+            self.flow_usd is not None
+            and self.flow_native is not None
+            and self.flow_usd != 0
+            and self.flow_native != 0
+            and (self.flow_usd > 0) != (self.flow_native > 0)
+        ):
+            problems.append("flow in USD and flow in coins have opposite signs")
+        if (
+            self.unit_cost_usd is not None
+            and self.flow_usd is not None
+            and self.flow_native not in (None, 0)
+        ):
+            assert self.flow_native is not None  # noqa: S101 — narrowed above
+            implied = abs(self.flow_usd / self.flow_native)
+            if self.unit_cost_usd <= 0 or abs(implied - self.unit_cost_usd) > (
+                self.unit_cost_usd * UNIT_COST_TOLERANCE
+            ):
+                problems.append(
+                    f"unit cost {self.unit_cost_usd} differs from flow_usd / flow_native "
+                    f"= {implied:.2f} by more than {UNIT_COST_TOLERANCE:%}"
+                )
+        return problems
+
+
+# Reported per-unit cost may be rounded or include fees; beyond this relative difference the
+# three reported numbers do not describe the same transaction.
+UNIT_COST_TOLERANCE = Decimal("0.02")

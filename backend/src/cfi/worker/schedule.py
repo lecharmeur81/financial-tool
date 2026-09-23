@@ -1,4 +1,4 @@
-"""Celery beat schedule for market data (pure; no connections — unit-testable).
+"""Celery beat schedule for market and institutional data (pure; no connections — unit-testable).
 
 Queues by workload (ADR-0023): ``ingest_fast`` (minute bars, last trade), ``ingest`` (everything
 else recent), ``backfill`` (history, low priority). Each scheduled run expires after one interval,
@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from cfi.domain.datasets import DatasetSpec
+from cfi.institutional.sources import sources_for
 from cfi.market.sources import ADAPTERS, datasets_for
 
 # Seconds between scheduled runs, per dataset period (or metric for event series).
@@ -65,8 +66,24 @@ def scheduled_ingestions(provider_ids: list[str]) -> list[ScheduledIngestion]:
     return out
 
 
-def beat_schedule(provider_ids: list[str]) -> dict[str, dict[str, Any]]:
-    schedule: dict[str, dict[str, Any]] = {}
+def institutional_entries(provider_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """One entry per (provider, dataset). Institutional data changes at most daily, so intervals
+    are hours; runs are idempotent (re-reading a window only adds new days or revisions)."""
+    return {
+        f"institutional:{item.provider_id}:{item.dataset.dataset_id}": {
+            "task": "institutional.ingest",
+            "schedule": float(item.interval_seconds),
+            "args": (item.provider_id, item.dataset.dataset_id),
+            "options": {"queue": item.queue, "expires": item.interval_seconds},
+        }
+        for item in sources_for(provider_ids)
+    }
+
+
+def beat_schedule(
+    provider_ids: list[str], institutional_provider_ids: list[str] | None = None
+) -> dict[str, dict[str, Any]]:
+    schedule: dict[str, dict[str, Any]] = institutional_entries(institutional_provider_ids or [])
     for item in scheduled_ingestions(provider_ids):
         schedule[f"latest:{item.provider_id}:{item.dataset_id}"] = {
             "task": "market.ingest_latest",

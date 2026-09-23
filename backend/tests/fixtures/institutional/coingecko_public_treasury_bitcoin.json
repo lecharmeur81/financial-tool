@@ -1,0 +1,16 @@
+{
+ "total_holdings": 100000,
+ "total_value_usd": 11000000000,
+ "market_cap_dominance": 0.5,
+ "companies": [
+  {
+   "name": "Test Treasury Co A",
+   "symbol": "TSTA.US",
+   "country": "US",
+   "total_holdings": 60000,
+   "total_entry_value_usd": 3650000000,
+   "total_current_value_usd": 6600000000,
+   "percentage_of_total_supply": 0.286
+  }
+ ]
+}
