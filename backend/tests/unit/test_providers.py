@@ -9,7 +9,8 @@ import pytest
 from cfi.core.errors import ProviderNotConfiguredError
 from cfi.domain.enums import PitReliability, QualityStatus
 from cfi.domain.observation import CanonicalObservation
-from cfi.providers.base import FetchWindow, ProviderRecord, RawResponse
+from cfi.providers.base import FetchWindow, NormaliseContext, ProviderRecord, RawResponse
+from cfi.providers.mock import MOCK_DATASET
 from cfi.providers.registry import ProviderRegistry
 from cfi.providers.stub import StubProvider
 
@@ -41,10 +42,10 @@ def _obs(**overrides: Any) -> CanonicalObservation:
 # ------------------------------------------------------------------ stub provider
 
 
-async def test_stub_fetch_refuses_instead_of_inventing_data() -> None:
+def test_stub_request_refuses_instead_of_inventing_data() -> None:
     stub = StubProvider()
     with pytest.raises(ProviderNotConfiguredError, match="stub"):
-        await stub.fetch("any_dataset", FetchWindow(T0, T0 + timedelta(hours=1)))
+        stub.first_request("any_dataset", FetchWindow(T0, T0 + timedelta(hours=1)))
 
 
 def test_stub_parse_and_normalise_refuse() -> None:
@@ -52,8 +53,9 @@ def test_stub_parse_and_normalise_refuse() -> None:
     raw = RawResponse("stub", "/x", {}, T0, 200, "application/json", b"{}")
     with pytest.raises(ProviderNotConfiguredError):
         stub.parse(raw)
+    ctx = NormaliseContext(dataset=MOCK_DATASET, ingested_at=T0, raw_ref=None)
     with pytest.raises(ProviderNotConfiguredError):
-        stub.normalise(ProviderRecord("stub", "d"), T0)
+        stub.normalise(ProviderRecord("stub", "d"), ctx)
 
 
 def test_stub_declares_no_datasets() -> None:

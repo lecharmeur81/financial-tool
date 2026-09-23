@@ -20,6 +20,7 @@ from cfi.api.app import create_app
 from cfi.cache.redis import check_redis, create_redis
 from cfi.core.config import Settings, get_settings
 from cfi.db.engine import LAYER_SCHEMAS, check_database, create_engine
+from tests.integration.conftest import head_revision
 
 pytestmark = [
     pytest.mark.integration,
@@ -45,7 +46,7 @@ async def engine(live_settings: Settings) -> AsyncIterator[AsyncEngine]:
 async def test_timescaledb_installed_and_migrated(engine: AsyncEngine) -> None:
     detail = await check_database(engine)
     assert detail["timescaledb_version"] != "not_installed"
-    assert detail["schema_revision"] == "0001"
+    assert detail["schema_revision"] == head_revision()
     assert detail["session_timezone"] == "UTC"
 
 
@@ -96,5 +97,5 @@ def test_ready_endpoint_against_real_services(live_settings: Settings) -> None:
         response = client.get("/health/ready")
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["components"]["database"]["detail"]["schema_revision"] == "0001"
+    assert body["components"]["database"]["detail"]["schema_revision"] == head_revision()
     assert body["components"]["redis"]["detail"]["ping"] == "PONG"

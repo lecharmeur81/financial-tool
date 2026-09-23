@@ -321,7 +321,7 @@ Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 | 1 | Master engineering rules | 15 | Backtesting |
 | 2 | Architecture | 16 | Quant red-team |
 | 3 | Foundation (infrastructure) | 17 | Anomaly engine |
-| 4 | Market data | 18 | Capital rotation |
+| 4 | Data ingestion engine | 18 | Capital rotation |
 | 5 | Institutional data | 19 | Claude AI Analyst |
 | 6 | Whale data | 20 | Daily intelligence |
 | 7 | Derivatives | 21 | Alerts |
@@ -332,9 +332,12 @@ Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 | 12 | Divergence engine | 26 | Production |
 | 13 | Regime engine | 27 | Real-time intelligence |
 
-Phases 0–3 follow the user's guide: 0 project foundation, 1 master engineering rules (Part B), 2 architecture,
-3 application foundation (infrastructure). Phase numbers from 4 onward are **provisional** until the user issues each phase.
-The **data ingestion framework** (formerly listed as 3) is not yet placed and must precede the dataset phases (see `TODO.md`).
+Phases 0–4 follow the user's guide: 0 project foundation, 1 master engineering rules (Part B), 2 architecture,
+3 application foundation (infrastructure), 4 data ingestion engine. Phase numbers from 5 onward are **provisional** until
+the user issues each phase (the dataset phases previously listed as 4–11 have not been re-numbered yet).
+
+**Testing rule:** integration tests that write data run only in the separate `<database>_test` database, which the test
+suite creates and migrates itself. Never point data-writing tests at the development or production database.
 
 Current phase and status: see `PROGRESS.md`.
 

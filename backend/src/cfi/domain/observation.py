@@ -1,14 +1,28 @@
 """Canonical observed-data record (L1) — the only shape provider data may take after normalisation.
 
-Fields follow DATA_DICTIONARY.md §2 and CLAUDE.md R3. Invariants enforced here:
+Fields follow DATA_DICTIONARY.md §2 and CLAUDE.md R3. Every record answers:
+
+| Question | Field(s) |
+|---|---|
+| What was measured? | ``metric`` (+ ``dataset_id``) |
+| When did it occur? | ``event_time`` (and ``period``) |
+| When was it knowable / ingested? | ``available_at`` (+ ``_estimated``), ``ingested_at`` |
+| Where did it come from? | ``original_source``, ``raw_ref`` (archived payload) |
+| Which provider supplied it? | ``source_provider`` |
+| What unit? | ``unit`` |
+| What asset? | ``asset`` (+ ``subject_ref``, ``venue``) |
+| How reliable? | ``quality_status``, ``quality_note``, ``confidence``, ``pit_reliability`` |
+| Was it transformed? | ``transformations`` (empty = value stored exactly as reported) |
+
+Invariants enforced here:
 - all timestamps are timezone-aware and converted to UTC;
 - a missing value is ``None`` **with** ``quality_status = missing`` — never zero, never silent;
-- confidence, when given, is within [0, 1].
+- a non-``ok`` status always carries a note; confidence, when given, is within [0, 1].
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
 
@@ -36,7 +50,9 @@ class CanonicalObservation:
     revision: int = 0
     quality_note: str | None = None
     confidence: Decimal | None = None
-    raw_ref: int | None = field(default=None)
+    raw_ref: int | None = None
+    venue: str | None = None
+    transformations: tuple[str, ...] = field(default=())
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "event_time", ensure_utc(self.event_time, field="event_time"))
@@ -60,3 +76,14 @@ class CanonicalObservation:
                 raise ValueError(f"{name} must not be empty")
         if not self.original_source:
             raise ValueError("original_source must not be empty (use 'unknown' if not provided)")
+
+    @property
+    def transformed(self) -> bool:
+        """True if the value or its timestamp was converted from the provider's representation."""
+        return bool(self.transformations)
+
+    def with_quality(self, status: QualityStatus, note: str) -> CanonicalObservation:
+        return replace(self, quality_status=status, quality_note=note)
+
+    def with_revision(self, revision: int) -> CanonicalObservation:
+        return replace(self, revision=revision)

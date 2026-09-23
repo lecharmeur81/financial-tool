@@ -215,7 +215,32 @@ schedule/trigger → rate-limit token → fetch (adapter) → write L0 (archive 
   through stream collectors → Redis Streams → batched writer (§5.20). The L1 schema is identical for both paths.
 - **Batch first, real-time last** (ADR-0009).
 
+**Implemented in Phase 4** (`backend/src/cfi/ingestion/`, ADR-0046): `IngestionEngine.ingest(dataset, adapter, client, window)`
+runs the pipeline above for one dataset/provider/window. Not yet implemented: scheduling and `dataset_updated` events
+(arrive with the Celery workers), `backfill`/`reconcile`/`gap_fill` job types, coverage table, per-dataset retention.
+Detection rules as built:
+
+| Situation | What the engine does |
+|---|---|
+| Same key, same value (again or twice in one response) | Counted as a duplicate; not stored again |
+| Same key, different value, same provider | Stored as a new `revision`; finding `revision` (`unexpected` if the dataset is not revisable) |
+| Same key, different values *within one response* | First kept, other rejected; finding `inconsistent_duplicate_in_response` |
+| Provider sends `null` | Stored as `missing` with a note; finding `missing_value` |
+| Expected point not delivered (continuous datasets) | Explicit `missing` row; finding `completeness_gap`; a later value becomes revision 1 |
+| Newest value older than the freshness limit, or no data | Finding `freshness` = `stale`; `job_run.stale = true` |
+| Two providers differ beyond the dataset tolerance | Incoming row stored as `conflicting` (note names the other provider and value); both kept; finding `cross_provider_conflict` |
+| Record cannot be normalised (unknown symbol, bad value, unfinished bar) | Rejected, reason recorded; job status `partial` |
+| Payload not JSON / schema changed | Payload archived and flagged `schema_ok = false`; job `failed` with `schema_mismatch` |
+| Timeout, 5xx, 429 | Retried with backoff (429/503 honour `Retry-After`); every attempt logged; job `failed` if retries run out |
+
 ### 5.4 Provider abstraction — ADR-0022
+
+**Implemented in Phase 4:** `ProviderAdapter` (`first_request` / `next_request` / `parse` / `normalise`) in
+`cfi/providers/base.py`; shared `ProviderHttpClient` with auth (header, query or bearer; secret read from an environment
+variable and redacted), timeouts, retries with exponential backoff and jitter, token-bucket rate limiter, circuit
+breaker, and per-attempt records (`ops.provider_request`) in `cfi/providers/http.py`. Rate limiter and circuit breaker are
+in-process until workers share them via Redis. Mock providers for tests only: `cfi/providers/mock.py`.
+
 
 - **One adapter per provider** implementing a small interface: `fetch(dataset, window) → RawResponse`,
   `parse(RawResponse) → list[ProviderRecord]`, `normalise(ProviderRecord) → CanonicalRecord`, plus declared
@@ -632,7 +657,7 @@ Phases 0–3 are defined by the user's guide; later phase numbers in `CLAUDE.md`
 | Component | Planned phase (provisional) |
 |---|---|
 | Infrastructure (Compose, DB, migrations baseline, CI, tooling) | 3 — done |
-| Ingestion framework, provider client layer, dataset registry, quality framework | unscheduled — to be placed by the user (before 4) |
+| Ingestion engine, provider client layer, dataset registry, quality detection | 4 — done (scheduler/workers not yet) |
 | Market, institutional, whale, derivatives, liquidity, retail, macro, market-structure datasets and metrics | 4–11 |
 | Divergence, regime, similarity, backtesting, red-team, anomaly, rotation | 12–18 |
 | AI analyst (snapshot, prompts, validator, evals) | 19 |

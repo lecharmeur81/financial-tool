@@ -13,6 +13,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Pinned uv, same version that produced uv.lock.
 COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /usr/local/bin/uv
 RUN groupadd --system cfi && useradd --system --gid cfi --home-dir /app --no-create-home cfi
+# Raw payload archive (ADR-0019). Created here so a Docker volume mounted on it is owned by cfi.
+RUN mkdir -p /data/raw && chown -R cfi:cfi /data
 WORKDIR /app
 
 # ---------------------------------------------------------------- development image

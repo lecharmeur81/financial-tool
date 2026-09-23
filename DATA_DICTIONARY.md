@@ -119,7 +119,12 @@ Every non-`unknown` assignment requires an `evidence_class`, `confidence` (0–1
 
 ## 4. Logical schema (planned — Phase 2 design)
 
-Tables are grouped by PostgreSQL schema (one per layer, ADR-0016). **Implemented so far (Phase 3, migration `0001`):** the nine
+Tables are grouped by PostgreSQL schema (one per layer, ADR-0016). **Implemented in Phase 4 (migration `0002`):** `ops.provider`, `ops.dataset`,
+`ops.dataset_provider`, `ops.job_run`, `ops.provider_request` (replaces the planned `provider_health_event` and
+`request_ledger`: one row per HTTP attempt with its outcome), `ops.quality_check_result` (column `check_name`), `raw.payload`,
+`obs.series`, `obs.observation` (plus `transformations text[]` — empty means the value was stored exactly as reported).
+Still planned: the typed market tables, `ref.*`, `calc`/`sig`/`regime`/`ai`/`usr` tables, `ops.coverage_daily`.
+**Implemented in Phase 3 (migration `0001`):** the nine
 schemas exist and are empty; no tables have been created yet. **HT** = TimescaleDB hypertable (time column in brackets).
 "Provenance" = the row-level fields of §2b. Write access per schema follows the DB roles in `ARCHITECTURE.md` §5.9.
 

@@ -45,5 +45,6 @@ class EvidenceClass(StrEnum):
 
 class AuthType(StrEnum):
     NONE = "none"
-    API_KEY = "api_key"
-    OAUTH = "oauth"
+    API_KEY_HEADER = "api_key_header"
+    API_KEY_QUERY = "api_key_query"
+    BEARER = "bearer"

@@ -83,10 +83,21 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 - [x] **User:** `ci.yml` placed in `.github\workflows\` (2026-09-23).
 - [x] **User:** `docker compose up --build` on Windows — all services healthy; `docker compose exec api pytest` 56 passed (2026-09-23).
 
-## Deferred from the foundation (to the phase that needs them)
+## Phase 4 — Data ingestion engine (done 2026-09-23; see PROGRESS.md)
 
-- [ ] Database roles and grants per service (ADR-0027, approved) — with the first tables (ingestion framework).
-- [ ] `ops.job_run` and Celery workers/beat (ADR-0023, approved) — with the ingestion framework.
+- [x] Provider adapter interface, shared HTTP client (auth, timeouts, retries/backoff, rate limit, circuit breaker, pagination).
+- [x] Response validation, normalisation (timestamps, time zones, units), provenance on every record.
+- [x] Duplicate, revision, missing, gap, stale, conflict, rejection detection; quality findings; job runs; request log.
+- [x] Raw payload archive; migration `0002` (registry, job runs, requests, payloads, series, observations, findings).
+- [x] Mock providers + tests (unit and integration); provider-health and ingestion-runs API.
+
+## Deferred (to the phase that needs them)
+
+- [ ] Scheduling: Celery workers/beat (ADR-0023, approved) and `dataset_updated` events — nothing runs ingestion automatically yet.
+- [ ] Shared (Redis-backed) rate limiter and circuit breaker — needed once several workers ingest in parallel.
+- [ ] Job types `backfill`, `reconcile`, `gap_fill`; `ops.coverage_daily`; per-dataset retention.
+- [ ] Database roles and grants per service (ADR-0027, approved) — when API and workers run as separate services.
+- [ ] First real provider adapters — terms, limits and access from the hosting location verified first.
 - [ ] Authentication (ADR-0026, approved) — before any user-layer feature or remote hosting.
 - [ ] Benchmark `NUMERIC` vs `double precision` (ADR-0044) — before the first high-volume table.
 - [ ] Pre-commit hooks (optional convenience; CI already enforces the same checks).

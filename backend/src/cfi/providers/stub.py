@@ -7,17 +7,17 @@ return invented values (R3: never fabricate data).
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
 
 from cfi.core.errors import ProviderNotConfiguredError
-from cfi.domain.enums import AuthType
 from cfi.domain.observation import CanonicalObservation
 from cfi.providers.base import (
     FetchWindow,
+    NormaliseContext,
     ProviderAdapter,
     ProviderCapabilities,
     ProviderRecord,
     RawResponse,
+    RequestSpec,
 )
 
 
@@ -28,10 +28,9 @@ class StubProvider(ProviderAdapter):
         self._capabilities = ProviderCapabilities(
             provider_id=provider_id,
             display_name=display_name,
+            base_url="https://stub.invalid",
             datasets=frozenset(),
-            auth_type=AuthType.NONE,
-            terms_verified=False,
-            notes="Placeholder only. No real data source is connected (Phase 3).",
+            notes="Placeholder only. No real data source is connected.",
         )
 
     @property
@@ -45,11 +44,11 @@ class StubProvider(ProviderAdapter):
             provider_id=self.provider_id,
         )
 
-    async def fetch(self, dataset_id: str, window: FetchWindow) -> RawResponse:
+    def first_request(self, dataset_id: str, window: FetchWindow) -> RequestSpec:
         raise self._refuse(f"fetch dataset '{dataset_id}'")
 
     def parse(self, raw: RawResponse) -> Sequence[ProviderRecord]:
         raise self._refuse("parse responses")
 
-    def normalise(self, record: ProviderRecord, ingested_at: datetime) -> CanonicalObservation:
+    def normalise(self, record: ProviderRecord, ctx: NormaliseContext) -> CanonicalObservation:
         raise self._refuse("normalise records")

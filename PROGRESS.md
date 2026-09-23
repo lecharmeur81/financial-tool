@@ -2,8 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 3 — Foundation → ✅ complete and verified on the user's Windows machine (2026-09-23)
-**Next phase:** 4 — to be defined by the user (do not start automatically)
+**Current phase:** 4 — Data ingestion engine → ✅ complete in Claude's workspace; awaiting the user's Docker check and commit
+**Next phase:** 5 — to be defined by the user (do not start automatically)
 
 ---
 
@@ -15,7 +15,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 1 | Master engineering rules | ✅ Complete |
 | 2 | Architecture | ✅ Complete (checklist Part A approved 2026-09-23) |
 | 3 | Foundation (infrastructure) | ✅ Complete — verified on Windows |
-| 4 | Market data | ⏳ Not started |
+| 4 | Data ingestion engine | ✅ Complete — Docker check on Windows pending |
 | 5 | Institutional data | ⏳ Not started |
 | 6 | Whale data | ⏳ Not started |
 | 7 | Derivatives | ⏳ Not started |
@@ -199,4 +199,47 @@ phases that need them (R13: do not build unrequested features). The Docker Compo
 - **Re-run after the fix (user's machine):** `docker compose exec api pytest` → **56 passed in 1.08s**, no errors. Settings page:
   "All systems ready" — database OK (timescaledb_version 2.30.1, schema_revision 0001, session_timezone UTC), Redis OK (8.8.3).
 - `.github/workflows/ci.yml` placed by the user (2,592 bytes, identical to the original).
-- **Phase 3 complete.** Git commit: pending — user to commit as `[P3] application foundation`.
+- **Phase 3 complete.** Git commit: `ec7ab27` — `[P3] application foundation` (99 files; created by the user).
+
+### 2026-09-23 — Phase 4: Data ingestion engine
+
+**What changed**
+- **Provider abstraction** (`cfi/providers/base.py`): `ProviderAdapter` with `first_request` / `next_request` (pagination) / `parse`
+  (response validation → `SchemaMismatchError`) / `normalise`; declared capabilities (auth, rate limit, timeout, page limit, original
+  source).
+- **HTTP client layer** (`cfi/providers/http.py`): authentication (API-key header or query parameter, bearer; secret from an environment
+  variable, redacted from records), timeouts, retries with exponential backoff + jitter honouring `Retry-After`, token-bucket rate
+  limiter, circuit breaker, one record per attempt.
+- **Normalisation**: epoch/ISO/naive-local timestamps → UTC with declared units and time zones (DST-aware, `tzdata` added); unit
+  conversion recorded in `transformations`; availability rules set `available_at` (unfinished bars rejected).
+- **Ingestion engine** (`cfi/ingestion/`): raw payload archive (content-addressed files), pipeline with duplicate / revision / missing /
+  gap / stale / conflict / rejection detection, quality findings, job runs, provider health.
+- **Migration `0002`**: `ops.provider`, `ops.dataset`, `ops.dataset_provider`, `ops.job_run`, `ops.provider_request` (HT),
+  `ops.quality_check_result` (HT), `raw.payload` (HT), `obs.series`, `obs.observation` (HT). Downgrade refuses if any table has data.
+- **API**: `GET /api/v1/providers/health`, `GET /api/v1/ingestion/runs` (operational, no market values).
+- **Mock providers** (tests only): two deliberately different formats + scriptable servers (timeout, 429, 5xx, malformed body).
+- **Docker**: `/data/raw` archive directory owned by the app user; `rawarchive` volume and `CFI_RAW_ARCHIVE_DIR` in Compose.
+- **Tests**: integration tests now run in a separate `<db>_test` database created by the test suite (never the development data).
+- Docs: ARCHITECTURE §5.3/§5.4 (implemented behaviour table), DATA_DICTIONARY §4, DECISIONS ADR-0046, CLAUDE.md §C3, TODO.
+
+**Tests run (Claude's workspace: PostgreSQL 17.11 + TimescaleDB 2.30.1, Redis 8.8.3, Python 3.12)**
+
+| Check | Result |
+|---|---|
+| `uv run pytest` (unit + integration) | 106 passed (run twice, same result) |
+| `uv run pytest` without database/Redis | 85 passed, 21 skipped (integration tests skip) |
+| `uv run ruff format --check .` / `uv run ruff check .` | clean |
+| `uv run mypy` (strict, 58 files) | no issues |
+| `docker compose config` with `.env.example` | valid |
+
+Required test cases → where: successful ingestion, timeout, retry, rate limit, malformed response, duplicate record, missing value,
+stale value, conflicting provider values → `tests/integration/test_ingestion.py` (end to end through the database) and
+`tests/unit/test_http_client.py`, `test_detection.py`, `test_normalisation.py`.
+
+**Known limitations**
+- Nothing runs ingestion on a schedule yet (Celery workers deferred); the engine is invoked from code/tests only.
+- Rate limiter and circuit breaker are in-process; a shared (Redis) version is needed once several workers run.
+- No real provider adapters (by instruction); mock providers are test-only and never registered in the app.
+- Docker images were not rebuilt in Claude's workspace (Docker Hub unreachable there); the Windows Docker check is pending.
+
+**Git commit:** pending — user to commit as `[P4] data ingestion engine`.

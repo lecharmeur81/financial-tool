@@ -53,6 +53,7 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 | 0043 | Charting libraries | Accepted | 2026-09-23 |
 | 0044 | Numeric precision for high-volume data | **Proposed** | 2026-09-23 |
 | 0045 | Phase 3 foundation implementation choices | Accepted | 2026-09-23 |
+| 0046 | Phase 4 ingestion engine implementation choices | Accepted | 2026-09-23 |
 
 ---
 
@@ -781,3 +782,37 @@ drives); keeping `httpx` with a suppressed deprecation warning.
 **Trade-offs.** No hot reload inside containers; developers who want it run the API/frontend locally against the Compose services.
 
 **Future implications.** Version pins must be updated deliberately; the CI workflow runs the same checks once a Git remote exists.
+
+---
+
+## ADR-0046 — Phase 4 ingestion engine implementation choices
+**Status:** Accepted (implemented in Phase 4; within approved ADR-0017, 0018, 0019, 0021, 0022, 0031)
+
+**Decision.**
+- **Adapter contract:** adapters only describe requests (`first_request` / `next_request`, which also carries pagination), validate
+  payloads (`parse`, raising `SchemaMismatchError`) and map records (`normalise`). All HTTP behaviour lives in one shared client.
+- **HTTP library:** `httpx2` for runtime requests (the maintained successor Starlette now expects; same API as `httpx`).
+- **Rate limiter and circuit breaker are in-process** for now; they move to Redis when several workers ingest in parallel.
+- **One request log** (`ops.provider_request`, one row per attempt with its outcome) replaces the planned separate provider-health and
+  request-ledger tables; provider health is computed from it.
+- **Missing data is explicit rows:** a `null` from a provider, or an expected point that never arrives (for datasets marked
+  `expect_continuous`), is stored as `value NULL, quality_status missing` with a note. A later real value becomes revision 1.
+- **Conflicts are marked on the incoming row** (`quality_status conflicting`, note names the other provider and value); the earlier
+  provider's row is never modified (append-only). Both values are kept; no blending.
+- **Availability rule per dataset** sets `available_at` (provider time, end of period + delay, or event time + delay); a record whose
+  period had not closed at ingestion is rejected rather than stored as final.
+- **Integration tests use a separate `<db>_test` database** created and migrated by the test suite, so `docker compose exec api pytest`
+  never writes into the development database.
+- **Mock providers ship in the package** (`cfi/providers/mock.py`) for tests but are never registered in the running application.
+- **Deferred:** scheduling (Celery), shared limiter, backfill/reconcile/gap-fill job types, coverage table, database roles.
+
+**Reason.** Delivers every Phase 4 requirement with one pipeline and one client, without building the worker infrastructure early (R13).
+
+**Alternatives considered.** Separate health/ledger tables (more writes, same information); placeholder-free gap reporting (gaps only in
+findings — weaker, because readers of the data would not see the hole); overwriting the earlier provider's row to mark a conflict
+(violates append-only); using the development database for integration tests with cleanup (risk of deleting real data).
+
+**Trade-offs.** Per-record queries for series lookup and existing values are simple but not yet batched for very large pages; in-process
+limits do not coordinate across processes.
+
+**Future implications.** Workers can call `IngestionEngine.ingest` unchanged; real adapters only implement the four adapter methods.

@@ -1,0 +1,178 @@
+"""SQLAlchemy Core table definitions mirroring the migrations (source of truth: migrations/)."""
+
+from __future__ import annotations
+
+from sqlalchemy import (
+    ARRAY,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Identity,
+    Integer,
+    MetaData,
+    Numeric,
+    Table,
+    Text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+
+metadata = MetaData()
+
+TS = DateTime(timezone=True)
+
+provider = Table(
+    "provider",
+    metadata,
+    Column("provider_id", Text, primary_key=True),
+    Column("display_name", Text, nullable=False),
+    Column("base_url", Text, nullable=False),
+    Column("auth_type", Text, nullable=False),
+    Column("original_source", Text, nullable=False),
+    Column("terms_verified", Boolean, nullable=False),
+    Column("notes", Text, nullable=False),
+    Column("updated_at", TS, nullable=False),
+    schema="ops",
+)
+
+dataset = Table(
+    "dataset",
+    metadata,
+    Column("dataset_id", Text, primary_key=True),
+    Column("metric", Text, nullable=False),
+    Column("unit", Text, nullable=False),
+    Column("period", Text, nullable=False),
+    Column("availability_rule", JSONB, nullable=False),
+    Column("freshness_limit_seconds", Integer, nullable=False),
+    Column("conflict_tolerance", Numeric, nullable=False),
+    Column("revisable", Boolean, nullable=False),
+    Column("expect_continuous", Boolean, nullable=False),
+    Column("description", Text, nullable=False),
+    Column("updated_at", TS, nullable=False),
+    schema="ops",
+)
+
+dataset_provider = Table(
+    "dataset_provider",
+    metadata,
+    Column("dataset_id", Text, primary_key=True),
+    Column("provider_id", Text, primary_key=True),
+    Column("priority", Integer, nullable=False),
+    Column("enabled", Boolean, nullable=False),
+    schema="ops",
+)
+
+job_run = Table(
+    "job_run",
+    metadata,
+    Column("job_run_id", BigInteger, Identity(always=True), primary_key=True),
+    Column("job_type", Text, nullable=False),
+    Column("dataset_id", Text, nullable=False),
+    Column("provider_id", Text, nullable=False),
+    Column("window_start", TS, nullable=False),
+    Column("window_end", TS, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("started_at", TS, nullable=False),
+    Column("finished_at", TS),
+    Column("pages", Integer, nullable=False),
+    Column("records_received", Integer, nullable=False),
+    Column("inserted", Integer, nullable=False),
+    Column("duplicates", Integer, nullable=False),
+    Column("revisions", Integer, nullable=False),
+    Column("missing", Integer, nullable=False),
+    Column("conflicts", Integer, nullable=False),
+    Column("rejected", Integer, nullable=False),
+    Column("stale", Boolean),
+    Column("error_code", Text),
+    Column("error_detail", Text),
+    Column("code_version", Text, nullable=False),
+    schema="ops",
+)
+
+provider_request = Table(
+    "provider_request",
+    metadata,
+    Column("request_id", BigInteger, Identity(always=True), primary_key=True),
+    Column("provider_id", Text, nullable=False),
+    Column("dataset_id", Text),
+    Column("job_run_id", BigInteger),
+    Column("endpoint", Text, nullable=False),
+    Column("attempt", Integer, nullable=False),
+    Column("started_at", TS, primary_key=True),
+    Column("latency_ms", Numeric, nullable=False),
+    Column("outcome", Text, nullable=False),
+    Column("http_status", Integer),
+    Column("error_class", Text),
+    schema="ops",
+)
+
+payload = Table(
+    "payload",
+    metadata,
+    Column("payload_id", BigInteger, Identity(always=True), primary_key=True),
+    Column("provider_id", Text, nullable=False),
+    Column("dataset_id", Text, nullable=False),
+    Column("job_run_id", BigInteger),
+    Column("endpoint", Text, nullable=False),
+    Column("request_params", JSONB, nullable=False),
+    Column("http_status", Integer, nullable=False),
+    Column("content_type", Text, nullable=False),
+    Column("received_at", TS, primary_key=True),
+    Column("content_hash", Text, nullable=False),
+    Column("archive_uri", Text, nullable=False),
+    Column("bytes", Integer, nullable=False),
+    Column("schema_ok", Boolean),
+    Column("schema_error", Text),
+    schema="raw",
+)
+
+series = Table(
+    "series",
+    metadata,
+    Column("series_id", BigInteger, Identity(always=True), primary_key=True),
+    Column("dataset_id", Text, nullable=False),
+    Column("metric", Text, nullable=False),
+    Column("asset", Text),
+    Column("subject_ref", Text, nullable=False),
+    Column("venue", Text),
+    Column("period", Text, nullable=False),
+    Column("unit", Text, nullable=False),
+    Column("created_at", TS, nullable=False),
+    schema="obs",
+)
+
+observation = Table(
+    "observation",
+    metadata,
+    Column("series_id", BigInteger, primary_key=True),
+    Column("event_time", TS, primary_key=True),
+    Column("available_at", TS, nullable=False),
+    Column("available_at_estimated", Boolean, nullable=False),
+    Column("ingested_at", TS, nullable=False),
+    Column("value", Numeric),
+    Column("source_provider", Text, primary_key=True),
+    Column("original_source", Text, nullable=False),
+    Column("raw_ref", BigInteger),
+    Column("revision", Integer, primary_key=True),
+    Column("pit_reliability", Text, nullable=False),
+    Column("quality_status", Text, nullable=False),
+    Column("quality_note", Text),
+    Column("confidence", Numeric),
+    Column("transformations", ARRAY(Text), nullable=False),
+    schema="obs",
+)
+
+quality_check_result = Table(
+    "quality_check_result",
+    metadata,
+    Column("check_id", BigInteger, Identity(always=True), primary_key=True),
+    Column("dataset_id", Text, nullable=False),
+    Column("series_id", BigInteger),
+    Column("provider_id", Text),
+    Column("job_run_id", BigInteger),
+    Column("check_name", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("details", JSONB, nullable=False),
+    Column("checked_at", TS, primary_key=True),
+    schema="ops",
+)

@@ -7,6 +7,7 @@ Connection URLs are ``SecretStr`` so they never appear in logs, reprs, or error 
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
@@ -46,6 +47,9 @@ class Settings(BaseSettings):
     health_check_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
 
     cors_origins: list[str] = Field(default_factory=list)
+
+    # Raw payload archive (L0, ADR-0019). Relative paths resolve from the working directory.
+    raw_archive_dir: Path = Path("data/raw")
 
     @field_validator("database_url")
     @classmethod

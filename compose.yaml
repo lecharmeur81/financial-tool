@@ -12,6 +12,7 @@ x-backend-env: &backend-env
   CFI_LOG_FORMAT: ${CFI_LOG_FORMAT:-json}
   CFI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:?set POSTGRES_DB in .env}
   CFI_REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
+  CFI_RAW_ARCHIVE_DIR: /data/raw
 
 x-backend-build: &backend-build
   context: ./backend
@@ -67,6 +68,8 @@ services:
     build: *backend-build
     image: cfi-backend:dev
     environment: *backend-env
+    volumes:
+      - rawarchive:/data/raw
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
@@ -110,3 +113,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  rawarchive:
