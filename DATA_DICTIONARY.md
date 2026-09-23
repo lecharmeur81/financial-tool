@@ -119,7 +119,8 @@ Every non-`unknown` assignment requires an `evidence_class`, `confidence` (0–1
 
 ## 4. Logical schema (planned — Phase 2 design)
 
-Tables are grouped by PostgreSQL schema (one per layer, ADR-0016). **HT** = TimescaleDB hypertable (time column in brackets).
+Tables are grouped by PostgreSQL schema (one per layer, ADR-0016). **Implemented so far (Phase 3, migration `0001`):** the nine
+schemas exist and are empty; no tables have been created yet. **HT** = TimescaleDB hypertable (time column in brackets).
 "Provenance" = the row-level fields of §2b. Write access per schema follows the DB roles in `ARCHITECTURE.md` §5.9.
 
 ### `ref` — reference data (bitemporal: `valid_from`/`valid_to` + `recorded_at`)

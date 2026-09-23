@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      db:
+        image: timescale/timescaledb:2.30.1-pg17
+        env:
+          POSTGRES_USER: cfi
+          # Throwaway credential for the CI service container only; not a real secret.
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: cfi
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cfi -d cfi"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:8.8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      CFI_DATABASE_URL: postgresql+psycopg://cfi:ci-only-password@localhost:5432/cfi
+      CFI_REDIS_URL: redis://localhost:6379/0
+      CFI_ENVIRONMENT: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.8.17"
+          enable-cache: true
+      - name: Install
+        run: uv sync --frozen
+      - name: Lint
+        run: uv run ruff check .
+      - name: Format check
+        run: uv run ruff format --check .
+      - name: Type check
+        run: uv run mypy
+      - name: Migrate
+        run: uv run alembic upgrade head
+      - name: Test (unit, API, integration)
+        run: uv run pytest
+
+  frontend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Format check
+        run: pnpm format:check
+      - name: Type check
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+
+  compose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate compose file
+        run: cp .env.example .env && docker compose config --quiet
+      - name: Build images
+        run: docker compose build

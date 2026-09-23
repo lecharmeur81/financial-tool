@@ -6,8 +6,9 @@
 
 ## Status
 
-**Phase 2 — Architecture** (design complete, awaiting approval). Documentation only.
-No application code exists yet. See [`PROGRESS.md`](PROGRESS.md).
+**Phase 3 — Foundation.** Development environment, backend and frontend skeletons, database migrations,
+health checks, tests, linting, and CI. **No market-data provider is connected yet** — pages are placeholders.
+See [`PROGRESS.md`](PROGRESS.md).
 
 ## What it is
 
@@ -70,9 +71,40 @@ AI-assisted analysis (Claude)
 | [`TODO.md`](TODO.md) | what comes next and what is undecided |
 | [`CLAUDE.md`](CLAUDE.md) | the rules Claude follows when working here |
 
-## Getting started
+## Getting started (Windows, macOS, or Linux)
 
-Not applicable yet. Setup, installation, and run instructions will be added in the **infrastructure phase**.
+**Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (on Windows with the WSL 2 backend) and Git.
+
+1. Open a terminal in the project folder (e.g. `E:\FINANCIAL TOOL`).
+2. Create your local settings file and set passwords (letters and digits only):
+   ```
+   copy .env.example .env        (Windows)     |     cp .env.example .env   (macOS/Linux)
+   ```
+   Edit `.env` and replace both `replace-with-a-random-value` entries. In PowerShell,
+   `[guid]::NewGuid().ToString('N')` prints a suitable random value.
+3. Start everything:
+   ```
+   docker compose up --build
+   ```
+   First start downloads images and builds; later starts are fast.
+4. Open:
+   - Frontend: http://localhost:3000 (Settings shows live system status)
+   - API docs: http://localhost:8000/api/docs
+   - Readiness: http://localhost:8000/health/ready
+
+Stop with `Ctrl+C`, or `docker compose down` (data is kept in Docker volumes;
+`docker compose down -v` **deletes** the database volume).
+
+**Run the checks inside Docker**
+
+| Check | Command |
+|---|---|
+| Backend tests (incl. integration against the real DB and Redis) | `docker compose exec api pytest` |
+| Backend lint / format / types | `docker compose exec api ruff check .` · `docker compose exec api ruff format --check .` · `docker compose exec api mypy` |
+| Frontend | run locally with pnpm — see `frontend/README.md` |
+
+Service layout: `db` (PostgreSQL 17 + TimescaleDB 2.30.1) · `redis` (Redis 8.8) · `migrate` (runs Alembic once) ·
+`api` (FastAPI) · `frontend` (Next.js). Details: `backend/README.md`, `frontend/README.md`.
 
 ## Disclaimer
 

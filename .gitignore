@@ -31,6 +31,14 @@ data/
 logs/
 *.log
 
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+coverage/
+
 # --- Notebooks checkpoints ---
 .ipynb_checkpoints/
 

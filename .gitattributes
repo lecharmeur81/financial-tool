@@ -8,6 +8,8 @@
 
 # Binary
 *.png binary
+*.ico binary
+*.woff2 binary
 *.jpg binary
 *.pdf binary
 *.parquet binary

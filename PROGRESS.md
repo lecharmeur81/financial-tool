@@ -2,8 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 2 — Architecture → ✅ review complete, **awaiting approval** (checklist in `TODO.md`)
-**Next phase:** 3 — to be defined by the user (infrastructure not yet placed)
+**Current phase:** 3 — Foundation → ✅ complete and verified on the user's Windows machine (2026-09-23)
+**Next phase:** 4 — to be defined by the user (do not start automatically)
 
 ---
 
@@ -13,8 +13,8 @@ Single source of truth for what has been done. Updated at the end of every task.
 |---|---|---|
 | 0 | Project foundation | ✅ Complete |
 | 1 | Master engineering rules | ✅ Complete |
-| 2 | Architecture | ✅ Review complete — awaiting approval |
-| 3 | Data ingestion | ⏳ Not started |
+| 2 | Architecture | ✅ Complete (checklist Part A approved 2026-09-23) |
+| 3 | Foundation (infrastructure) | ✅ Complete — verified on Windows |
 | 4 | Market data | ⏳ Not started |
 | 5 | Institutional data | ⏳ Not started |
 | 6 | Whale data | ⏳ Not started |
@@ -117,4 +117,86 @@ No software tests apply (no code).
 **Known issues:** All Phase 2 ADRs are *Proposed* until the user approves the checklist. Storage volumes, retention, and numeric-type
 performance are estimates to be benchmarked. Provider capabilities remain unverified.
 
-**Git commit:** pending — user to commit as `[P2] architecture review`.
+**Git commit:** `ca0bd80` — `[P2] architecture review` (created by the user). The Phase 1 closing edits were included in this
+commit; no separate `[P1] close phase 1` commit exists.
+
+### 2026-09-23 — Phase 3: Foundation
+
+**What changed**
+- **Development environment:** `compose.yaml` (db: TimescaleDB 2.30.1/PG17, redis 8.8, one-shot `migrate`, `api`, `frontend`; health
+  checks; ports bound to 127.0.0.1; named volumes), `.env.example`, Dockerfiles in `backend/` and `frontend/`.
+- **Backend** (`backend/`, Python 3.12, uv): FastAPI app factory; `CFI_` configuration with secret URLs; structured JSON logging
+  with request IDs and secret redaction; error taxonomy (ADR-0030) with RFC 9457 problem-details responses; `/health/live`,
+  `/health/ready` (DB + TimescaleDB version + migration revision + Redis), `/api/v1/meta`; async SQLAlchemy/psycopg engine; Redis
+  client; canonical domain enums and `CanonicalObservation` (R3 invariants); provider adapter interface, registry, and a stub that
+  refuses every call (no real providers).
+- **Migrations:** Alembic, revision `0001` — TimescaleDB extension and the nine layer schemas; `RESTRICT` downgrade.
+- **Frontend** (`frontend/`, Next.js 16.3.6, React 19.2, TypeScript strict): app shell with navigation; placeholders for
+  Dashboard, Market, Flows, Derivatives, Liquidity, Analytics, Alerts, Settings (no numbers shown); Settings shows live API/DB/Redis
+  status; `/healthz`; baseline security headers; standalone output for Docker.
+- **Quality tooling:** ruff (lint + format), mypy strict (src, tests, migrations), pytest (warnings are errors); ESLint, Prettier,
+  `next typegen` + `tsc`, Vitest + Testing Library.
+- **CI:** `.github/workflows/ci.yml` — backend (lint, format, types, migrate, all tests with TimescaleDB + Redis service containers),
+  frontend (lint, format, types, tests, build), compose (validate + build images).
+- Docs: README (getting started), CLAUDE.md §C3/§C5, ARCHITECTURE §8–9, DECISIONS ADR-0045, DATA_DICTIONARY §4 note, TODO.
+
+**Tests run (in Claude's cloud workspace)**
+| Check | Result |
+|---|---|
+| Backend `ruff check` / `ruff format --check` | pass / pass (41 files) |
+| Backend `mypy --strict` (40 files incl. tests, migrations) | pass |
+| Backend `pytest` — unit + API + integration | **56 passed** (51 unit/API, 5 integration) |
+| Alembic `upgrade head` → `downgrade base` → `upgrade head` | pass |
+| Downgrade safety: schema holding a table → downgrade refused, row kept | pass |
+| Live API server: live/ready/meta/404 problem JSON; readiness 503 when Redis stopped, 200 after restart; no password in logs | pass |
+| Frontend `pnpm lint` / `format:check` / `typecheck` | pass / pass / pass |
+| Frontend `pnpm test` (Vitest) | **24 passed** (5 files) |
+| Frontend `pnpm build` + standalone server: all 8 pages 200, unknown page 404, `/healthz` 200, Settings shows live readiness | pass |
+| Dockerfile steps replayed in clean folders (backend dev + runtime targets; frontend deps + build) | pass |
+| `docker compose config` (with `.env.example`); refuses to run without `.env` | pass |
+| `actionlint` on the CI workflow | pass |
+
+**Known limitations**
+- **Docker Compose was not started here:** Docker Hub is blocked from Claude's workspace by policy, so images could not be pulled or
+  built. Every Dockerfile step was replayed outside Docker instead. The first real `docker compose up --build` is on your machine.
+- ~~Integration tests ran against PostgreSQL 16 + Redis 7.0 instead of the Compose versions~~ — resolved in the follow-up below
+  (re-run on PostgreSQL 17.11 + TimescaleDB 2.30.1 + Redis 8.8.3).
+- CI workflow not executed (no Git remote); validated with actionlint only. **`.github/workflows/ci.yml` could not be written
+  to the drive** (the remote file bridge protects `.github/`); it was sent to the user to place manually.
+- Not in Phase 3 scope: Celery workers, authentication, database roles, tables beyond schemas, real providers.
+- ~~The Phase 2 approval checklist is still open~~ — Part A approved and B1–B3 answered in the follow-up below.
+
+**Git commit:** pending — user to commit as `[P3] application foundation`.
+
+### 2026-09-23 — Phase 3 follow-up: known issues
+
+**What changed**
+- **Versions now match Compose exactly.** Built PostgreSQL 17.11, TimescaleDB 2.30.1 (for PG17) and Redis 8.8.3 from official source and
+  re-ran everything: migrations up → down → up; downgrade refused when a schema holds data (row kept); **56/56 backend tests** (incl.
+  5 integration); ruff, format, mypy strict; live API readiness reporting `timescaledb_version 2.30.1`, `redis_version 8.8.3`; frontend
+  Settings page showing both live. No password in logs.
+- **Approvals recorded:** checklist Part A (A1–A12) approved → ADR-0014, 0015, 0016, 0017, 0018, 0019, 0023, 0024, 0026, 0027, 0032,
+  0034, 0043 now **Accepted**. B1 = BTC, ETH + major altcoins (list to confirm); B2 = $0 data budget; B3 = $20/month Claude ceiling
+  (recorded in ADR-0038). B4–B8 remain on their defaults.
+- **CI file:** writing to `.github\` is refused by a fixed rule in the Claude app's file access (not Windows permissions; retried after the
+  user changed folder permissions — still refused). The user's copy at the project root was verified byte-identical; the user moves it.
+
+**Still open by design (not defects):** Celery workers, authentication, database roles and data tables are approved but belong to the
+phases that need them (R13: do not build unrequested features). The Docker Compose run on Windows is still to be confirmed by the user.
+
+**Git commit:** pending — user to commit (together with Phase 3) as `[P3] application foundation`.
+
+### 2026-09-23 — Phase 3: first Docker Compose run on Windows (user's machine)
+
+- `docker compose up --build`: all images pulled/built; `db` (PostgreSQL 17.11 + TimescaleDB), `redis` 8.8.3 healthy; `migrate` exited 0
+  (revision 0001); `api` healthy; `frontend` ready on :3000.
+- `docker compose exec api pytest`: **56 collected, all 56 passed** (incl. 5 integration against the real Compose services), then the
+  run crashed while writing pytest's cache: `/app` was root-owned and the container runs as the unprivileged `cfi` user; with warnings
+  treated as errors, the cache warning failed the run. Claude's earlier Docker simulation ran as root, which hid this.
+- **Fix:** `backend/Dockerfile` dev target now gives `cfi` ownership of the `/app` directory only (source files stay root-owned,
+  read-only). Reproduced the failure as an unprivileged user, then verified the fix: pytest exit 0, ruff and mypy caches work,
+  source files still not writable by `cfi`.
+- **Re-run after the fix (user's machine):** `docker compose exec api pytest` → **56 passed in 1.08s**, no errors. Settings page:
+  "All systems ready" — database OK (timescaledb_version 2.30.1, schema_revision 0001, session_timezone UTC), Redis OK (8.8.3).
+- `.github/workflows/ci.yml` placed by the user (2,592 bytes, identical to the original).
+- **Phase 3 complete.** Git commit: pending — user to commit as `[P3] application foundation`.

@@ -1,0 +1,255 @@
+/* Capital Flow Intelligence — base styles. Colours are tokens so light/dark themes stay consistent. */
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --border: #dfe3e8;
+  --text: #16191d;
+  --muted: #5f6b7a;
+  --accent: #1f5fbf;
+  --accent-soft: #e6eefb;
+  --ok: #17803d;
+  --ok-soft: #e3f4e8;
+  --error: #b42318;
+  --error-soft: #fdecea;
+  --neutral-soft: #eef0f3;
+  --radius: 8px;
+  --sidebar-width: 232px;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216;
+    --surface: #161a20;
+    --border: #2a313a;
+    --text: #e6e9ed;
+    --muted: #97a3b2;
+    --accent: #6ea2ff;
+    --accent-soft: #1b2738;
+    --ok: #5cc98a;
+    --ok-soft: #13291d;
+    --error: #ff8a80;
+    --error-soft: #331715;
+    --neutral-soft: #222831;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+}
+
+.brand-mark {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+
+.brand-name {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-link {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.nav-link:hover {
+  background: var(--neutral-soft);
+  color: var(--text);
+}
+
+.nav-link.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.nav-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sidebar-footnote {
+  margin-top: auto;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 8px;
+}
+
+.content {
+  padding: 32px;
+  max-width: 1200px;
+  width: 100%;
+}
+
+.page-header h1 {
+  margin: 0 0 6px;
+  font-size: 24px;
+}
+
+.page-description {
+  margin: 0 0 20px;
+  color: var(--muted);
+  max-width: 70ch;
+}
+
+.placeholder,
+.status-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.status-card h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.badge-neutral {
+  background: var(--neutral-soft);
+  color: var(--muted);
+}
+
+.badge-ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.badge-error {
+  background: var(--error-soft);
+  color: var(--error);
+}
+
+.status-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin: 12px 0;
+}
+
+.status-table th,
+.status-table td {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.status-table thead th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar ul {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .sidebar-footnote {
+    margin-top: 0;
+  }
+
+  .content {
+    padding: 20px 16px;
+  }
+
+  .status-table {
+    display: block;
+    overflow-x: auto;
+  }
+}

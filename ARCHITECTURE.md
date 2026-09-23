@@ -578,13 +578,14 @@ explained by late data or revisions; unexpected ones are bugs). Dependency lockf
 
 ---
 
-## 8. Repository layout (proposed, not created) — ADR-0015
+## 8. Repository layout — ADR-0015, ADR-0045
 
 ```
 FINANCIAL TOOL/
 ├── CLAUDE.md  README.md  ARCHITECTURE.md  DATA_DICTIONARY.md  DECISIONS.md  PROGRESS.md  TODO.md
-├── backend/
-│   ├── pyproject.toml  uv.lock
+├── compose.yaml  .env.example  .github/workflows/ci.yml          (created in Phase 3)
+├── backend/                                                        (created in Phase 3; Dockerfile here)
+│   ├── Dockerfile  pyproject.toml  uv.lock  alembic.ini
 │   ├── src/cfi/
 │   │   ├── core/          # config, time (UTC, calendars), errors, logging, ids
 │   │   ├── domain/        # canonical models (no provider code)
@@ -600,13 +601,10 @@ FINANCIAL TOOL/
 │   │   └── workers/       # Celery app, queues, schedules
 │   ├── migrations/        # Alembic
 │   └── tests/             # unit/ integration/ db/ api/ quant/ (historical fixtures) leakage/ ai_eval/
-├── frontend/
-│   ├── package.json  pnpm-lock.yaml
+├── frontend/                                                       (created in Phase 3; Dockerfile here)
+│   ├── Dockerfile  package.json  pnpm-lock.yaml
 │   └── src/ (app/, components/, charts/, lib/api-client/ generated)
-├── infra/
-│   ├── docker/            # Dockerfiles
-│   ├── compose/           # docker-compose.yml (+ overrides)
-│   └── observability/     # Prometheus, Grafana dashboards
+├── infra/                 # not yet created — observability config, production deployment (later)
 └── docs/                  # extended docs if needed
 ```
 
@@ -614,9 +612,11 @@ FINANCIAL TOOL/
 
 ## 9. Deployment topology — ADR-0014, ADR-0037
 
-**Development (Windows + Docker Desktop with WSL2):** one Compose project:
-`postgres` (TimescaleDB image) · `redis` · `api` · `worker` (one per queue group) · `beat` · `frontend` · optional `prometheus`/`grafana`.
-Named Docker volumes for data (not bind-mounted from `E:`). Source code bind-mounted for hot reload.
+**Development (Windows + Docker Desktop with WSL2):** one Compose project (`compose.yaml`, implemented in Phase 3):
+`db` (timescale/timescaledb:2.30.1-pg17) · `redis` (redis:8.8-alpine) · `migrate` (Alembic, runs once) · `api` · `frontend`.
+Planned later: `worker` (one per queue group) · `beat` · optional `prometheus`/`grafana`.
+Named Docker volumes for data (not bind-mounted from `E:`). Images are built from source (no bind mounts in Phase 3);
+for hot reload, run the API or frontend locally with uv/pnpm against the Compose database and Redis.
 Note: bind mounts from Windows drives into Linux containers are slow; placing the working copy inside the WSL2 filesystem is faster — needs a decision.
 
 **First production (later phase):** a single Linux host (VPS) running the same Compose project behind a reverse proxy with TLS,
@@ -627,12 +627,12 @@ The hosting location must allow access to the chosen exchange APIs (jurisdiction
 
 ## 10. Component-to-phase map
 
-Phases 0–2 are defined by the user's guide; later phase numbers in `CLAUDE.md` §C3 are provisional until the user issues each phase.
+Phases 0–3 are defined by the user's guide; later phase numbers in `CLAUDE.md` §C3 are provisional until the user issues each phase.
 
 | Component | Planned phase (provisional) |
 |---|---|
-| Infrastructure (Compose, DB, migrations baseline, CI, tooling) | unscheduled — to be placed by the user |
-| Ingestion framework, provider client layer, dataset registry, quality framework | 3 |
+| Infrastructure (Compose, DB, migrations baseline, CI, tooling) | 3 — done |
+| Ingestion framework, provider client layer, dataset registry, quality framework | unscheduled — to be placed by the user (before 4) |
 | Market, institutional, whale, derivatives, liquidity, retail, macro, market-structure datasets and metrics | 4–11 |
 | Divergence, regime, similarity, backtesting, red-team, anomaly, rotation | 12–18 |
 | AI analyst (snapshot, prompts, validator, evals) | 19 |

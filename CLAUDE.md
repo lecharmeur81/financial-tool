@@ -320,7 +320,7 @@ Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 | 0 | Project foundation | 14 | Historical similarity |
 | 1 | Master engineering rules | 15 | Backtesting |
 | 2 | Architecture | 16 | Quant red-team |
-| 3 | Data ingestion framework | 17 | Anomaly engine |
+| 3 | Foundation (infrastructure) | 17 | Anomaly engine |
 | 4 | Market data | 18 | Capital rotation |
 | 5 | Institutional data | 19 | Claude AI Analyst |
 | 6 | Whale data | 20 | Daily intelligence |
@@ -332,9 +332,9 @@ Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 | 12 | Divergence engine | 26 | Production |
 | 13 | Regime engine | 27 | Real-time intelligence |
 
-Phases 0–2 follow the user's guide: 0 foundation, 1 master engineering rules (Part B), 2 architecture.
-Phase numbers from 3 onward are **provisional** until the user issues each phase. **Infrastructure** (Compose, database,
-migrations baseline, tooling) is not yet placed and must precede any ingestion code (see `TODO.md`).
+Phases 0–3 follow the user's guide: 0 project foundation, 1 master engineering rules (Part B), 2 architecture,
+3 application foundation (infrastructure). Phase numbers from 4 onward are **provisional** until the user issues each phase.
+The **data ingestion framework** (formerly listed as 3) is not yet placed and must precede the dataset phases (see `TODO.md`).
 
 Current phase and status: see `PROGRESS.md`.
 
@@ -357,14 +357,24 @@ Current phase and status: see `PROGRESS.md`.
   into `.git` or run Git there. In that case, step 5 (Git status) and step 15 (commit) are done by giving
   the user the exact commands to run and recording the resulting hash in `PROGRESS.md`.
 - After copying files to the user's machine, Claude reads them back and compares them before reporting success.
-- Tooling commands (test, lint, type check, run) will be listed here once chosen in Phase 2:
+- Tooling commands (Phase 3). Backend from `backend/` with uv; frontend from `frontend/` with pnpm 10.28:
 
 ```
-# test:        (to be defined in Phase 2)
-# lint:        (to be defined in Phase 2)
-# type check:  (to be defined in Phase 2)
-# run:         (to be defined in Phase 2)
+# run everything:   docker compose up --build            (needs .env from .env.example)
+# backend test:     uv run pytest                        (integration tests need CFI_DATABASE_URL, CFI_REDIS_URL)
+# backend lint:     uv run ruff check .   &&   uv run ruff format --check .
+# backend types:    uv run mypy                          (strict; src, tests, migrations)
+# migrations:       uv run alembic upgrade head          (new: uv run alembic revision -m "...")
+# frontend test:    pnpm test
+# frontend lint:    pnpm lint   &&   pnpm format:check
+# frontend types:   pnpm typecheck                       (next typegen && tsc --noEmit)
+# frontend build:   pnpm build
+# in Docker:        docker compose exec api pytest | ruff check . | mypy
 ```
+
+- This Next.js version (16.x) differs from older versions: read `frontend/node_modules/next/dist/docs/`
+  before changing frontend code (see `frontend/AGENTS.md`).
+- Pytest treats warnings as errors; only explicitly documented third-party warnings are ignored (`backend/pyproject.toml`).
 
 ## C6. Documentation map
 

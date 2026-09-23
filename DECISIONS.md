@@ -21,27 +21,27 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 | 0011 | Git workflow and LF line endings | Accepted | 2026-09-23 |
 | 0012 | Numbered phases (0–27) instead of letters | Accepted | 2026-09-23 |
 | 0013 | Master engineering rules (CLAUDE.md R1–R13) | Accepted | 2026-09-23 |
-| 0014 | Technology stack | **Proposed** | 2026-09-23 |
-| 0015 | Service boundaries and monorepo | **Proposed** | 2026-09-23 |
-| 0016 | PostgreSQL + TimescaleDB as the single primary store | **Proposed** | 2026-09-23 |
-| 0017 | Hybrid storage model with a series registry | **Proposed** | 2026-09-23 |
-| 0018 | Bitemporal knowledge model | **Proposed** | 2026-09-23 |
-| 0019 | Raw payload archive in object storage | **Proposed** | 2026-09-23 |
+| 0014 | Technology stack | Accepted | 2026-09-23 |
+| 0015 | Service boundaries and monorepo | Accepted | 2026-09-23 |
+| 0016 | PostgreSQL + TimescaleDB as the single primary store | Accepted | 2026-09-23 |
+| 0017 | Hybrid storage model with a series registry | Accepted | 2026-09-23 |
+| 0018 | Bitemporal knowledge model | Accepted | 2026-09-23 |
+| 0019 | Raw payload archive in object storage | Accepted | 2026-09-23 |
 | 0020 | Time-series strategy | **Proposed** | 2026-09-23 |
 | 0021 | Ingestion pipeline and dataset registry | **Proposed** | 2026-09-23 |
 | 0022 | Provider adapters, health, fallback, and rate limits | **Proposed** | 2026-09-23 |
-| 0023 | Background processing with Celery | **Proposed** | 2026-09-23 |
-| 0024 | Redis role and licence | **Proposed** | 2026-09-23 |
+| 0023 | Background processing with Celery | Accepted | 2026-09-23 |
+| 0024 | Redis role and licence | Accepted | 2026-09-23 |
 | 0025 | API design | **Proposed** | 2026-09-23 |
-| 0026 | Authentication | **Proposed** | 2026-09-23 |
-| 0027 | Authorization and database-role enforcement | **Proposed** | 2026-09-23 |
+| 0026 | Authentication | Accepted | 2026-09-23 |
+| 0027 | Authorization and database-role enforcement | Accepted | 2026-09-23 |
 | 0028 | Security baseline | **Proposed** | 2026-09-23 |
 | 0029 | Observability and logging | **Proposed** | 2026-09-23 |
 | 0030 | Error handling taxonomy | **Proposed** | 2026-09-23 |
 | 0031 | Data quality framework | **Proposed** | 2026-09-23 |
-| 0032 | Historical data and point-in-time reliability | **Proposed** | 2026-09-23 |
+| 0032 | Historical data and point-in-time reliability | Accepted | 2026-09-23 |
 | 0033 | Backtesting architecture | **Proposed** | 2026-09-23 |
-| 0034 | AI architecture and grounding | **Proposed** | 2026-09-23 |
+| 0034 | AI architecture and grounding | Accepted | 2026-09-23 |
 | 0035 | Alert architecture | **Proposed** | 2026-09-23 |
 | 0036 | Decision journal and paper trading | **Proposed** | 2026-09-23 |
 | 0037 | Scalability path and real-time processing | **Proposed** | 2026-09-23 |
@@ -50,8 +50,9 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 | 0040 | Bias and leakage controls | **Proposed** | 2026-09-23 |
 | 0041 | Reproducibility and versioning | **Proposed** | 2026-09-23 |
 | 0042 | Disaster recovery | **Proposed** | 2026-09-23 |
-| 0043 | Charting libraries | **Proposed** | 2026-09-23 |
+| 0043 | Charting libraries | Accepted | 2026-09-23 |
 | 0044 | Numeric precision for high-volume data | **Proposed** | 2026-09-23 |
+| 0045 | Phase 3 foundation implementation choices | Accepted | 2026-09-23 |
 
 ---
 
@@ -200,7 +201,7 @@ Format for each: **Decision · Reason · Alternatives considered · Trade-offs �
 ---
 
 ## ADR-0014 — Technology stack
-**Status:** Proposed (stack proposed by the user; supersedes ADR-0008)
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A1). Was: Proposed (stack proposed by the user; supersedes ADR-0008)
 
 **Decision.** Frontend: Next.js (App Router), React, TypeScript (strict). Backend: Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy 2.x, psycopg 3,
 Alembic. Numerics: NumPy, pandas and/or Polars, SciPy, statsmodels. Database: PostgreSQL + TimescaleDB. Cache/broker: Redis.
@@ -219,7 +220,7 @@ time-series APIs); Streamlit/Dash-only frontend (fast to build, limited for a pr
 ---
 
 ## ADR-0015 — Service boundaries and monorepo
-**Status:** Proposed
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A2). Was: Proposed
 
 **Decision.** One Git repository with `backend/`, `frontend/`, `infra/`. FastAPI is the **only** gateway to data; Next.js is presentation-only
 (no direct DB access, no Claude calls, no business logic). Workers and API share the backend codebase but run as separate processes.
@@ -237,7 +238,7 @@ migrations, and UI changes in the same commit.
 ---
 
 ## ADR-0016 — PostgreSQL + TimescaleDB as the single primary store
-**Status:** Proposed
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A3). Was: Proposed
 
 **Decision.** Self-hosted PostgreSQL with the TimescaleDB extension holds all layers, organised into schemas `ref`, `raw`, `obs`, `calc`, `sig`,
 `regime`, `ai`, `usr`, `ops`.
@@ -258,7 +259,7 @@ but this must be re-checked with the licence text at that time. A managed Timesc
 ---
 
 ## ADR-0017 — Hybrid storage model with a series registry
-**Status:** Proposed
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A4). Was: Proposed
 
 **Decision.** `obs.series` registers every observed series (metric, subject, venue, period, unit). High-volume multi-field data uses **typed
 hypertables** (`market_bar`, `funding_rate`, `open_interest`, `liquidation_event`, `orderbook_depth`, `option_quote`, `onchain_transfer`);
@@ -278,7 +279,7 @@ one typed table per dataset (clear, but table sprawl and repeated code); documen
 ---
 
 ## ADR-0018 — Bitemporal knowledge model
-**Status:** Proposed (implements accepted ADR-0003)
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A5). Was: Proposed (implements accepted ADR-0003)
 
 **Decision.** Every L1 row has `event_time` (when it happened), `available_at` (when publicly knowable), `ingested_at` (when we stored it), and
 `revision`. Reference data and entity labels have valid time and record time. Queries support two cut-offs: `as_of` on `available_at`
@@ -297,7 +298,7 @@ Without both, revisions and late backfills silently change history.
 ---
 
 ## ADR-0019 — Raw payload archive in object storage
-**Status:** Proposed
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A6). Was: Proposed
 
 **Decision.** Every provider response body is written once, compressed, to an archive (local filesystem in development; S3-compatible object
 storage with versioning in production), addressed by content hash. `raw.payload` in Postgres indexes it (provider, endpoint, params, received_at,
@@ -370,7 +371,7 @@ single-provider dependency and opaque provenance).
 ---
 
 ## ADR-0023 — Background processing with Celery
-**Status:** Proposed (Celery named by the user; alternatives listed for approval)
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A7). Was: Proposed (Celery named by the user; alternatives listed for approval)
 
 **Decision.** Celery workers with a Redis broker; Celery beat for schedules; queues `ingest_fast`, `ingest`, `backfill`, `compute`, `ai`,
 `alerts`, `maintenance`; idempotent tasks with late acknowledgement, time limits, and transient-only retries; `ops.job_run` in Postgres as
@@ -389,7 +390,7 @@ heavier to operate); Dagster/Prefect (data orchestration with lineage UI, heavie
 ---
 
 ## ADR-0024 — Redis role and licence
-**Status:** Proposed
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A8). Was: Proposed
 
 **Decision.** Redis serves as Celery broker, cache, shared rate-limit state, session store, pub/sub for live updates, and (later) Streams for
 real-time ingestion. It is never a source of truth. Cache invalidation is by data-version counters plus short TTLs.
@@ -425,7 +426,7 @@ awkward for browsers); WebSockets for all live data (two-way, more complex than 
 ---
 
 ## ADR-0026 — Authentication
-**Status:** Proposed
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A9). Was: Proposed
 
 **Decision.** FastAPI-owned accounts; Argon2id password hashing; mandatory TOTP two-factor for owner/admin; server-side sessions in an
 `HttpOnly`, `Secure`, `SameSite=Lax` cookie with CSRF protection; frontend and API under one site via a reverse proxy; scoped, expiring,
@@ -444,7 +445,7 @@ full-featured, heavy for one user; Auth.js in Next.js — puts auth in the prese
 ---
 
 ## ADR-0027 — Authorization and database-role enforcement
-**Status:** Proposed
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A10). Was: Proposed
 
 **Decision.** Application roles `owner`, `analyst`, `viewer`; per-user ownership of user-layer rows; separate Postgres roles per service
 (`cfi_ingest`, `cfi_compute`, `cfi_ai`, `cfi_alerts`, `cfi_api`, `cfi_readonly`, `cfi_migrator`) with grants that mirror the layer rule.
@@ -528,7 +529,7 @@ continuity) run after every ingest; results stored historically; statuses propag
 ---
 
 ## ADR-0032 — Historical data and point-in-time reliability
-**Status:** Proposed
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A5). Was: Proposed
 
 **Decision.** Record history start per dataset; tag rows with `pit_reliability` (`native`, `vendor_pit`, `backfilled_latest`); keep our own vintages of
 sources that overwrite history; resumable, low-priority backfills; research extracts only through the point-in-time loader.
@@ -562,7 +563,7 @@ aging); NautilusTrader (high-performance event-driven, larger learning curve). A
 ---
 
 ## ADR-0034 — AI architecture and grounding
-**Status:** Proposed (models and budgets need approval)
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A11). Was: Proposed (models and budgets need approval)
 
 **Decision.** Snapshot builder → immutable snapshot with field IDs, explicit missing entries and conflicts → versioned prompt → Claude API
 (server-side `ai` workers only; structured JSON output with the nine R6 sections and evidence tags) → deterministic validator → store/display.
@@ -630,7 +631,7 @@ batched writer → incremental computation → pub/sub → SSE. No Kafka until R
 ---
 
 ## ADR-0038 — Cost control
-**Status:** Proposed (budgets need approval)
+**Status:** Proposed — budgets set by the user on 2026-09-23: data providers **$0/month** (free sources first), Claude API **$20/month** hard ceiling (AI pauses with a notice when reached).
 
 **Decision.** Per-provider budgets and a request ledger; Claude daily/monthly ceilings enforced in code, model tiering, caching, batch processing;
 compression and retention tiers; debounced recomputation and off-peak backfills; single-host deployment until load requires more.
@@ -715,7 +716,7 @@ scheduled restore drills.
 ---
 
 ## ADR-0043 — Charting libraries
-**Status:** Proposed
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A12). Was: Proposed
 
 **Decision.** TradingView Lightweight Charts for price and time-series charts (candles, lines, histograms with overlays); Apache ECharts for
 analytical visuals (heatmaps, correlation matrices, distributions, flow/rotation diagrams, gauges). Both wrapped in our own chart components
@@ -747,3 +748,36 @@ families (minute bars, order-book depth, trades) using `NUMERIC` vs. `double pre
 **Trade-offs.** Two numeric conventions if the benchmark justifies it.
 
 **Future implications.** Decision recorded with benchmark numbers before large-scale ingestion starts.
+
+---
+
+## ADR-0045 — Phase 3 foundation implementation choices
+**Status:** Accepted (implemented in Phase 3; checklist Part A approved by the user on 2026-09-23)
+
+**Decision.**
+- Implemented on the Phase 2 recommended defaults for A1 (stack), A2 (monorepo; FastAPI sole data gateway), A3 (self-hosted
+  TimescaleDB) and A8 (Redis 8). Not yet exercised: A4–A7, A9–A12 (storage tables, raw archive, Celery, auth, DB roles, AI, charts) — all approved on
+  2026-09-23 and to be implemented in the phases that need them.
+- Pinned versions: Python 3.12 · FastAPI 0.141 · SQLAlchemy 2.0 (async, psycopg 3.3) · Alembic 1.20 · redis-py 8.1 · structlog 26.1 ·
+  pytest 9.1 · mypy 2.3 (strict) · ruff 0.16 · uv 0.8.17 · Next.js 16.3.6 · React 19.2 · TypeScript 5.9 · ESLint 9 · Prettier 3.9 ·
+  Vitest 5 · pnpm 10.28.0 · images `timescale/timescaledb:2.30.1-pg17`, `redis:8.8-alpine`, `python:3.12-slim`, `node:22-alpine`.
+- `compose.yaml` at the repository root; one `Dockerfile` inside each app folder (`backend/`, `frontend/`) instead of `infra/docker/`
+  (simpler paths on Windows). Backend image has `dev` (with test tools; used by Compose) and `runtime` targets.
+- Configuration via `CFI_`-prefixed environment variables (pydantic-settings); URLs held as secrets; no implicit `.env` loading in
+  the app — Compose supplies the environment, and refuses to start without `.env`.
+- Migrations run in a one-shot `migrate` service before the API starts. Baseline revision `0001`: TimescaleDB extension + nine layer
+  schemas; downgrade uses `RESTRICT` so it cannot delete data.
+- Starlette's test client uses `httpx2` (the `httpx` path is deprecated upstream). Pytest treats warnings as errors, with one
+  documented third-party exception.
+- The frontend uses system fonts (no build-time font download) and reads `API_INTERNAL_URL` at request time (`connection()`), so one
+  image serves every environment.
+- Celery workers and authentication are **not** part of Phase 3 (not requested); they arrive with the phases that need them.
+
+**Reason.** Smallest foundation that satisfies the Phase 3 brief and the Phase 2 architecture without pre-building later phases (R13).
+
+**Alternatives considered.** Dockerfiles under `infra/docker/` (as first proposed); bind-mounted hot-reload containers (slow on Windows
+drives); keeping `httpx` with a suppressed deprecation warning.
+
+**Trade-offs.** No hot reload inside containers; developers who want it run the API/frontend locally against the Compose services.
+
+**Future implications.** Version pins must be updated deliberately; the CI workflow runs the same checks once a Git remote exists.
