@@ -2,8 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 0 — Project foundation → ✅ complete, awaiting user sign-off
-**Next phase:** 1 — Architecture (not started; waits for the user to open it)
+**Current phase:** 1 — Architecture → 🔄 in progress (master engineering rules done; design items in `TODO.md` pending)
+**Next phase:** 2 — Infrastructure (waits for the user to open it)
 
 ---
 
@@ -11,8 +11,8 @@ Single source of truth for what has been done. Updated at the end of every task.
 
 | Phase | Name | Status |
 |---|---|---|
-| 0 | Project foundation | ✅ Complete (pending review) |
-| 1 | Architecture | ⏳ Not started |
+| 0 | Project foundation | ✅ Complete |
+| 1 | Architecture | 🔄 In progress |
 | 2 | Infrastructure | ⏳ Not started |
 | 3 | Data ingestion | ⏳ Not started |
 | 4 | Market data | ⏳ Not started |
@@ -72,4 +72,24 @@ Single source of truth for what has been done. Updated at the end of every task.
 
 **Tests run:** None applicable (documentation only). Files read back from `E:\FINANCIAL TOOL` and compared byte-for-byte; no leftover letter-based phase references found by search.
 
-**Git commit:** pending — user to commit as `[P0] renumber phases and record git workflow`.
+**Git commit:** `7ca0345` — `[P0] renumber phases and record git workflow` (created by the user).
+
+### 2026-09-23 — Phase 1: Master engineering rules
+
+**What changed**
+- `CLAUDE.md` restructured into Part A (context), Part B (master engineering rules R1–R13, as issued by the user), Part C (workflow).
+  Earlier hard rules merged into R1–R13 without loss; phase-end report format added (C2).
+- `ARCHITECTURE.md`: Hypothesis category (§2), adapter failure-mode requirements and idempotent writes (§5),
+  `conflicting` quality status (§6), nine-section AI output contract with "Insufficient data." rule (§8),
+  backtest cost/constraint list and survivorship handling (§10).
+- `DATA_DICTIONARY.md`: new universal fields `metric`, `asset`, `original_source`, `confidence` (§2);
+  `conflicting` status (§3); AI output sections (§9).
+- `DECISIONS.md`: ADR-0013. `TODO.md`: section reference fixed.
+
+**Tests run:** None applicable (documentation only, no code). Checks: every rule in the user's brief located in `CLAUDE.md`
+by search; cross-references between files checked; files read back from `E:\FINANCIAL TOOL` and compared byte-for-byte.
+
+**Known limitations:** Phase 1 design items (data model, point-in-time contract, adapter interface, metric registry,
+snapshot/validator contract, quality checks, ADR-0008/0009) are not started. Q1–Q10 in `TODO.md` remain open.
+
+**Git commit:** pending — user to commit as `[P1] add master engineering rules`.

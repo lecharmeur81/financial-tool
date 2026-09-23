@@ -32,6 +32,7 @@ Nothing here is started until the user opens the corresponding phase.
 
 ## Phase 1 — Architecture (next)
 
+- [x] Master engineering rules added to `CLAUDE.md` (R1–R13) — 2026-09-23.
 - [ ] Resolve Q1–Q10 (or record defaults in `DECISIONS.md`).
 - [ ] Finalise the logical data model: raw, observation, reference entities, metric/signal/regime/interpretation tables.
 - [ ] Specify the point-in-time query contract and the leakage-test strategy.
@@ -47,7 +48,7 @@ Nothing here is started until the user opens the corresponding phase.
 - [ ] Local database (containerised or native per Q2), migrations baseline.
 - [ ] Config and secret handling (`.env.example`, no real keys in Git).
 - [ ] Logging, error handling, job-run audit table.
-- [ ] Test, lint, type-check commands wired and documented in `CLAUDE.md` §7.
+- [ ] Test, lint, type-check commands wired and documented in `CLAUDE.md` §C5.
 - [ ] CI (optional, if a remote is added).
 
 ## Phase 3 — Data ingestion: provider research

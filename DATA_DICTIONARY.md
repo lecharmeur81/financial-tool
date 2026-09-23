@@ -30,6 +30,8 @@ Exact column types and table names are finalised when each phase is implemented;
 |---|---|---|
 | `observation_id` | id | Unique ID |
 | `dataset_id` | text | Which dataset this belongs to (see §5) |
+| `metric` | text | What is measured, e.g. `perp_funding_rate`, `etf_net_flow` (canonical name) |
+| `asset` | text | Canonical asset symbol, e.g. `BTC`; `NULL` only for non-asset series (e.g. macro) |
 | `entity_ref` | text | What it describes: asset, instrument, venue, ETF, address cluster, macro series |
 | `event_time` | timestamptz | When the event happened / start of the period described |
 | `period` | text | Granularity: `tick`, `1m`, `1h`, `8h`, `1d`, `1w`, `1q` |
@@ -38,11 +40,13 @@ Exact column types and table names are finalised when each phase is implemented;
 | `ingested_at` | timestamptz | When our system received it |
 | `value` | decimal | The observed value |
 | `unit` | text | Unit of `value` |
-| `source_provider` | text | Provider that supplied it |
+| `source_provider` | text | Provider we fetched it from (e.g. an aggregator or API vendor) |
+| `original_source` | text | Who first published it (e.g. the ETF issuer, the exchange), if different from the provider; `unknown` if the provider does not say |
 | `raw_ref` | id | Pointer to the L0 raw payload |
 | `revision` | int | 0 = first publication; increments on each revision |
 | `quality_status` | enum | See §3 |
 | `quality_note` | text | Human-readable reason when status is not `ok` |
+| `confidence` | decimal 0–1, nullable | Where appropriate: for estimated, attributed, or inferred values. `NULL` for values reported directly by the source |
 
 ---
 
@@ -58,6 +62,7 @@ Exact column types and table names are finalised when each phase is implemented;
 | `estimated` | Filled/derived under an explicitly permitted rule |
 | `revised` | Superseded by a later revision (kept for history) |
 | `suspect` | Failed a range/consistency check; retained, excluded from signals by default |
+| `conflicting` | Two or more providers disagree beyond tolerance; all values kept and shown |
 | `provider_error` | Provider returned an error or malformed payload |
 
 ### `evidence_class` (entity classification)
@@ -202,7 +207,7 @@ exact inputs depend on verified provider data.
 | `snapshot_id` | The immutable evidence pack Claude received |
 | `model_id` | Exact model identifier used |
 | `prompt_version` | Version of the prompt template |
-| `output` | Structured output (observations, interpretation, hypotheses, confidence, invalidation, data gaps) |
+| `output` | Structured output with sections: Summary, Evidence, Contradicting Evidence, Market Regime, Key Changes, Risks, Scenarios, Invalidation Conditions, Data Quality (CLAUDE.md R6). Each statement tagged with its evidence category (R2) |
 | `validation_status` | `passed` · `failed` · `flagged` |
 | `validation_errors` | Numbers/claims that did not match the snapshot |
 | `created_at` | Timestamp |

@@ -19,6 +19,7 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 | 0010 | UTC timestamps and exact decimals in storage | Accepted | 2026-09-23 |
 | 0011 | Git workflow and LF line endings | Accepted | 2026-09-23 |
 | 0012 | Numbered phases (0–27) instead of letters | Accepted | 2026-09-23 |
+| 0013 | Master engineering rules (CLAUDE.md R1–R13) | Accepted | 2026-09-23 |
 
 ---
 
@@ -134,3 +135,20 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 **Decision.** Phases are numbered from 0: A→0 (Project foundation), B→1 (Architecture) … Z→25 (Security + AI + stress testing), then 26 (Production) and 27 (Real-time intelligence). Commit prefix is `[P<number>]`; branches are `phase-<number>/<name>`.
 
 **Consequences.** The first commit (`d59cb20`) keeps its original `[A]` label; `[A]` = Phase 0. No other history is affected.
+
+---
+
+## ADR-0013 — Master engineering rules
+**Status:** Accepted (user requirement, Phase 1)
+
+**Context.** The user issued thirteen engineering principles that govern every phase.
+
+**Decision.** They are recorded in `CLAUDE.md` Part B as rules R1–R13 and take precedence over later convenience.
+Consequences for existing designs, applied in the same change:
+- The evidence hierarchy gains a sixth category, **Hypothesis**, kept separate from AI Interpretation (R2).
+- Every observation carries `metric`, `asset`, `original_source` (vs. `source_provider`), and a nullable `confidence` (R3).
+- New quality status `conflicting` for cross-provider disagreement; conflicts are shown, not resolved silently (R3).
+- The AI output contract is fixed to nine sections, with the literal phrase "Insufficient data." for gaps (R6).
+- Adapters must handle the eleven failure modes listed in R8; backtests must model the costs and constraints in R4.
+
+**Consequences.** More fields and tests per feature. The rules are the checklist for reviews and for Phase 16 (quant red-team).

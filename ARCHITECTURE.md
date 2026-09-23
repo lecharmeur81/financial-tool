@@ -61,6 +61,7 @@ Design principles:
 - L5 never writes to L1–L4. If Claude's output contains a number, it must match a value in the input snapshot or the output is rejected (§8).
 - L2–L4 are **derived** and can be rebuilt from L1 for any `as_of` time. If they cannot be rebuilt, that is a bug.
 - Supporting analyses (anomalies, similarity, rotation, backtests) are L3/L4-level consumers: they read metrics/signals and write their own versioned results.
+- **Hypothesis** is a sixth evidence category (CLAUDE.md R2): an untested proposed explanation. It is not a data layer; it is a label on L5 output (AI-proposed) or L6 entries (user-proposed), and is always stored and displayed separately from interpretation.
 
 ---
 
@@ -158,6 +159,11 @@ For data we started collecting ourselves, `ingested_at` is the conservative boun
 ## 5. Provider abstraction
 
 - Each provider has **one adapter** implementing a common interface (fetch, paginate, rate-limit, map to canonical).
+- Every adapter must handle (CLAUDE.md R8): authentication · rate limits · retries · exponential backoff · timeouts ·
+  malformed responses · provider outages · stale data · duplicate data · missing data · schema changes.
+  Schema changes are detected by validating each payload against the expected schema; a mismatch is stored in L0,
+  marked `provider_error`, and alerted — never coerced silently.
+- Duplicate deliveries are made harmless by idempotent writes keyed on (dataset, entity, event_time, provider, revision).
 - Each **dataset** (e.g. "perpetual funding rate", "spot ETF daily net flow") declares a list of eligible providers with priority.
 - Provider-specific symbols, units, and field names never leak beyond the normaliser.
 - Adapters record provider **licence/terms constraints** (redistribution, storage, rate limits) in configuration.
@@ -173,7 +179,7 @@ for a dataset with exactly one source; wrap it simply and document the dependenc
 
 Every observation and metric has a `quality_status`:
 
-`ok` · `missing` · `stale` · `partial` · `estimated` · `revised` · `suspect` · `provider_error`
+`ok` · `missing` · `stale` · `partial` · `estimated` · `revised` · `suspect` · `conflicting` · `provider_error`
 
 - Missing values are never filled with zero. Forward-fill or interpolation is allowed only when the metric
   definition in `DATA_DICTIONARY.md` explicitly permits it, and the result is flagged `estimated`.
@@ -194,7 +200,11 @@ Every observation and metric has a `quality_status`:
 ## 8. AI Analyst guardrails (Claude inside the product)
 
 1. **Input:** an immutable snapshot (L1–L4 values, quality flags, caveats, historical comparisons). Nothing else — no free web browsing for data.
-2. **Output contract:** structured (e.g. JSON) with sections for observations, interpretation, competing hypotheses, confidence, what would change the view, and data gaps.
+2. **Output contract:** structured (e.g. JSON) with exactly these sections, in order (CLAUDE.md R6):
+   Summary · Evidence · Contradicting Evidence · Market Regime · Key Changes · Risks · Scenarios · Invalidation Conditions · Data Quality.
+   Each statement inside is tagged with its evidence category (R2); hypotheses are tagged `hypothesis`.
+   - When required data is missing, the affected section states **"Insufficient data."** rather than inferring.
+   - When sources disagree, the output names the sources and their values in Contradicting Evidence and Data Quality.
 3. **Citation rule:** every number in the output must reference a snapshot field ID.
 4. **Validator:** a deterministic post-check extracts every number/claim reference and verifies it against the snapshot. Failures are rejected or flagged; they are never silently shown.
 5. **Labelling:** AI output is always displayed as *interpretation*, visually distinct from observed data.
@@ -225,7 +235,11 @@ A large transfer is **not** an institution by default; a small transfer is **not
 
 - Backtests run only through the point-in-time query layer (§4). There is no other data path.
 - Walk-forward / out-of-sample splits are the default; in-sample-only results are labelled as such.
-- Transaction costs, funding, slippage, and data latency are included explicitly.
+- Explicitly modelled (CLAUDE.md R4): fees · slippage · liquidity (position size vs. available depth/volume) · execution assumptions
+  (fill price, delay, venue) · turnover · position sizing · funding costs · data latency · missing data · unavailable historical data
+  (a signal is not evaluated before all its inputs existed).
+- Survivorship and selection bias: the asset/venue universe at each historical date is the universe that existed *then*,
+  including delisted assets and defunct exchanges where data exists.
 - Every backtest records how many variants were tried (to account for multiple testing).
 - Results are reported with dispersion and drawdowns, never as a single headline number, and never as proof of future performance.
 

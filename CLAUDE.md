@@ -2,20 +2,24 @@
 
 This file is read at the start of **every** task in this repository.
 It defines how Claude must work on the Capital Flow Intelligence platform.
-If anything in a task request conflicts with this file, stop and ask.
+If a task request conflicts with this file, stop and ask.
+
+Structure: **Part A** project context · **Part B** master engineering rules (R1–R13) · **Part C** workflow.
 
 ---
 
-## 1. What this project is
+# Part A — Project context
 
-A cryptocurrency **Capital Flow Intelligence** platform: decision-support software that answers
+## A1. What this project is
+
+A cryptocurrency **Capital Flow Intelligence** and market research platform: decision-support software that answers
 
 > **"Where is money moving, who is moving it, and how is that behavior changing?"**
 
-It is **not** a prediction oracle and **not** an automatic financial-advice engine.
+It is **not** a guaranteed prediction system and **not** an automatic financial-advice engine.
 It surfaces evidence, divergences, and scenarios. The human makes the decision.
 
-## 2. The layer rule (non-negotiable)
+## A2. The layer rule (non-negotiable)
 
 ```
 Observed Data → Calculated Metrics → Statistical Signals → Market Regime → AI Interpretation → User Decision
@@ -23,12 +27,248 @@ Observed Data → Calculated Metrics → Statistical Signals → Market Regime �
 
 - Each layer may only read from the layers **to its left**. Never the reverse.
 - The **database and the statistical engine are the source of truth.**
-- The AI layer (Claude) **reads** structured outputs and **writes only interpretations**.
+- The AI layer (Claude) **reads** structured outputs and **writes only interpretations and hypotheses**.
   It never writes to observed data, metrics, signals, or regimes.
 - Every value shown to a user must be traceable back to observed data (lineage).
 - See `ARCHITECTURE.md` for the full layer contract.
 
-## 3. Operating protocol (every task)
+---
+
+# Part B — Master engineering rules
+
+These rules apply to every phase. Cite them by number (e.g. "violates R3") in reviews and reports.
+
+## R1. Core philosophy
+
+This is a Capital Flow Intelligence and market research platform. It is not a guaranteed prediction system.
+
+The system helps the user understand:
+
+- where capital is moving
+- who appears to be moving it
+- how strong the evidence is
+- whether different market participants agree or disagree
+- what historical periods looked similar
+- what risks and contradictions exist
+
+**Never present uncertain inference as fact.** Never turn uncertainty into certainty.
+Never treat correlation as causation.
+
+## R2. Evidence hierarchy
+
+Always distinguish these six categories. **Never collapse them.**
+
+| Category | What it is | Example | Layer |
+|---|---|---|---|
+| **Observed Data** | A value a source reported, as reported | "Fund X reported +1,200 BTC net creation for 2026-03-02" | L1 |
+| **Calculated Metric** | A deterministic calculation over observed data | "Aggregate ETF net flow, 7-day sum" | L2 |
+| **Statistical Signal** | A metric evaluated against its own history or another metric | "7-day ETF flow is at the 96th percentile of the past 2 years" | L3 |
+| **Regime Classification** | A labelled market state produced by a versioned model, with confidence | "Regime: leveraged expansion (confidence 0.62)" | L4 |
+| **AI Interpretation** | Claude's explanation of L1–L4 evidence | "Institutional demand appears to be absorbing retail selling" | L5 |
+| **Hypothesis** | A proposed explanation or expectation that has **not** been tested | "If funding normalises while ETF inflows continue, spot demand may be leading" | L5 / L6 |
+
+Every value, label, and sentence the system shows must be identifiable as exactly one of these.
+The UI, the database, and AI output must keep them visually and structurally separate.
+
+## R3. Data integrity
+
+Never:
+
+- fabricate data
+- invent missing values
+- silently replace missing data
+- silently substitute one provider for another
+- hide stale data
+- hide conflicting sources
+- assume wallet ownership without evidence
+- assume institutional identity without evidence
+- use future information in historical calculations
+
+Also never fabricate sources, API endpoints, field names, or provider capabilities — verify against real
+documentation or a real response. Never hide errors. Missing is a first-class state (`quality_status = missing`),
+never a zero and never an unflagged interpolation.
+
+Every important dataset preserves (field names in `DATA_DICTIONARY.md` §2):
+
+| Required | Field(s) |
+|---|---|
+| source | `original_source` (who first published it) |
+| timestamp | `event_time` and `available_at` |
+| ingestion timestamp | `ingested_at` |
+| metric | `metric` |
+| asset | `asset` |
+| value | `value` |
+| unit | `unit` |
+| provider | `source_provider` (who we fetched it from) |
+| data quality | `quality_status`, `quality_note` |
+| confidence where appropriate | `confidence` |
+
+**Point-in-time rule:** every historical computation may only use rows where `available_at <= as_of`, and
+only the latest revision available at that time. Revised data keeps both the original and the revision.
+
+## R4. Quantitative research rules
+
+All historical analysis must avoid:
+
+- look-ahead bias
+- survivorship bias (e.g. analysing only assets or exchanges that still exist today)
+- data leakage
+- selection bias
+- overfitting
+- future revisions leaking into historical signals
+
+Backtests must account for:
+
+- fees
+- slippage
+- liquidity
+- execution assumptions
+- turnover
+- position sizing
+- missing data
+- unavailable historical data (a signal cannot be backtested before its inputs existed)
+
+Backtests use walk-forward / out-of-sample evaluation by default, record how many variants were tried,
+and report dispersion and drawdowns. **Never use backtest results as proof of future performance.**
+
+## R5. Entity classification
+
+Never automatically assume a wallet or flow belongs to:
+
+- an institution
+- an ETF
+- an exchange
+- a market maker
+- a hedge fund
+- a government
+- a whale
+
+unless there is reliable evidence.
+
+Every classification stores: label, `evidence_class` (`direct` / `attributed` / `inferred`), `confidence`,
+the rule or source that produced it, and `valid_from` / `valid_to`. Large ≠ institutional. Small ≠ retail.
+
+## R6. AI rules
+
+**Claude is the analyst, not the database.**
+
+- AI analysis must be grounded in database records — specifically, an immutable snapshot of them.
+- Claude may only cite numbers present in that snapshot, each referenced by its field ID.
+- If data is missing, Claude must say: **"Insufficient data."**
+- If sources disagree, Claude must explicitly report the disagreement (which sources, which values).
+- AI interpretation is never presented as observed fact (R2).
+- AI output must contain these sections, in this order:
+  1. **Summary**
+  2. **Evidence**
+  3. **Contradicting Evidence**
+  4. **Market Regime**
+  5. **Key Changes**
+  6. **Risks**
+  7. **Scenarios**
+  8. **Invalidation Conditions**
+  9. **Data Quality**
+
+## R7. Software engineering
+
+Before modifying code:
+
+1. Inspect relevant files.
+2. Understand existing architecture.
+3. Make a plan.
+4. Implement the smallest robust solution.
+5. Run tests.
+6. Run linting/type checks.
+7. Check regressions.
+8. Update documentation.
+9. Update `PROGRESS.md`.
+10. Commit to Git.
+
+**Never claim a task is complete if tests are failing.** Never assume code exists without opening it.
+Never claim something works without testing it. If something cannot be verified, say so explicitly.
+
+## R8. External APIs
+
+All external data providers must use an **adapter architecture**.
+
+Every provider integration must handle:
+
+- authentication
+- rate limits
+- retries
+- exponential backoff
+- timeouts
+- malformed responses
+- provider outages
+- stale data
+- duplicate data
+- missing data
+- schema changes
+
+**Never allow provider-specific code to contaminate the core domain model.** Provider symbols, field names,
+and units are converted at the adapter/normaliser boundary and go no further.
+Never make the system dependent on a single provider when an adapter can reasonably prevent it.
+A fallback to another provider is always recorded, never silent (R3).
+
+## R9. Security
+
+Never hard-code:
+
+- API keys
+- passwords
+- secrets
+- tokens
+
+Use environment variables and secure configuration. Local secrets live in `.env` (git-ignored); only
+`.env.example` with placeholder values is committed. Never log secrets.
+
+## R10. Database
+
+- Use migrations for every schema change.
+- **Never destroy production data to solve a migration problem.**
+- Prefer additive schema changes (add columns/tables; deprecate before removing).
+
+## R11. Testing
+
+Every major feature requires:
+
+- unit tests
+- integration tests
+- database tests where appropriate
+- API tests
+- quantitative validation where applicable
+
+Quantitative algorithms require **historical test datasets** (versioned fixtures with known expected outputs).
+Point-in-time logic requires explicit leakage tests.
+
+## R12. AI evaluation
+
+AI outputs must eventually be tested for:
+
+- hallucination
+- unsupported claims
+- incorrect calculations
+- missing evidence
+- incorrect interpretation
+- source conflicts
+- confidence calibration
+
+## R13. Development behavior
+
+- Do not over-engineer.
+- Do not create unnecessary abstractions.
+- Do not implement features that have not been requested.
+- Do not use hard-coded values to make tests pass.
+- Use standard production-quality approaches.
+- Before destructive operations — deleting files, dropping tables, force-pushing Git, rewriting history,
+  rotating keys, or changing shared infrastructure — **ask for confirmation**.
+- Update `PROGRESS.md` after meaningful work.
+- **Do not automatically proceed to the next major phase without the user's instruction.**
+
+---
+
+# Part C — Workflow
+
+## C1. Operating protocol (every task)
 
 1. Read `CLAUDE.md`.
 2. Read `PROGRESS.md`.
@@ -46,7 +286,11 @@ Observed Data → Calculated Metrics → Statistical Signals → Market Regime �
 14. Update `PROGRESS.md`.
 15. Commit the work.
 
-When a task is complete, report:
+(R7 is the same process applied to code changes.)
+
+## C2. Reports
+
+**End of every task:**
 
 - What changed
 - Files changed
@@ -55,40 +299,20 @@ When a task is complete, report:
 - Known limitations
 - Git commit (hash + message)
 
-If something cannot be verified, **say so explicitly**.
+**End of every phase:**
 
-## 4. Hard rules
+- Completed work
+- Files changed
+- Tests executed
+- Test results
+- Known issues
+- Next recommended phase
 
-**Truthfulness**
-- Never assume code exists without opening it.
-- Never claim something works without testing it.
-- Never fabricate data. Never fabricate sources. Never fabricate API endpoints, field names, or provider capabilities — verify against real documentation or a real response.
-- Never hide errors. Never hide missing data. Missing is a first-class state (`status = missing`), not a zero and not an interpolation.
-- Never turn uncertainty into certainty. Every signal and interpretation carries confidence and caveats.
+Then stop and wait for the user (R13).
 
-**Time and history**
-- Never silently use future information.
-- Never use future information in historical calculations.
-- Every historical computation must be **point-in-time**: it may only use rows where `available_at <= as_of` (see `DATA_DICTIONARY.md` §2).
-- Revised data (e.g. restated ETF flows, re-labelled wallets) must preserve the original value and the revision.
-- Never use backtest results as proof of future performance.
-
-**Interpretation**
-- Never classify an entity (institution, whale, exchange, fund, retail) without recorded evidence and a confidence level.
-- Never treat correlation as causation.
-- Never treat an AI interpretation as observed fact. AI output is always labelled as interpretation.
-- Claude, inside the product, may only cite numbers that exist in the structured input it was given.
-
-**Engineering**
-- Never make the system dependent on a single external data provider when a provider abstraction can reasonably prevent it.
-- Prefer simple, maintainable solutions over unnecessary abstraction.
-- Before destructive or irreversible actions (dropping tables, deleting data, rewriting Git history, force-push, rotating keys), **ask for confirmation**.
-- Never commit secrets. API keys live in `.env` (git-ignored) or a secret manager.
-
-## 5. Development phases
+## C3. Development phases
 
 Work proceeds phase by phase. Do not start a phase until the user opens it.
-
 Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 
 | # | Phase | # | Phase |
@@ -110,7 +334,7 @@ Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 
 Current phase and status: see `PROGRESS.md`.
 
-## 6. Conventions (initial — confirm in Phase 1/2)
+## C4. Conventions (initial — confirm in Phase 1/2)
 
 - **Timezone:** all timestamps stored in UTC, ISO-8601, timezone-aware. Never naive datetimes.
 - **Money:** exact decimals for prices, sizes, and flows in storage. Floats allowed only inside statistical computation.
@@ -120,7 +344,7 @@ Current phase and status: see `PROGRESS.md`.
 - **Commits:** small, one logical change, imperative subject line, prefixed with the phase number, e.g. `[P3] add provider base interface`. (The very first commit, `d59cb20`, used the old `[A]` label = Phase 0.)
 - **Branches:** `main` is always green. Feature work on `phase-<number>/<short-name>`, e.g. `phase-3/provider-interface`.
 
-## 7. Environment notes
+## C5. Environment notes
 
 - Development machine: Windows (x64). Project root: `E:\FINANCIAL TOOL`.
   The path contains a space — always quote it in shell commands and scripts.
@@ -128,6 +352,7 @@ Current phase and status: see `PROGRESS.md`.
 - **Git runs on the user's machine.** When Claude works through the remote file bridge, it cannot write
   into `.git` or run Git there. In that case, step 5 (Git status) and step 15 (commit) are done by giving
   the user the exact commands to run and recording the resulting hash in `PROGRESS.md`.
+- After copying files to the user's machine, Claude reads them back and compares them before reporting success.
 - Tooling commands (test, lint, type check, run) will be listed here once chosen in Phase 2:
 
 ```
@@ -137,7 +362,7 @@ Current phase and status: see `PROGRESS.md`.
 # run:         (to be defined in Phase 2)
 ```
 
-## 8. Documentation map
+## C6. Documentation map
 
 | File | Purpose |
 |---|---|
