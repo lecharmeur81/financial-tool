@@ -123,7 +123,12 @@ Tables are grouped by PostgreSQL schema (one per layer, ADR-0016). **Implemented
 `ops.dataset_provider`, `ops.job_run`, `ops.provider_request` (replaces the planned `provider_health_event` and
 `request_ledger`: one row per HTTP attempt with its outcome), `ops.quality_check_result` (column `check_name`), `raw.payload`,
 `obs.series`, `obs.observation` (plus `transformations text[]` — empty means the value was stored exactly as reported).
-Still planned: the typed market tables, `ref.*`, `calc`/`sig`/`regime`/`ai`/`usr` tables, `ops.coverage_daily`.
+**Implemented in Phase 5 (migration `0003`):** `obs.market_bar` (below), `ops.backfill_state` (resumable history
+checkpoint: `dataset_id`, `provider_id`, `subject`, `covered_from`, `covered_to`, `target_start`, `complete`,
+`empty_chunks`, `note`, `updated_at`), `ops.dataset.kind` (`scalar` | `bar`), `ops.job_run.subject` (asset the run
+covered), `ops.job_run.skipped` (records not final yet — skipped, fetched later), `ops.job_run.suspect`
+(records failing a consistency check), `ops.job_run.job_type` ∈ {`ingest`, `backfill`}.
+Still planned: the other typed market tables, `ref.*`, `calc`/`sig`/`regime`/`ai`/`usr` tables, `ops.coverage_daily`.
 **Implemented in Phase 3 (migration `0001`):** the nine
 schemas exist and are empty; no tables have been created yet. **HT** = TimescaleDB hypertable (time column in brackets).
 "Provenance" = the row-level fields of §2b. Write access per schema follows the DB roles in `ARCHITECTURE.md` §5.9.
@@ -157,7 +162,7 @@ schemas exist and are empty; no tables have been created yet. **HT** = Timescale
 |---|---|---|
 | `series` | Series registry (§2a) | see §2a |
 | `observation` (HT [`event_time`]) | Generic scalar series: ETF flows/holdings, stablecoin supply, exchange reserves, macro, sentiment, on-chain aggregates | `value` |
-| `market_bar` (HT) | OHLCV bars | `open`, `high`, `low`, `close`, `volume_base`, `volume_quote`, `trade_count` |
+| `market_bar` (HT [`event_time`], **implemented**) | OHLCV bars; `event_time` = bar open | `open`, `high`, `low`, `close` (unit = series unit, the quote currency), `volume_base` (base asset), `volume_quote` (quote currency; NULL when the venue does not report it), `trade_count` (NULL when not reported). A missing bar has all prices and volumes NULL with `quality_status = missing` |
 | `funding_rate` (HT) | Perpetual funding | `rate`, `interval_hours`, `rate_per_8h`, `mark_price`, `index_price`, `is_predicted` |
 | `open_interest` (HT) | Open interest | `oi_contracts`, `oi_base`, `oi_usd` |
 | `liquidation_event` (HT) | Liquidations (event or aggregated) | `side` (long/short), `quantity_base`, `notional_usd`, `price`, `is_aggregated` |
@@ -236,8 +241,9 @@ Evidence class indicates how directly the dataset tells us *who* is acting.
 
 | Category | Dataset (planned) | Typical period | Evidence of actor | Phase |
 |---|---|---|---|---|
-| Market | Spot OHLCV per venue | 1m–1d | n/a | 4 |
-| Market | Spot volume by venue | 1h–1d | inferred (venue mix) | 4 |
+| Market | Spot OHLCV per venue — **implemented (Phase 5)** | 1m–1d | n/a | 5 |
+| Market | Last trade price, market capitalisation — **implemented (Phase 5)** | event, 1d | n/a | 5 |
+| Market | Spot volume by venue (venue share metric) | 1h–1d | inferred (venue mix) | later (L2) |
 | Institutional | Spot ETF daily net flows, holdings, AUM | 1d | direct | 5 |
 | Institutional | CME futures OI & volume | 1d | inferred (regulated venue) | 5 |
 | Institutional | Regulatory position filings (e.g. quarterly holdings) | 1q, lagged | direct, heavily lagged | 5 |
@@ -264,6 +270,21 @@ Candidate providers for each dataset are **not yet selected**; see `TODO.md` (Ph
 No provider capability is assumed until verified against its documentation and a real response.
 
 ---
+
+## 5a. Market datasets (implemented in Phase 5)
+
+| Dataset ID | Metric | Unit | Period | Providers (venue · instrument) | Availability rule | Freshness limit |
+|---|---|---|---|---|---|---|
+| `market.ohlcv.usd.<tf>` | `spot_ohlcv` | `usd` | 1m, 5m, 15m, 1h, 4h, 1d | Coinbase Exchange `coinbase:spot:<A>-USD` (no 4h: rolled up from 1h at read time); Kraken `kraken:spot:<A>-USD` (720 most recent bars only) | bar close + 60 s | 5 min, 15 min, 45 min, 3 h, 10 h, 50 h |
+| `market.ohlcv.usdt.<tf>` | `spot_ohlcv` | `usdt` | 1m, 5m, 15m, 1h, 4h, 1d | Binance `binance:spot:<A>-USDT`; OKX `okx:spot:<A>-USDT` (4h/1d = UTC-aligned bars); Bybit `bybit:spot:<A>-USDT` | bar close + 60 s | as above |
+| `market.spot_price.usd` | `spot_price` | `usd` | event | Coinbase Exchange last trade (`event_time` = trade time) | provider time | 5 min |
+| `market.market_cap.usd` | `market_cap` | `usd` | event | CoinGecko (`event_time` = its last update) | provider time | 30 min |
+| `market.market_cap.usd.1d` | `market_cap` | `usd` | 1d | CoinGecko daily snapshot at 00:00 UTC (history ≤ 365 days on the free tier) | 00:00 + 10 min | 50 h |
+
+`<A>` ∈ {BTC, ETH, SOL, XRP}. Each venue is its own series (`obs.series.venue`); USD and USDT are different units and
+are never combined. `pit_reliability` is `native` when a value was stored within its freshness limit after it became
+knowable, otherwise `backfilled_latest`. `transformations` records every conversion (epoch → UTC, field re-ordering,
+time truncation, alignment to the daily grid).
 
 ## 6. Metric definition template (L2)
 

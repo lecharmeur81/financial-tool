@@ -17,7 +17,7 @@ from enum import StrEnum
 from typing import Any
 
 from cfi.core.time import ensure_utc, floor_to_period
-from cfi.domain.observation import CanonicalObservation
+from cfi.domain.observation import ObservedRecord
 
 
 class CheckName(StrEnum):
@@ -29,6 +29,7 @@ class CheckName(StrEnum):
     FRESHNESS = "freshness"
     REJECTED = "rejected_record"
     SCHEMA = "schema"
+    CONSISTENCY = "consistency"
     INCONSISTENT_BATCH = "inconsistent_duplicate_in_response"
 
 
@@ -47,29 +48,29 @@ class QualityFinding:
 # --------------------------------------------------------------------------- batch duplicates
 
 
-def _key(obs: CanonicalObservation) -> tuple[str, str | None, str, datetime]:
+def _key(obs: ObservedRecord) -> tuple[str, str | None, str, datetime]:
     return (obs.subject_ref, obs.venue, obs.period, obs.event_time)
 
 
 @dataclass(frozen=True, slots=True)
-class BatchSplit:
-    unique: list[CanonicalObservation]
-    duplicates: list[CanonicalObservation]
-    inconsistent: list[tuple[CanonicalObservation, CanonicalObservation]]
+class BatchSplit[R: ObservedRecord]:
+    unique: list[R]
+    duplicates: list[R]
+    inconsistent: list[tuple[R, R]]
 
 
-def split_batch(observations: Iterable[CanonicalObservation]) -> BatchSplit:
+def split_batch[R: ObservedRecord](observations: Iterable[R]) -> BatchSplit[R]:
     """Within one delivery: identical repeats are duplicates; same key with a *different* value is
     inconsistent (the first is kept, the other rejected and reported — never silently chosen)."""
-    seen: dict[tuple[str, str | None, str, datetime], CanonicalObservation] = {}
-    duplicates: list[CanonicalObservation] = []
-    inconsistent: list[tuple[CanonicalObservation, CanonicalObservation]] = []
+    seen: dict[tuple[str, str | None, str, datetime], R] = {}
+    duplicates: list[R] = []
+    inconsistent: list[tuple[R, R]] = []
     for obs in observations:
         key = _key(obs)
         first = seen.get(key)
         if first is None:
             seen[key] = obs
-        elif first.value == obs.value:
+        elif first.comparable() == obs.comparable():
             duplicates.append(obs)
         else:
             inconsistent.append((first, obs))
@@ -86,16 +87,16 @@ class Classification(StrEnum):
 
 
 def classify(
-    obs: CanonicalObservation, existing: tuple[int, Decimal | None] | None
+    obs: ObservedRecord, existing: tuple[int, object] | None
 ) -> tuple[Classification, int]:
-    """Compare with the latest stored revision from the same provider.
+    """Compare with the latest stored revision (its ``comparable()`` values) from the same provider.
 
     Returns the classification and the revision number to store (only meaningful for NEW/REVISION).
     """
     if existing is None:
         return Classification.NEW, 0
     revision, value = existing
-    if value == obs.value:
+    if value == obs.comparable():
         return Classification.DUPLICATE, revision
     return Classification.REVISION, revision + 1
 

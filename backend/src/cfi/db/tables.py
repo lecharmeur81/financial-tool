@@ -49,6 +49,7 @@ dataset = Table(
     Column("expect_continuous", Boolean, nullable=False),
     Column("description", Text, nullable=False),
     Column("updated_at", TS, nullable=False),
+    Column("kind", Text, nullable=False),
     schema="ops",
 )
 
@@ -86,6 +87,9 @@ job_run = Table(
     Column("error_code", Text),
     Column("error_detail", Text),
     Column("code_version", Text, nullable=False),
+    Column("subject", Text),
+    Column("skipped", Integer, nullable=False),
+    Column("suspect", Integer, nullable=False),
     schema="ops",
 )
 
@@ -160,6 +164,49 @@ observation = Table(
     Column("confidence", Numeric),
     Column("transformations", ARRAY(Text), nullable=False),
     schema="obs",
+)
+
+market_bar = Table(
+    "market_bar",
+    metadata,
+    Column("series_id", BigInteger, primary_key=True),
+    Column("event_time", TS, primary_key=True),
+    Column("available_at", TS, nullable=False),
+    Column("available_at_estimated", Boolean, nullable=False),
+    Column("ingested_at", TS, nullable=False),
+    Column("open", Numeric),
+    Column("high", Numeric),
+    Column("low", Numeric),
+    Column("close", Numeric),
+    Column("volume_base", Numeric),
+    Column("volume_quote", Numeric),
+    Column("trade_count", BigInteger),
+    Column("source_provider", Text, primary_key=True),
+    Column("original_source", Text, nullable=False),
+    Column("raw_ref", BigInteger),
+    Column("revision", Integer, primary_key=True),
+    Column("pit_reliability", Text, nullable=False),
+    Column("quality_status", Text, nullable=False),
+    Column("quality_note", Text),
+    Column("confidence", Numeric),
+    Column("transformations", ARRAY(Text), nullable=False),
+    schema="obs",
+)
+
+backfill_state = Table(
+    "backfill_state",
+    metadata,
+    Column("dataset_id", Text, primary_key=True),
+    Column("provider_id", Text, primary_key=True),
+    Column("subject", Text, primary_key=True),
+    Column("covered_from", TS, nullable=False),
+    Column("covered_to", TS, nullable=False),
+    Column("target_start", TS, nullable=False),
+    Column("complete", Boolean, nullable=False),
+    Column("empty_chunks", Integer, nullable=False),
+    Column("note", Text),
+    Column("updated_at", TS, nullable=False),
+    schema="ops",
 )
 
 quality_check_result = Table(

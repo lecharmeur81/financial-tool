@@ -13,6 +13,10 @@ x-backend-env: &backend-env
   CFI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:?set POSTGRES_DB in .env}
   CFI_REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
   CFI_RAW_ARCHIVE_DIR: /data/raw
+  # Market data (Phase 5): providers the workers ingest from; optional free CoinGecko Demo key.
+  CFI_MARKET_PROVIDERS: ${CFI_MARKET_PROVIDERS:-coinbase,kraken,binance,okx,bybit,coingecko}
+  CFI_MARKET_BACKFILL_DAYS: ${CFI_MARKET_BACKFILL_DAYS:-}
+  CFI_PROVIDER_COINGECKO_API_KEY: ${CFI_PROVIDER_COINGECKO_API_KEY:-}
 
 x-backend-build: &backend-build
   context: ./backend
@@ -89,6 +93,51 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    restart: unless-stopped
+
+  # Background ingestion (Celery, ADR-0023). Recent data and history backfill run in separate
+  # processes so a long backfill never delays the latest bars.
+  worker:
+    build: *backend-build
+    image: cfi-backend:dev
+    command: ["celery", "-A", "cfi.worker.app", "worker", "-Q", "ingest_fast,ingest",
+              "--concurrency=1", "--hostname=ingest@%h", "--loglevel=INFO"]
+    environment: *backend-env
+    volumes:
+      - rawarchive:/data/raw
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker-backfill:
+    build: *backend-build
+    image: cfi-backend:dev
+    command: ["celery", "-A", "cfi.worker.app", "worker", "-Q", "backfill",
+              "--concurrency=1", "--hostname=backfill@%h", "--loglevel=INFO"]
+    environment: *backend-env
+    volumes:
+      - rawarchive:/data/raw
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  beat:
+    build: *backend-build
+    image: cfi-backend:dev
+    command: ["celery", "-A", "cfi.worker.app", "beat", "--schedule", "/tmp/celerybeat-schedule",
+              "--loglevel=INFO"]
+    environment: *backend-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:

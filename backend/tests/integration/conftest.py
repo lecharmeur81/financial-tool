@@ -31,6 +31,8 @@ requires_services = pytest.mark.skipif(
 
 DATA_TABLES = (
     "ops.quality_check_result",
+    "ops.backfill_state",
+    "obs.market_bar",
     "obs.observation",
     "obs.series",
     "raw.payload",
@@ -93,3 +95,7 @@ async def db(test_settings: Settings) -> AsyncIterator[AsyncEngine]:
         await conn.execute(text(f"TRUNCATE {', '.join(DATA_TABLES)} RESTART IDENTITY CASCADE"))
     yield engine
     await engine.dispose()
+
+
+# Market-data harness fixture (defined with its helpers in market_support.py).
+from tests.integration.market_support import market  # noqa: E402, F401

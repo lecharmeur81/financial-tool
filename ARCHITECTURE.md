@@ -179,6 +179,8 @@ Each subsection states the design. Rationale, alternatives, trade-offs, and futu
 - **Numeric types.** Exact `NUMERIC` by default (ADR-0010); a benchmark in the infrastructure phase decides whether
   high-volume families switch to `double precision` with the exact string kept in L0 (ADR-0044).
 - **Migrations** with Alembic only; additive by default; destructive steps need explicit approval (R10).
+- **Implemented:** `obs.series`, `obs.observation` (Phase 4), `obs.market_bar` (Phase 5, 30-day chunks, no compression
+  yet). The other typed tables and the `selected_observation` view are still planned.
 
 ### 5.2 Time-series strategy — ADR-0020
 
@@ -233,6 +235,20 @@ Detection rules as built:
 | Payload not JSON / schema changed | Payload archived and flagged `schema_ok = false`; job `failed` with `schema_mismatch` |
 | Timeout, 5xx, 429 | Retried with backoff (429/503 honour `Retry-After`); every attempt logged; job `failed` if retries run out |
 
+**Implemented in Phase 5** (ADR-0047): scheduling with Celery (`backend/src/cfi/worker/`), `ingest` and `backfill`
+job types, bar record family (`obs.market_bar`), per-subject job runs, `ops.backfill_state` checkpoints. Market-data
+behaviour as built:
+
+| Situation | What happens |
+|---|---|
+| Current, unfinished bar (or CoinGecko's running value) | Skipped and counted (`job_run.skipped`); fetched again once final (period end + 60 s) |
+| Coinbase publishes no candle for a minute | Explicit `missing` bar with the note that it may mean zero trades |
+| High below low, non-positive price, negative volume | Stored unchanged as `suspect` with the reason; finding `consistency` |
+| Worker stopped for a while | Next latest run starts after the newest stored bar (up to 1,000 bars back) |
+| History | Backfill walks back in request-sized chunks to the configured depth; stops after 3 empty chunks (provider history start, e.g. Kraken's 720-bar limit, or an instrument's listing); a failed chunk is retried, never skipped |
+| Provider unreachable (e.g. ISP block) | Runs fail with the error; circuit breaker pauses calls; the dashboard shows the failure |
+| HTTP 418/429 with a long `Retry-After` | Not retried early; circuit held open for the requested time |
+
 ### 5.4 Provider abstraction — ADR-0022
 
 **Implemented in Phase 4:** `ProviderAdapter` (`first_request` / `next_request` / `parse` / `normalise`) in
@@ -270,6 +286,10 @@ in-process until workers share them via Redis. Mock providers for tests only: `c
 - **Live updates:** Server-Sent Events first (one-way, simple, works through proxies); WebSockets only if two-way need appears.
 - **Errors** use RFC 9457 "problem details" JSON with a stable `error_code` (§5.13).
 - **Pagination:** cursor-based on time; mandatory time bounds and server-side row limits to prevent unbounded queries.
+- **Implemented in Phase 5:** `GET /api/v1/market/catalog`, `/market/bars` (asset, timeframe, venue, limit ≤ 1,500,
+  start, end, `as_of`), `/market/overview` — evidence envelope with source, units, derivation, quality (missing /
+  not-loaded / suspect / conflicting / revised), freshness and last ingestion run. The OpenAPI-generated TypeScript
+  client is not built yet (types are hand-written in `frontend/src/lib/market.ts`).
 
 ### 5.6 Background jobs — ADR-0023
 
@@ -282,6 +302,10 @@ in-process until workers share them via Redis. Mock providers for tests only: `c
 - **Dependency chaining:** `dataset_updated` events trigger the minimal downstream recomputation (metrics → signals →
   regime → alert evaluation), debounced so a burst of updates causes one recomputation.
 - Celery does not support Windows as a worker platform; workers run in Linux containers (Docker) — also on the Windows dev machine.
+- **Implemented in Phase 5:** services `worker` (queues `ingest_fast`, `ingest`), `worker-backfill` (queue `backfill`)
+  and `beat`; schedules in `cfi/worker/schedule.py` (1m bars and last trade every 30–60 s, other timeframes every
+  2–30 min, market caps every 5 min / 6 h, backfill round every 60 s). Dependency chaining (`dataset_updated`) and the
+  `compute`/`ai`/`alerts`/`maintenance` queues are not built yet.
 
 ### 5.7 Caching — ADR-0024
 
@@ -652,13 +676,14 @@ The hosting location must allow access to the chosen exchange APIs (jurisdiction
 
 ## 10. Component-to-phase map
 
-Phases 0–3 are defined by the user's guide; later phase numbers in `CLAUDE.md` §C3 are provisional until the user issues each phase.
+Phases 0–5 are defined by the user's guide; later phase numbers in `CLAUDE.md` §C3 are provisional until the user issues each phase.
 
 | Component | Planned phase (provisional) |
 |---|---|
 | Infrastructure (Compose, DB, migrations baseline, CI, tooling) | 3 — done |
-| Ingestion engine, provider client layer, dataset registry, quality detection | 4 — done (scheduler/workers not yet) |
-| Market, institutional, whale, derivatives, liquidity, retail, macro, market-structure datasets and metrics | 4–11 |
+| Ingestion engine, provider client layer, dataset registry, quality detection | 4 — done |
+| Market data: OHLCV, last trade, market cap, workers, market API, Market page | 5 — done |
+| Institutional, whale, derivatives, liquidity, retail, macro, market-structure datasets and metrics | 6+ (to be issued) |
 | Divergence, regime, similarity, backtesting, red-team, anomaly, rotation | 12–18 |
 | AI analyst (snapshot, prompts, validator, evals) | 19 |
 | Daily intelligence, alerts, paper trading, decision journal | 20–23 |
@@ -675,7 +700,7 @@ Phases 0–3 are defined by the user's guide; later phase numbers in `CLAUDE.md`
 | 1 | Look-ahead via backfilled/revised data | Inflated backtests, false confidence | Bitemporal model, `pit_reliability`, leakage tests (§5.25) |
 | 2 | "Institutional" labels are mostly inference | Misleading conclusions | `evidence_class` + confidence everywhere; UI separates direct from inferred (R5) |
 | 3 | Paid data costs and restrictive terms | Budget overrun; unusable data | Provider budgets, request ledger, terms recorded before ingestion |
-| 4 | Exchange API geo-restrictions | Missing datasets depending on host location | Verify per provider from the actual host before committing |
+| 4 | Exchange API geo-restrictions | Missing datasets depending on host location | Several providers per dataset; failures visible in provider health and on the Market page; `CFI_MARKET_PROVIDERS` to disable blocked ones. Known: Binance, OKX, Bybit, Kraken blocked by Philippine ISPs (2024–2025) |
 | 5 | Short crypto history (few cycles) | Overfit regimes/similarity | Walk-forward, trial counting, Phase 16 red-team |
 | 6 | AI hallucinated numbers | Wrong decisions | Snapshot grounding + deterministic validator + eval harness |
 | 7 | TimescaleDB licence (TSL) limits | Cannot offer the DB itself as a service | Our use (own application) is permitted; revisit if the business model changes |

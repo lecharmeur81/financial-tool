@@ -20,8 +20,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     href: "/market",
     label: "Market",
-    description: "Spot prices, volume by venue, volatility, dominance, and market structure.",
-    plannedPhase: "4 and 11",
+    description:
+      "Spot prices, candles and volume by venue, and market capitalisation — with source, freshness, and missing-data warnings.",
+    plannedPhase: "5 (market data); market structure later",
   },
   {
     href: "/flows",

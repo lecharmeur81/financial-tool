@@ -91,15 +91,36 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 - [x] Raw payload archive; migration `0002` (registry, job runs, requests, payloads, series, observations, findings).
 - [x] Mock providers + tests (unit and integration); provider-health and ingestion-runs API.
 
+## Phase 5 — Market data (done 2026-09-23; see PROGRESS.md)
+
+- [x] Adapters: Coinbase Exchange, Kraken, Binance, OKX, Bybit (OHLCV), Coinbase last trade, CoinGecko market cap.
+- [x] `obs.market_bar`, backfill checkpoints, Celery workers + beat, market API, Market page with charts.
+- [ ] **User:** run `docker compose up --build` on Windows and check the Market page with real data.
+
+### Decisions needed from the user (Phase 5)
+
+- [ ] **CoinGecko storage.** Its terms discourage storing data and ask that stored data be refreshed at least every
+      24 h. Options: (a) keep storing (current: refreshed every 6 h / 5 min, history kept); (b) keep only the latest
+      value; (c) drop market cap until a licensed source is chosen.
+- [ ] **Exchange terms.** Coinbase, Kraken, Binance, OKX, Bybit terms of use not reviewed (`terms_verified = false`).
+- [ ] **History depth / retention (B4, C1).** Defaults: 1m 7 d, 5m 30 d, 15m 90 d, 1h 2 y, 4h 4 y, 1d 10 y
+      (`CFI_MARKET_BACKFILL_DAYS`). Raw payload files grow with every request (about 7k small files/day per provider).
+- [ ] **Blocked providers.** Binance, OKX, Bybit, Kraken are blocked by Philippine ISPs; keep them enabled (visible
+      failures) or remove them from `CFI_MARKET_PROVIDERS`? Hosting location (B6) decides this in production.
+- [ ] **Display time zone (B8).** The Market page shows UTC; Asia/Manila display not built yet.
+
 ## Deferred (to the phase that needs them)
 
-- [ ] Scheduling: Celery workers/beat (ADR-0023, approved) and `dataset_updated` events — nothing runs ingestion automatically yet.
+- [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.
+- [ ] Freshness/quality findings are written on every run (thousands of rows/day) — add retention or summarise.
+- [ ] Compression policy for `obs.market_bar` (ADR-0020) once data volume is measured.
+- [ ] OpenAPI-generated TypeScript client (ADR-0025); types are hand-written for now.
 - [ ] Shared (Redis-backed) rate limiter and circuit breaker — needed once several workers ingest in parallel.
 - [ ] Job types `backfill`, `reconcile`, `gap_fill`; `ops.coverage_daily`; per-dataset retention.
 - [ ] Database roles and grants per service (ADR-0027, approved) — when API and workers run as separate services.
-- [ ] First real provider adapters — terms, limits and access from the hosting location verified first.
+- [x] First real provider adapters (Phase 5). Access from the final hosting location still to verify (B6).
 - [ ] Authentication (ADR-0026, approved) — before any user-layer feature or remote hosting.
-- [ ] Benchmark `NUMERIC` vs `double precision` (ADR-0044) — before the first high-volume table.
+- [x] Benchmark `NUMERIC` vs `double precision` (ADR-0044) — done in Phase 5: keep `NUMERIC`.
 - [ ] Pre-commit hooks (optional convenience; CI already enforces the same checks).
 - [ ] Observability stack (Prometheus/Grafana) — decision C3.
 

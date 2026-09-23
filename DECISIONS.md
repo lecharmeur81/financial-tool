@@ -51,9 +51,10 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 | 0041 | Reproducibility and versioning | **Proposed** | 2026-09-23 |
 | 0042 | Disaster recovery | **Proposed** | 2026-09-23 |
 | 0043 | Charting libraries | Accepted | 2026-09-23 |
-| 0044 | Numeric precision for high-volume data | **Proposed** | 2026-09-23 |
+| 0044 | Numeric precision for high-volume data | Accepted — keep `NUMERIC` (benchmark in Phase 5) | 2026-09-23 |
 | 0045 | Phase 3 foundation implementation choices | Accepted | 2026-09-23 |
 | 0046 | Phase 4 ingestion engine implementation choices | Accepted | 2026-09-23 |
+| 0047 | Phase 5 market-data layer: providers, storage, workers, API, dashboard | Accepted | 2026-09-23 |
 
 ---
 
@@ -372,7 +373,7 @@ single-provider dependency and opaque provenance).
 ---
 
 ## ADR-0023 — Background processing with Celery
-**Status:** Accepted — approved by the user on 2026-09-23 (checklist A7). Was: Proposed (Celery named by the user; alternatives listed for approval)
+**Status:** Accepted — approved by the user on 2026-09-23 (checklist A7); implemented for market data in Phase 5 (ADR-0047). Was: Proposed (Celery named by the user; alternatives listed for approval)
 
 **Decision.** Celery workers with a Redis broker; Celery beat for schedules; queues `ingest_fast`, `ingest`, `backfill`, `compute`, `ai`,
 `alerts`, `maintenance`; idempotent tasks with late acknowledgement, time limits, and transient-only retries; `ops.job_run` in Postgres as
@@ -736,7 +737,12 @@ on the page/app (the built-in attribution logo option can satisfy the link).
 ---
 
 ## ADR-0044 — Numeric precision for high-volume data
-**Status:** Proposed (amends ADR-0010 pending benchmark)
+**Status:** Accepted in Phase 5 — keep exact `NUMERIC` for bars. Was: Proposed (amends ADR-0010 pending benchmark)
+
+**Benchmark (2026-09-23, PostgreSQL 17.11 + TimescaleDB 2.30.1, 1,042,564 one-minute bars, 4 series, 30-day chunks,
+uncompressed):** storage 152 MB (`NUMERIC`) vs 144 MB (`double precision`), +5 %; 4-hour roll-up over ~80 days of one
+series 66 ms vs 37 ms; reading 1,000 bars 3.3 ms vs 3.0 ms. The difference is not material at this scale, so market
+bars keep exact decimals. Revisit if compression or order-book/trade volumes change the picture.
 
 **Decision.** Default remains exact `NUMERIC` for L1 values. In the infrastructure phase, benchmark storage size and query speed for high-volume
 families (minute bars, order-book depth, trades) using `NUMERIC` vs. `double precision`. If the difference is material, those families may use
@@ -816,3 +822,58 @@ findings — weaker, because readers of the data would not see the hole); overwr
 limits do not coordinate across processes.
 
 **Future implications.** Workers can call `IngestionEngine.ingest` unchanged; real adapters only implement the four adapter methods.
+
+---
+
+## ADR-0047 — Phase 5 market-data layer: providers, storage, workers, API, dashboard
+**Status:** Accepted (implemented in Phase 5; within approved ADR-0017, 0018, 0020, 0021, 0022, 0023, 0025, 0043, 0044)
+
+**Decision.**
+- **Providers (free, verified against official documentation on 2026-09-23):** Coinbase Exchange (primary, USD;
+  candles 1m/5m/15m/1h/1d and last trade), Kraken (USD; all six timeframes, but only its 720 most recent bars),
+  Binance market-data endpoint, OKX and Bybit (USDT; all six timeframes, deep history), CoinGecko (market
+  capitalisation, latest and daily). OKX, Bybit and Kraken were added at the user's request as further backups.
+  Enabled providers are configurable (`CFI_MARKET_PROVIDERS`).
+- **Access risk recorded, not hidden:** Binance (2024) and OKX, Bybit, Kraken (August 2025) are blocked by Philippine
+  ISPs; Coinbase and CoinGecko are not on those lists. Unreachable providers show as failed runs and dashboard warnings.
+- **Venues are separate series; units are never mixed.** Datasets are defined per quote currency
+  (`market.ohlcv.usd.<tf>`, `market.ohlcv.usdt.<tf>`); USD and USDT prices are never combined or treated as equal.
+  No cross-venue blending or "consensus price".
+- **Storage:** `obs.market_bar` hypertable (30-day chunks) with the same provenance columns and natural key as
+  `obs.observation`; the engine gained record families (scalar / bar) behind one pipeline. Explicit missing bars;
+  OHLC consistency failures kept as `suspect`; changes are new revisions.
+- **4h on Coinbase** (not published) is rolled up at read time from stored 1h bars, labelled with its derivation, and
+  shown only when all four hourly bars exist — otherwise reported as missing. Evidence category stays "observed"
+  because an OHLC roll-up is an exact regrouping of observed bars; the `derivation` field and UI badge disclose it.
+  OKX 4h/1d use its UTC-aligned bars (`4Hutc`, `1Dutc`), never the Hong Kong-time variants.
+- **Finality:** a bar is final one minute after its period ends; unfinished bars (and CoinGecko's running value)
+  are skipped and counted (`job_run.skipped`), never stored.
+- **Point-in-time reliability:** `native` when stored within the dataset's freshness limit after it became knowable,
+  otherwise `backfilled_latest`.
+- **Workers (ADR-0023 implemented):** Celery with Redis; `worker` (queues `ingest_fast`, `ingest`) and
+  `worker-backfill` (queue `backfill`) as separate processes, one task at a time each, late acknowledgement, time
+  limits, expiring schedule entries; `beat` holds the schedule. Latest ingestion catches up after downtime (bounded);
+  backfill walks history backwards with a checkpoint (`ops.backfill_state`) and stops at the configured depth or
+  after three consecutive empty chunks (start of the provider's available history).
+- **HTTP client:** HTTP 418 (IP ban) is treated as rate limiting; a `Retry-After` longer than the maximum backoff is
+  never retried early — the request fails and the circuit stays open for that long. Optional API keys supported.
+- **API:** `GET /api/v1/market/catalog`, `/market/bars`, `/market/overview` — read-only, `as_of` point-in-time
+  parameter, exact decimals as strings, evidence envelope with source, freshness, gaps, last ingestion run, warnings.
+- **Dashboard:** server-rendered Market page (asset / timeframe / venue switching via links), Lightweight Charts
+  candles + separate volume pane (TradingView attribution kept), freshness badges, source and missing-data warnings,
+  30-second refresh. No signals, scores or recommendations.
+
+**Reason.** Free sources only (B2), no single-provider dependency (R8), and complete transparency about gaps, units
+and access problems (R3).
+
+**Alternatives considered.** Binance as primary (blocked in the Philippines); storing derived 4h bars (duplicates data
+and needs recomputation on revision); partial 4h candles (would misstate high/low/volume); an in-process scheduler
+instead of Celery (deviates from approved ADR-0023); Bitstamp (official docs and API not verifiable from here).
+
+**Trade-offs.** Many small scheduled requests; rate limiters and circuit breakers are per worker process (limits set
+conservatively so both processes together stay under each provider's published limit); CoinGecko storage terms need
+the user's decision; exchange terms not yet reviewed.
+
+**Future implications.** Order-book, trades and derivatives datasets reuse the bar store pattern; cross-venue metrics
+(premiums, venue share) belong to later metric phases (L2), not here.
+

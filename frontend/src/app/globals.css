@@ -253,3 +253,193 @@ a {
     overflow-x: auto;
   }
 }
+
+/* --- Market dashboard (Phase 5) ---------------------------------------------------------- */
+:root {
+  --warn: #9a5b00;
+  --warn-soft: #fdf1dc;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --warn: #f2b35b;
+    --warn-soft: #33260f;
+  }
+}
+
+.badge-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.badge + .badge {
+  margin-left: 6px;
+}
+
+.market-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.segment {
+  padding: 6px 12px;
+  font-size: 14px;
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+}
+
+.segment:last-child {
+  border-right: none;
+}
+
+.segment:hover {
+  background: var(--neutral-soft);
+  color: var(--text);
+}
+
+.segment.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.tile h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.tile-value {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile p {
+  margin: 2px 0;
+}
+
+.venue-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.venue-list strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.attribution {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.chart-card h2 {
+  font-size: 16px;
+}
+
+.price-chart {
+  width: 100%;
+  height: 460px;
+}
+
+.empty-chart {
+  padding: 48px 12px;
+  text-align: center;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.chart-card a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.facts > div {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 12px;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.warnings {
+  margin: 0;
+  padding: 10px 12px 10px 28px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+@media (max-width: 760px) {
+  .facts > div {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .price-chart {
+    height: 360px;
+  }
+}

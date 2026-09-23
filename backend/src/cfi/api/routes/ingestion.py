@@ -39,8 +39,10 @@ class ProviderHealthResponse(BaseModel):
 
 class JobRun(BaseModel):
     job_run_id: int
+    job_type: str
     dataset_id: str
     provider_id: str
+    subject: str | None
     status: str
     window_start: datetime
     window_end: datetime
@@ -54,6 +56,8 @@ class JobRun(BaseModel):
     missing: int
     conflicts: int
     rejected: int
+    skipped: int
+    suspect: int
     stale: bool | None
     error_code: str | None
     error_detail: str | None

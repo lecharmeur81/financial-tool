@@ -5,7 +5,8 @@ conventions exist. It is deliberately small:
 
 - ``first_request`` / ``next_request`` describe *what* to ask for (including pagination);
 - ``parse`` validates the payload shape and raises ``SchemaMismatchError`` if it changed;
-- ``normalise`` converts one provider record into a :class:`CanonicalObservation`.
+- ``normalise`` converts one provider record into a canonical record
+  (:class:`CanonicalObservation` or :class:`CanonicalBar`).
 
 *How* requests are sent — authentication, timeouts, retries with exponential backoff, rate
 limits, circuit breaking, request logging — is handled once, in :mod:`cfi.providers.http`.
@@ -24,7 +25,7 @@ from typing import Any, Literal
 from cfi.core.time import ensure_utc
 from cfi.domain.datasets import DatasetSpec
 from cfi.domain.enums import AuthType
-from cfi.domain.observation import CanonicalObservation
+from cfi.domain.observation import ObservedRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +35,7 @@ class AuthSpec:
     type: AuthType = AuthType.NONE
     name: str = ""  # header or query-parameter name
     env_var: str = ""  # environment variable holding the secret (never the secret itself)
+    optional: bool = False  # True: send the request without credential when none is configured
 
     def __post_init__(self) -> None:
         if self.type is not AuthType.NONE and not (self.name and self.env_var):
@@ -71,14 +73,21 @@ class ProviderCapabilities:
     original_source: str = "unknown"
     terms_verified: bool = False
     notes: str = ""
+    # How to describe an expected-but-absent point from this provider (explicit missing rows).
+    gap_note: str = "expected point not delivered by provider"
 
 
 @dataclass(frozen=True, slots=True)
 class FetchWindow:
-    """Half-open UTC time window [start, end)."""
+    """Half-open UTC time window [start, end), optionally for one canonical subject.
+
+    ``subject`` is a canonical asset symbol (e.g. ``BTC``); ``None`` means every subject the
+    adapter covers for the dataset.
+    """
 
     start: datetime
     end: datetime
+    subject: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "start", ensure_utc(self.start, field="start"))
@@ -99,6 +108,8 @@ class RequestSpec:
     params: Mapping[str, str] = field(default_factory=dict)
     method: Literal["GET", "POST"] = "GET"
     page: int = 1
+    # Adapter bookkeeping for pagination (e.g. the overall window end). Never sent to the provider.
+    state: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,11 +169,12 @@ class ProviderAdapter(ABC):
         """Validate and split a raw response. Raise ``SchemaMismatchError`` on unexpected shape."""
 
     @abstractmethod
-    def normalise(self, record: ProviderRecord, ctx: NormaliseContext) -> CanonicalObservation:
+    def normalise(self, record: ProviderRecord, ctx: NormaliseContext) -> ObservedRecord:
         """Convert one provider record into the canonical model (units, symbols, UTC).
 
         Raise ``DataValidationError`` for a record that cannot be normalised; the engine rejects
-        that record, records why, and continues with the others.
+        that record, records why, and continues with the others. Raise ``NotYetFinalError`` for a
+        record that is not final yet (e.g. the current, unfinished bar): it is skipped and counted.
         """
 
     @property

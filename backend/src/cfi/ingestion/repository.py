@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import datetime
-from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select, text, update
@@ -19,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.db import tables as t
 from cfi.domain.datasets import DatasetSpec
-from cfi.domain.observation import CanonicalObservation
+from cfi.domain.observation import ObservedRecord
 from cfi.ingestion.archive import ArchivedPayload
 from cfi.ingestion.detection import QualityFinding
 from cfi.providers.base import FetchWindow, ProviderCapabilities, RawResponse
@@ -60,6 +59,7 @@ class IngestionRepository:
             "revisable": spec.revisable,
             "expect_continuous": spec.expect_continuous,
             "description": spec.description,
+            "kind": spec.kind,
             "updated_at": now,
         }
         stmt = insert(t.dataset).values(**values)
@@ -90,13 +90,15 @@ class IngestionRepository:
         window: FetchWindow,
         started_at: datetime,
         code_version: str,
+        job_type: str = "ingest",
     ) -> int:
         stmt = (
             insert(t.job_run)
             .values(
-                job_type="ingest",
+                job_type=job_type,
                 dataset_id=dataset_id,
                 provider_id=provider_id,
+                subject=window.subject,
                 window_start=window.start,
                 window_end=window.end,
                 status="running",
@@ -109,6 +111,8 @@ class IngestionRepository:
                 missing=0,
                 conflicts=0,
                 rejected=0,
+                skipped=0,
+                suspect=0,
                 code_version=code_version,
             )
             .returning(t.job_run.c.job_run_id)
@@ -163,7 +167,7 @@ class IngestionRepository:
 
     # ------------------------------------------------------------------ series & observations
 
-    async def series_id(self, obs: CanonicalObservation) -> int:
+    async def series_id(self, obs: ObservedRecord) -> int:
         identity = {
             "dataset_id": obs.dataset_id,
             "subject_ref": obs.subject_ref,
@@ -199,88 +203,51 @@ class IngestionRepository:
             raise ValueError(f"series {row.series_id} is stored in {row.unit!r}, got {obs.unit!r}")
         return int(row.series_id)
 
-    async def latest_for_provider(
-        self, series_id: int, event_times: Sequence[datetime], provider_id: str
-    ) -> dict[datetime, tuple[int, Decimal | None]]:
-        """Latest stored revision (and its value) per event time, for one provider."""
-        if not event_times:
-            return {}
-        o = t.observation
-        stmt = (
-            select(o.c.event_time, o.c.revision, o.c.value)
-            .distinct(o.c.event_time)
-            .where(
-                o.c.series_id == series_id,
-                o.c.source_provider == provider_id,
-                o.c.event_time.in_(list(event_times)),
-            )
-            .order_by(o.c.event_time, o.c.revision.desc())
+    # ------------------------------------------------------------------ backfill checkpoints
+
+    async def backfill_state(
+        self, dataset_id: str, provider_id: str, subject: str
+    ) -> dict[str, Any] | None:
+        b = t.backfill_state
+        stmt = select(b).where(
+            b.c.dataset_id == dataset_id, b.c.provider_id == provider_id, b.c.subject == subject
         )
         async with self.engine.connect() as conn:
-            rows = (await conn.execute(stmt)).all()
-        return {r.event_time: (int(r.revision), r.value) for r in rows}
+            row = (await conn.execute(stmt)).mappings().first()
+        return dict(row) if row else None
 
-    async def latest_from_others(
-        self, series_id: int, event_times: Sequence[datetime], provider_id: str
-    ) -> dict[datetime, list[tuple[str, Decimal | None]]]:
-        """Latest revision per (event time, other provider)."""
-        if not event_times:
-            return {}
-        o = t.observation
-        stmt = (
-            select(o.c.event_time, o.c.source_provider, o.c.value)
-            .distinct(o.c.event_time, o.c.source_provider)
-            .where(
-                o.c.series_id == series_id,
-                o.c.source_provider != provider_id,
-                o.c.event_time.in_(list(event_times)),
-            )
-            .order_by(o.c.event_time, o.c.source_provider, o.c.revision.desc())
+    async def save_backfill_state(
+        self,
+        dataset_id: str,
+        provider_id: str,
+        subject: str,
+        *,
+        covered_from: datetime,
+        covered_to: datetime,
+        target_start: datetime,
+        complete: bool,
+        empty_chunks: int,
+        note: str | None,
+        now: datetime,
+    ) -> None:
+        values = {
+            "dataset_id": dataset_id,
+            "provider_id": provider_id,
+            "subject": subject,
+            "covered_from": covered_from,
+            "covered_to": covered_to,
+            "target_start": target_start,
+            "complete": complete,
+            "empty_chunks": empty_chunks,
+            "note": note,
+            "updated_at": now,
+        }
+        stmt = insert(t.backfill_state).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["dataset_id", "provider_id", "subject"], set_=values
         )
-        async with self.engine.connect() as conn:
-            rows = (await conn.execute(stmt)).all()
-        out: dict[datetime, list[tuple[str, Decimal | None]]] = {}
-        for r in rows:
-            out.setdefault(r.event_time, []).append((r.source_provider, r.value))
-        return out
-
-    async def insert_observations(self, rows: Sequence[tuple[int, CanonicalObservation]]) -> int:
-        if not rows:
-            return 0
-        values = [
-            {
-                "series_id": series_id,
-                "event_time": o.event_time,
-                "available_at": o.available_at,
-                "available_at_estimated": o.available_at_estimated,
-                "ingested_at": o.ingested_at,
-                "value": o.value,
-                "source_provider": o.source_provider,
-                "original_source": o.original_source,
-                "raw_ref": o.raw_ref,
-                "revision": o.revision,
-                "pit_reliability": str(o.pit_reliability),
-                "quality_status": str(o.quality_status),
-                "quality_note": o.quality_note,
-                "confidence": o.confidence,
-                "transformations": list(o.transformations),
-            }
-            for series_id, o in rows
-        ]
         async with self.engine.begin() as conn:
-            await conn.execute(insert(t.observation), values)
-        return len(values)
-
-    async def latest_event_time(self, series_id: int, provider_id: str) -> datetime | None:
-        o = t.observation
-        stmt = select(func.max(o.c.event_time)).where(
-            o.c.series_id == series_id,
-            o.c.source_provider == provider_id,
-            o.c.value.is_not(None),
-        )
-        async with self.engine.connect() as conn:
-            value: datetime | None = (await conn.execute(stmt)).scalar()
-        return value
+            await conn.execute(stmt)
 
     # ------------------------------------------------------------------ quality findings
 

@@ -10,13 +10,14 @@ from cfi.core.config import Settings
 
 
 def create_redis(settings: Settings) -> Redis:
-    return Redis.from_url(
+    client: Redis = Redis.from_url(
         settings.redis_url.get_secret_value(),
         decode_responses=True,
         socket_connect_timeout=settings.health_check_timeout_seconds,
         socket_timeout=settings.health_check_timeout_seconds,
         health_check_interval=30,
     )
+    return client
 
 
 async def check_redis(client: Redis) -> Mapping[str, str]:

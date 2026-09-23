@@ -2,8 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 4 — Data ingestion engine → ✅ complete in Claude's workspace; awaiting the user's Docker check and commit
-**Next phase:** 5 — to be defined by the user (do not start automatically)
+**Current phase:** 5 — Market data → ✅ complete in Claude's workspace; awaiting the user's Docker run with real providers and commit
+**Next phase:** 6 — to be defined by the user (do not start automatically)
 
 ---
 
@@ -15,8 +15,8 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 1 | Master engineering rules | ✅ Complete |
 | 2 | Architecture | ✅ Complete (checklist Part A approved 2026-09-23) |
 | 3 | Foundation (infrastructure) | ✅ Complete — verified on Windows |
-| 4 | Data ingestion engine | ✅ Complete — Docker check on Windows pending |
-| 5 | Institutional data | ⏳ Not started |
+| 4 | Data ingestion engine | ✅ Complete — verified on Windows (`69b5442`) |
+| 5 | Market data | ✅ Complete — Windows run with real providers pending |
 | 6 | Whale data | ⏳ Not started |
 | 7 | Derivatives | ⏳ Not started |
 | 8 | Liquidity | ⏳ Not started |
@@ -39,6 +39,8 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 25 | Security + AI + stress testing | ⏳ Not started |
 | 26 | Production | ⏳ Not started |
 | 27 | Real-time intelligence | ⏳ Not started |
+
+Phases 6–27 are provisional until the user issues them. "Institutional data" (previously listed as 5) is not yet re-scheduled.
 
 ---
 
@@ -242,4 +244,58 @@ stale value, conflicting provider values → `tests/integration/test_ingestion.p
 - No real provider adapters (by instruction); mock providers are test-only and never registered in the app.
 - Docker images were not rebuilt in Claude's workspace (Docker Hub unreachable there); the Windows Docker check is pending.
 
-**Git commit:** pending — user to commit as `[P4] data ingestion engine`.
+**Windows check (user, 2026-09-23):** `docker compose up --build` — migration `0002` applied, all services healthy;
+`docker compose exec api pytest` → 106 passed.
+
+**Git commit:** `69b5442` — `[P4] data ingestion engine`.
+
+### 2026-09-23 — Phase 5: Market data
+
+**What changed**
+- **Providers** (verified against official docs on 2026-09-23; no keys needed): Coinbase Exchange (USD candles 1m/5m/15m/1h/1d,
+  last trade — response format also confirmed with a real captured response), Kraken (USD, all six timeframes, 720 most
+  recent bars only), Binance market-data endpoint, OKX and Bybit (USDT, all six timeframes), CoinGecko (market cap,
+  latest and daily). OKX, Bybit and Kraken added at the user's request mid-phase.
+- **Storage:** migration `0003` — `obs.market_bar` hypertable (OHLCV + full provenance), `ops.backfill_state`,
+  `ops.dataset.kind`, `ops.job_run.subject/skipped/suspect`. Exact decimals kept (ADR-0044 benchmark: +5 % storage).
+- **Engine:** record families (scalar/bar) through the same pipeline; unfinished bars skipped and counted; OHLC consistency
+  failures kept as `suspect`; provider-specific gap notes; backfill job type; only in-window data counts as coverage.
+- **HTTP client:** 418 treated as rate limiting; long `Retry-After` never retried early (circuit held open); optional API
+  keys; fixed a token-bucket rounding loop found by the new tests.
+- **Workers:** Celery `worker` (latest data), `worker-backfill` (history) and `beat` services; catch-up after downtime;
+  resumable backfill with checkpoints.
+- **API:** `/api/v1/market/catalog`, `/market/bars` (point-in-time `as_of`, gaps, freshness, source, derivation,
+  warnings), `/market/overview`; `/ingestion/runs` now shows subject, job type, skipped and suspect counts.
+- **Market page:** asset / timeframe / venue switching, candlestick chart with separate volume pane (TradingView
+  Lightweight Charts 5.2.1, attribution kept), last trade, market cap (CoinGecko attribution), latest 1m close per venue,
+  freshness badges, data status (source, units, last update, completeness, last ingestion, history) and missing-data
+  warnings; refreshes every 30 s. No signals or recommendations.
+- **Docs:** ADR-0047 (and ADR-0044 accepted, ADR-0023 implemented), ARCHITECTURE §5.1/5.3/5.5/5.6/§10/§11,
+  DATA_DICTIONARY §4/§5/§5a, CLAUDE.md §C3 (Phase 5 = Market data), README, TODO, THIRD_PARTY_NOTICES.md, `.env.example`.
+
+**Tests run (Claude's workspace: PostgreSQL 17.11 + TimescaleDB 2.30.1, Redis 8.8.3, Python 3.12, Node 22)**
+
+| Check | Result |
+|---|---|
+| Backend `uv run pytest` (unit + integration + API) | 164 passed (run twice) |
+| Backend without database/Redis | 113 passed, 51 skipped |
+| `ruff format --check` / `ruff check` / `mypy` (strict, 85 files) | clean |
+| Frontend `pnpm test` / `lint` / `format:check` / `typecheck` / `build` | 34 passed / clean / clean / clean / built |
+| `docker compose config` | valid |
+| Running stack (API + built frontend + Playwright) | charts render on 6 pages (5 venues, native and derived 4h), timeframe switching works, TradingView link present, no browser console errors — **with synthetic test data** (this workspace cannot reach the providers) |
+| Celery worker + beat against a test database | tasks scheduled and executed; with no network, every run is recorded as `failed` (connection error), circuit breaker engaged — failures visible, nothing invented |
+
+Required behaviour covered by tests: historical ingestion (backfill, pagination, listing/history start, failed chunk
+retry), latest data (catch-up), normalised storage with provenance, market API (exact decimals, gaps, freshness,
+point-in-time leakage test, derived 4h), OKX/Bybit/Kraken formats and error payloads.
+
+**Known limitations**
+- Real provider data has **not** been seen by the system yet: this workspace has no access to the providers. The first
+  real run is on the user's machine. Binance, OKX, Bybit and Kraken are blocked by Philippine ISPs and may fail there.
+- Decisions pending (TODO.md): CoinGecko storage terms; exchange terms review; history depth / retention; blocked providers.
+- Kraken offers only its 720 most recent bars per timeframe; Coinbase 4h is derived from 1h.
+- Rate limiters and circuit breakers are per worker process (limits set so both processes together stay under each
+  provider's published limit).
+- Times on the Market page are UTC (Asia/Manila display not built). Quality findings grow quickly (retention to add).
+
+**Git commit:** pending — user to commit as `[P5] market data layer`.

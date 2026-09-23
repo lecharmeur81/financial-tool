@@ -1,4 +1,4 @@
-"""Canonical observed-data record (L1) — the only shape provider data may take after normalisation.
+"""Canonical observed-data records (L1): the only shapes provider data may take once normalised.
 
 Fields follow DATA_DICTIONARY.md §2 and CLAUDE.md R3. Every record answers:
 
@@ -14,6 +14,11 @@ Fields follow DATA_DICTIONARY.md §2 and CLAUDE.md R3. Every record answers:
 | How reliable? | ``quality_status``, ``quality_note``, ``confidence``, ``pit_reliability`` |
 | Was it transformed? | ``transformations`` (empty = value stored exactly as reported) |
 
+Two record families share this provenance (ADR-0017):
+
+- :class:`CanonicalObservation` — one scalar ``value`` (stored in ``obs.observation``);
+- :class:`CanonicalBar` — an OHLCV bar (stored in ``obs.market_bar``).
+
 Invariants enforced here:
 - all timestamps are timezone-aware and converted to UTC;
 - a missing value is ``None`` **with** ``quality_status = missing`` — never zero, never silent;
@@ -25,13 +30,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
+from typing import Self
 
 from cfi.core.time import ensure_utc
 from cfi.domain.enums import PitReliability, QualityStatus
 
 
-@dataclass(frozen=True, slots=True)
-class CanonicalObservation:
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ObservedRecord:
+    """Provenance shared by every L1 record family."""
+
     dataset_id: str
     metric: str
     asset: str | None
@@ -42,7 +50,6 @@ class CanonicalObservation:
     available_at: datetime
     available_at_estimated: bool
     ingested_at: datetime
-    value: Decimal | None
     source_provider: str
     original_source: str
     quality_status: QualityStatus
@@ -61,9 +68,9 @@ class CanonicalObservation:
         )
         object.__setattr__(self, "ingested_at", ensure_utc(self.ingested_at, field="ingested_at"))
 
-        if self.value is None and self.quality_status is not QualityStatus.MISSING:
+        if self.is_missing and self.quality_status is not QualityStatus.MISSING:
             raise ValueError("value is None but quality_status is not 'missing' (R3)")
-        if self.quality_status is QualityStatus.MISSING and self.value is not None:
+        if self.quality_status is QualityStatus.MISSING and not self.is_missing:
             raise ValueError("quality_status is 'missing' but a value was provided")
         if self.quality_status is not QualityStatus.OK and not self.quality_note:
             raise ValueError("quality_note is required when quality_status is not 'ok'")
@@ -77,13 +84,133 @@ class CanonicalObservation:
         if not self.original_source:
             raise ValueError("original_source must not be empty (use 'unknown' if not provided)")
 
+    # -- family-specific behaviour used by the ingestion engine ------------------------------
+
+    @property
+    def is_missing(self) -> bool:
+        """True when the record carries no value (an explicit gap)."""
+        raise NotImplementedError
+
+    def comparable(self) -> object:
+        """The values that decide duplicate vs. revision (same key, same values = duplicate)."""
+        raise NotImplementedError
+
+    @property
+    def conflict_value(self) -> Decimal | None:
+        """The value compared across providers for conflict detection."""
+        raise NotImplementedError
+
+    def describe(self) -> str:
+        """Human-readable value, used in quality findings."""
+        raise NotImplementedError
+
+    def consistency_problems(self) -> list[str]:
+        """Internal consistency checks; violations mark the record ``suspect`` (kept, flagged)."""
+        return []
+
+    # -- shared helpers ----------------------------------------------------------------------
+
     @property
     def transformed(self) -> bool:
         """True if the value or its timestamp was converted from the provider's representation."""
         return bool(self.transformations)
 
-    def with_quality(self, status: QualityStatus, note: str) -> CanonicalObservation:
+    def with_quality(self, status: QualityStatus, note: str) -> Self:
         return replace(self, quality_status=status, quality_note=note)
 
-    def with_revision(self, revision: int) -> CanonicalObservation:
+    def with_revision(self, revision: int) -> Self:
         return replace(self, revision=revision)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CanonicalObservation(ObservedRecord):
+    """A single scalar value (price snapshot, market cap, ETF flow, …)."""
+
+    value: Decimal | None
+
+    @property
+    def is_missing(self) -> bool:
+        return self.value is None
+
+    def comparable(self) -> object:
+        return self.value
+
+    @property
+    def conflict_value(self) -> Decimal | None:
+        return self.value
+
+    def describe(self) -> str:
+        return str(self.value)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CanonicalBar(ObservedRecord):
+    """An OHLCV bar. ``event_time`` is the bar **open** time; the bar covers one ``period``.
+
+    Prices are in ``unit`` (the quote currency, e.g. ``usd`` or ``usdt``); ``volume_base`` is in
+    units of ``asset``; ``volume_quote`` is in ``unit``. ``volume_quote`` and ``trade_count`` are
+    ``None`` when the provider does not report them — they are never estimated here.
+    A missing bar has every price and volume ``None``.
+    """
+
+    open: Decimal | None
+    high: Decimal | None
+    low: Decimal | None
+    close: Decimal | None
+    volume_base: Decimal | None
+    volume_quote: Decimal | None = None
+    trade_count: int | None = None
+
+    def __post_init__(self) -> None:
+        prices = (self.open, self.high, self.low, self.close)
+        if any(p is None for p in prices) and not all(p is None for p in prices):
+            raise ValueError("a bar has either all four prices or none")
+        if self.close is None and (self.volume_base is not None or self.volume_quote is not None):
+            raise ValueError("a missing bar cannot carry volume")
+        ObservedRecord.__post_init__(self)
+
+    @property
+    def is_missing(self) -> bool:
+        return self.close is None
+
+    def comparable(self) -> object:
+        return (
+            self.open,
+            self.high,
+            self.low,
+            self.close,
+            self.volume_base,
+            self.volume_quote,
+            self.trade_count,
+        )
+
+    @property
+    def conflict_value(self) -> Decimal | None:
+        return self.close
+
+    def describe(self) -> str:
+        if self.is_missing:
+            return "missing"
+        return f"O={self.open} H={self.high} L={self.low} C={self.close} V={self.volume_base}"
+
+    def consistency_problems(self) -> list[str]:
+        """OHLC sanity checks. Violations mark the bar ``suspect`` (kept, flagged), never fixed."""
+        if self.is_missing:
+            return []
+        o, h, lo, c = self.open, self.high, self.low, self.close
+        if o is None or h is None or lo is None or c is None:  # pragma: no cover — invariant
+            return ["incomplete prices"]
+        problems = []
+        if h < max(o, c, lo):
+            problems.append("high is below open, close or low")
+        if lo > min(o, c, h):
+            problems.append("low is above open, close or high")
+        if min(o, h, lo, c) <= 0:
+            problems.append("non-positive price")
+        if self.volume_base is not None and self.volume_base < 0:
+            problems.append("negative volume")
+        if self.volume_quote is not None and self.volume_quote < 0:
+            problems.append("negative quote volume")
+        if self.trade_count is not None and self.trade_count < 0:
+            problems.append("negative trade count")
+        return problems

@@ -15,3 +15,7 @@ This Next.js version differs from older ones; its own docs ship in `node_modules
 | Type check       | `pnpm typecheck` (generates route types, then `tsc --noEmit`) |
 | Tests            | `pnpm test`                                                   |
 | Production build | `pnpm build`                                                  |
+
+Charts: TradingView Lightweight Charts™ (Apache-2.0; attribution logo must stay enabled — see
+`../THIRD_PARTY_NOTICES.md`). The Market page (`src/app/market/page.tsx`) renders on the server; only the chart
+(`src/components/market/PriceChart.tsx`) and the refresh timer run in the browser.

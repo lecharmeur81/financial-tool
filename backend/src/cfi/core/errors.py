@@ -78,6 +78,22 @@ class DataValidationError(CFIError):
     title = "Data failed validation"
 
 
+class NotYetFinalError(DataValidationError):
+    """A record that was not final when received (an unfinished bar, a provider's running value).
+
+    Not an error in the data: the record is skipped, counted, and fetched again once final.
+    """
+
+    error_code = "not_yet_final"
+    title = "Value not final yet"
+
+
+class NotFoundError(CFIError):
+    error_code = "not_found"
+    http_status = HTTPStatus.NOT_FOUND
+    title = "Not found"
+
+
 class InsufficientDataError(CFIError):
     error_code = "insufficient_data"
     http_status = HTTPStatus.UNPROCESSABLE_ENTITY

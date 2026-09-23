@@ -12,10 +12,12 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
-from cfi.core.errors import DataValidationError
+from cfi.core.errors import NotYetFinalError
 from cfi.core.time import ensure_utc, parse_period
+from cfi.domain.enums import PitReliability
 
 AvailabilityKind = Literal["provider", "period_end_plus", "event_time_plus"]
+RecordKind = Literal["scalar", "bar"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +49,7 @@ class DatasetSpec:
     revisable: bool = False
     expect_continuous: bool = False
     description: str = ""
+    kind: RecordKind = "scalar"
 
     def __post_init__(self) -> None:
         parse_period(self.period)  # validates
@@ -66,8 +69,8 @@ class DatasetSpec:
     ) -> tuple[datetime, bool]:
         """Return ``(available_at, estimated)`` for one record.
 
-        Raises ``DataValidationError`` when the value could not yet have been final at ingestion
-        (e.g. a bar whose period has not closed) — such data is rejected, never stored as final.
+        Raises ``NotYetFinalError`` when the value could not yet have been final at ingestion
+        (e.g. a bar whose period has not closed) — such data is skipped, never stored as final.
         """
         event_time = ensure_utc(event_time, field="event_time")
         ingested_at = ensure_utc(ingested_at, field="ingested_at")
@@ -83,9 +86,18 @@ class DatasetSpec:
         else:
             available = event_time + rule.delay
         if available > ingested_at:
-            raise DataValidationError(
+            raise NotYetFinalError(
                 f"value for {event_time.isoformat()} was not final at ingestion "
                 f"(knowable from {available.isoformat()})",
                 dataset_id=self.dataset_id,
             )
         return available, True
+
+    def pit_reliability(self, available_at: datetime, ingested_at: datetime) -> PitReliability:
+        """``native`` when we recorded the value while it was current (within the freshness limit
+        after it became knowable); otherwise ``backfilled_latest`` — history as the provider shows
+        it today, which may include later corrections (ADR-0032)."""
+        lag = ensure_utc(ingested_at) - ensure_utc(available_at)
+        if lag <= self.freshness_limit:
+            return PitReliability.NATIVE
+        return PitReliability.BACKFILLED_LATEST

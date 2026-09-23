@@ -109,6 +109,9 @@ class RetryPolicy:
         return min(backoff, self.max_delay)
 
 
+_EPSILON = 1e-9
+
+
 class TokenBucket:
     """Token-bucket rate limiter. ``acquire`` waits (via ``sleep``) until a token is available."""
 
@@ -140,12 +143,14 @@ class TokenBucket:
         async with self._lock:
             waited = 0.0
             self._refill()
-            while self._tokens < 1:
+            # The epsilon stops float rounding (e.g. 0.9999999999 tokens) from looping on
+            # ever-smaller waits.
+            while self._tokens < 1 - _EPSILON:
                 wait = (1 - self._tokens) / self._rate
                 await self._sleep(wait)
                 waited += wait
                 self._refill()
-            self._tokens -= 1
+            self._tokens = max(0.0, self._tokens - 1)
             return waited
 
 
@@ -188,6 +193,12 @@ class CircuitBreaker:
         if self.state == "half_open" or self._failures >= self.failure_threshold:
             self._state = "open"
             self._opened_at = self._clock()
+
+    def hold_open(self, seconds: float) -> None:
+        """Open now and stay open for at least ``seconds`` (the provider asked us to back off)."""
+        self._state = "open"
+        # Opened "as if" earlier/later so that the normal recovery check reopens after `seconds`.
+        self._opened_at = self._clock() + max(0.0, seconds - self.recovery_seconds)
 
 
 # --------------------------------------------------------------------------- client
@@ -261,6 +272,8 @@ class ProviderHttpClient:
         if auth.type is AuthType.NONE:
             return {}, {}
         secret = self._environ.get(auth.env_var)
+        if not secret and auth.optional:
+            return {}, {}
         if not secret:
             raise ProviderPermanentError(
                 f"Credential for provider '{self.capabilities.provider_id}' is not configured "
@@ -351,7 +364,7 @@ class ProviderHttpClient:
                         content_type=response.headers.get("content-type", ""),
                         body=response.content,
                     )
-                if status == 429:
+                if status in (418, 429):  # 418: IP ban for repeated rate-limit violations
                     outcome = "rate_limited"
                     retry_after = _retry_after_seconds(response.headers.get("retry-after"))
                 elif status >= 500:
@@ -385,6 +398,17 @@ class ProviderHttpClient:
                 )
 
             self.breaker.record_failure()
+            if retry_after is not None and retry_after > self.retry.max_delay:
+                # The provider asked us to wait longer than we retry for: stop now, keep the
+                # circuit open for that long, and never retry early (that extends bans).
+                self.breaker.hold_open(retry_after)
+                raise ProviderTransientError(
+                    f"Provider '{provider_id}' asked to wait {retry_after:.0f} s before retrying "
+                    f"({last_error}); not retried.",
+                    provider_id=provider_id,
+                    outcome=last_error,
+                    retry_after_seconds=retry_after,
+                )
             if attempt < self.retry.max_attempts:
                 delay = self.retry.delay(attempt, retry_after, self._rng)
                 log.warning(
