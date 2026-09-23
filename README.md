@@ -6,7 +6,7 @@
 
 ## Status
 
-**Phase A — Project foundation.** Documentation and repository setup only.
+**Phase 0 — Project foundation.** Documentation and repository setup only.
 No application code exists yet. See [`PROGRESS.md`](PROGRESS.md).
 
 ## What it is
@@ -28,7 +28,7 @@ It is designed to help a human:
 
 - **Not a price-prediction oracle.** It does not claim to know what price will do.
 - **Not automatic financial advice.** It never places trades or tells a user what to buy.
-  Paper trading (Phase W) is simulation only.
+  Paper trading (Phase 22) is simulation only.
 - **Not a black box.** Every number on screen links back to the observed data and the calculation that produced it.
 
 ## Core principle: layered evidence
@@ -72,7 +72,7 @@ AI-assisted analysis (Claude)
 
 ## Getting started
 
-Not applicable yet. Setup, installation, and run instructions will be added in **Phase C (Infrastructure)**.
+Not applicable yet. Setup, installation, and run instructions will be added in **Phase 2 (Infrastructure)**.
 
 ## Disclaimer
 

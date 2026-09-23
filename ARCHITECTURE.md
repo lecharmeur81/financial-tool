@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
-**Status:** Draft v0.1 (Phase A). Principles in §1–§10 are the intended contract.
-Technology choices in §11 are **proposed** and must be confirmed in Phase B/C (see `DECISIONS.md`).
+**Status:** Draft v0.1 (Phase 0). Principles in §1–§10 are the intended contract.
+Technology choices in §11 are **proposed** and must be confirmed in Phase 1/2 (see `DECISIONS.md`).
 Nothing described here is implemented yet.
 
 ---
@@ -109,25 +109,25 @@ Design principles:
 
 | Component | Responsibility | Phase |
 |---|---|---|
-| Provider adapters | Fetch from one provider; handle auth, rate limits, retries, pagination; write L0 | D (framework), E–K (sources) |
-| Scheduler | Run ingestion and computation jobs on a schedule; record job runs | C/D |
-| Normalisers | Map provider payloads to canonical observations, units, symbols | D–K |
-| Data quality | Freshness, completeness, range, cross-source consistency checks | D onward |
-| Metric engine | Pure functions `f(observations, as_of) → metric`, registered with IDs and versions | E–L |
-| Signal engine | Z-scores, percentiles, regime-relative thresholds, divergence tests | M |
-| Regime engine | Combine signals into a labelled market state with confidence | N |
-| Similarity engine | Find historical periods whose feature vectors resemble the present | O |
-| Backtester | Point-in-time, walk-forward evaluation of signals and scenarios | P |
-| Red-team harness | Adversarial checks: leakage, overfitting, multiple testing, regime drift | Q |
-| Anomaly engine | Flag statistically unusual observations/metrics, incl. data-error candidates | R |
-| Rotation engine | Relative flows between BTC / ETH / alts / stablecoins / sectors | S |
-| Snapshot builder | Freeze all evidence for a given `as_of` into an immutable, ID'd pack | T |
-| Claude Analyst | Turn a snapshot into a labelled interpretation; validated before storage | T |
-| Daily intelligence | Scheduled snapshot + interpretation + delivery | U |
-| Alerts | Rule-based triggers on signals/regimes; never on AI text alone | V |
-| Paper trading | Simulated positions from user-chosen scenarios | W |
-| Decision journal | Record what the user decided, why, with the snapshot they saw | X |
-| API + Dashboard | Read-only presentation of every layer with drill-down lineage | Y |
+| Provider adapters | Fetch from one provider; handle auth, rate limits, retries, pagination; write L0 | 3 (framework), 4–10 (sources) |
+| Scheduler | Run ingestion and computation jobs on a schedule; record job runs | 2/3 |
+| Normalisers | Map provider payloads to canonical observations, units, symbols | 3–10 |
+| Data quality | Freshness, completeness, range, cross-source consistency checks | 3 onward |
+| Metric engine | Pure functions `f(observations, as_of) → metric`, registered with IDs and versions | 4–11 |
+| Signal engine | Z-scores, percentiles, regime-relative thresholds, divergence tests | 12 |
+| Regime engine | Combine signals into a labelled market state with confidence | 13 |
+| Similarity engine | Find historical periods whose feature vectors resemble the present | 14 |
+| Backtester | Point-in-time, walk-forward evaluation of signals and scenarios | 15 |
+| Red-team harness | Adversarial checks: leakage, overfitting, multiple testing, regime drift | 16 |
+| Anomaly engine | Flag statistically unusual observations/metrics, incl. data-error candidates | 17 |
+| Rotation engine | Relative flows between BTC / ETH / alts / stablecoins / sectors | 18 |
+| Snapshot builder | Freeze all evidence for a given `as_of` into an immutable, ID'd pack | 19 |
+| Claude Analyst | Turn a snapshot into a labelled interpretation; validated before storage | 19 |
+| Daily intelligence | Scheduled snapshot + interpretation + delivery | 20 |
+| Alerts | Rule-based triggers on signals/regimes; never on AI text alone | 21 |
+| Paper trading | Simulated positions from user-chosen scenarios | 22 |
+| Decision journal | Record what the user decided, why, with the snapshot they saw | 23 |
+| API + Dashboard | Read-only presentation of every layer with drill-down lineage | 24 |
 
 ---
 
@@ -242,8 +242,8 @@ A large transfer is **not** an institution by default; a small transfer is **not
 | Migrations | Alembic (with SQLAlchemy) | Versioned schema changes |
 | Jobs | Simple scheduler first (e.g. APScheduler), orchestrator later only if needed | Simplicity |
 | API | FastAPI | Typed, lightweight |
-| Dashboard | Decide in Phase Y (options: React/Next.js; Streamlit for internal prototypes) | Defer until data layer exists |
-| AI | Anthropic API (Claude), structured output + validator | Phase T |
+| Dashboard | Decide in Phase 24 (options: React/Next.js; Streamlit for internal prototypes) | Defer until data layer exists |
+| AI | Anthropic API (Claude), structured output + validator | Phase 19 |
 | Runtime | Docker Compose for local dev (Docker Desktop + WSL2 on Windows) | Reproducible environment |
 | Quality | pytest, ruff, mypy, pre-commit | Tests, lint, types |
 | Secrets | `.env` locally (git-ignored); secret manager in production | Never in Git |

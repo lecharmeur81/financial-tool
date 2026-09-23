@@ -1,6 +1,6 @@
 # DATA_DICTIONARY.md
 
-**Status:** Draft v0.1 (Phase A). Defines conventions, shared fields, and the planned dataset/metric catalogue.
+**Status:** Draft v0.1 (Phase 0). Defines conventions, shared fields, and the planned dataset/metric catalogue.
 **Nothing here is implemented.** Entries marked `planned` have no table, code, or data yet.
 Exact column types and table names are finalised when each phase is implemented; this file is updated in the same commit.
 
@@ -94,31 +94,31 @@ Evidence class indicates how directly the dataset tells us *who* is acting.
 
 | Category | Dataset (planned) | Typical period | Evidence of actor | Phase |
 |---|---|---|---|---|
-| Market | Spot OHLCV per venue | 1m–1d | n/a | E |
-| Market | Spot volume by venue | 1h–1d | inferred (venue mix) | E |
-| Institutional | Spot ETF daily net flows, holdings, AUM | 1d | direct | F |
-| Institutional | CME futures OI & volume | 1d | inferred (regulated venue) | F |
-| Institutional | Regulatory position filings (e.g. quarterly holdings) | 1q, lagged | direct, heavily lagged | F |
-| Institutional | Public company / treasury holdings | event | direct (filings) / attributed | F |
-| Institutional | Cross-venue premium (e.g. US-regulated vs offshore spot) | 1m–1h | inferred | F |
-| Whale | Large on-chain transfers | event | inferred (size) / attributed (labels) | G |
-| Whale | Balances by holder-size band | 1d | inferred | G |
-| Exchange flows | Exchange net inflow/outflow, reserves | 1h–1d | attributed (exchange address labels) | G |
-| Derivatives | Perpetual funding rates per venue | 1h–8h | n/a | H |
-| Derivatives | Open interest per venue/instrument | 5m–1d | n/a | H |
-| Derivatives | Liquidations (long/short) | event–1h | n/a | H |
-| Derivatives | Futures basis / term structure | 1h–1d | n/a | H |
-| Derivatives | Long/short account & position ratios (where venues publish) | 5m–1h | inferred | H/J |
-| Options | Options OI, volume, IV, skew, term structure, put/call | 1h–1d | n/a | H |
-| Liquidity | Stablecoin supply per chain/issuer | 1d | direct (issuer) / attributed | I |
-| Liquidity | Stablecoin exchange balances & flows | 1d | attributed | I |
-| Liquidity | Order-book depth (±x% from mid) | 1m–1h | n/a | I |
-| Retail | Search interest, app ranking, social volume/sentiment | 1d | inferred | J |
-| Retail | Small-transfer / small-holder activity | 1d | inferred | J |
-| Macro | Rates, yields, dollar index, liquidity aggregates, inflation, equities, volatility indices | 1d–1m | n/a | K |
-| Market structure | Dominance, correlations, volatility, realized cap-style aggregates | 1d | n/a | L |
+| Market | Spot OHLCV per venue | 1m–1d | n/a | 4 |
+| Market | Spot volume by venue | 1h–1d | inferred (venue mix) | 4 |
+| Institutional | Spot ETF daily net flows, holdings, AUM | 1d | direct | 5 |
+| Institutional | CME futures OI & volume | 1d | inferred (regulated venue) | 5 |
+| Institutional | Regulatory position filings (e.g. quarterly holdings) | 1q, lagged | direct, heavily lagged | 5 |
+| Institutional | Public company / treasury holdings | event | direct (filings) / attributed | 5 |
+| Institutional | Cross-venue premium (e.g. US-regulated vs offshore spot) | 1m–1h | inferred | 5 |
+| Whale | Large on-chain transfers | event | inferred (size) / attributed (labels) | 6 |
+| Whale | Balances by holder-size band | 1d | inferred | 6 |
+| Exchange flows | Exchange net inflow/outflow, reserves | 1h–1d | attributed (exchange address labels) | 6 |
+| Derivatives | Perpetual funding rates per venue | 1h–8h | n/a | 7 |
+| Derivatives | Open interest per venue/instrument | 5m–1d | n/a | 7 |
+| Derivatives | Liquidations (long/short) | event–1h | n/a | 7 |
+| Derivatives | Futures basis / term structure | 1h–1d | n/a | 7 |
+| Derivatives | Long/short account & position ratios (where venues publish) | 5m–1h | inferred | 7/9 |
+| Options | Options OI, volume, IV, skew, term structure, put/call | 1h–1d | n/a | 7 |
+| Liquidity | Stablecoin supply per chain/issuer | 1d | direct (issuer) / attributed | 8 |
+| Liquidity | Stablecoin exchange balances & flows | 1d | attributed | 8 |
+| Liquidity | Order-book depth (±x% from mid) | 1m–1h | n/a | 8 |
+| Retail | Search interest, app ranking, social volume/sentiment | 1d | inferred | 9 |
+| Retail | Small-transfer / small-holder activity | 1d | inferred | 9 |
+| Macro | Rates, yields, dollar index, liquidity aggregates, inflation, equities, volatility indices | 1d–1m | n/a | 10 |
+| Market structure | Dominance, correlations, volatility, realized cap-style aggregates | 1d | n/a | 11 |
 
-Candidate providers for each dataset are **not yet selected**; see `TODO.md` (Phase D research).
+Candidate providers for each dataset are **not yet selected**; see `TODO.md` (Phase 3 research).
 No provider capability is assumed until verified against its documentation and a real response.
 
 ---
@@ -140,7 +140,7 @@ missing_policy:   if venues covering < X% of total OI are present → partial; i
 fill_policy:      none
 interpretation:   positive = longs pay shorts (long-side demand for leverage)
 caveats:          venue funding intervals differ; normalise to per_8h before weighting
-owner_phase:      H
+owner_phase:      7
 status:           planned
 ```
 
@@ -153,27 +153,27 @@ exact inputs depend on verified provider data.
 
 | Metric (planned) | Definition | Phase |
 |---|---|---|
-| ETF net flow (USD / coin) | Creations − redemptions per fund per day; aggregated across funds | F |
-| ETF flow z-score | Net flow vs. rolling distribution of past flows (point-in-time window) | F/M |
-| Exchange netflow | Inflow − outflow for labelled exchange addresses; positive = coins moving onto exchanges | G |
-| Exchange reserve change | Δ balance held on labelled exchange addresses | G |
-| Whale accumulation index | Change in supply held by a size band, net of exchange-labelled addresses | G |
-| Open interest (USD) | Contracts outstanding × contract size × mark price | H |
-| OI change vs. price change | Joint direction of ΔOI and Δprice (e.g. price↑ OI↑ = new longs *or* short-side leverage — ambiguous without funding) | H |
-| Funding rate (normalised) | Venue funding converted to per_8h and annualised | H |
-| Estimated leverage ratio | Derivatives OI ÷ relevant exchange reserve (labelled proxy) | H |
-| Futures basis (annualised) | (Futures price − spot) ÷ spot × (365 ÷ days to expiry) | H |
-| Liquidation imbalance | (Long liq − short liq) ÷ total liq over window | H |
-| 25-delta skew | IV(25Δ put) − IV(25Δ call) at a fixed tenor | H |
-| Put/call OI ratio | Put OI ÷ call OI | H |
-| Stablecoin supply change | Δ total supply over window, by issuer/chain | I |
-| Stablecoin exchange ratio | Stablecoins on exchanges ÷ relevant crypto market cap (dry-powder proxy) | I |
-| Market depth | Sum of resting bid/ask size within ±x% of mid | I |
-| Retail attention index | Composite of normalised search/app/social inputs (weights documented) | J |
-| Institutional–retail divergence | Difference between standardised institutional and retail composites | M |
-| Dominance | Asset market cap ÷ total market cap | L |
-| Realized volatility | Annualised std. dev. of log returns over window | L |
-| Rolling correlation | Correlation of returns (e.g. BTC vs. equity index) over window | K/L |
+| ETF net flow (USD / coin) | Creations − redemptions per fund per day; aggregated across funds | 5 |
+| ETF flow z-score | Net flow vs. rolling distribution of past flows (point-in-time window) | 5/12 |
+| Exchange netflow | Inflow − outflow for labelled exchange addresses; positive = coins moving onto exchanges | 6 |
+| Exchange reserve change | Δ balance held on labelled exchange addresses | 6 |
+| Whale accumulation index | Change in supply held by a size band, net of exchange-labelled addresses | 6 |
+| Open interest (USD) | Contracts outstanding × contract size × mark price | 7 |
+| OI change vs. price change | Joint direction of ΔOI and Δprice (e.g. price↑ OI↑ = new longs *or* short-side leverage — ambiguous without funding) | 7 |
+| Funding rate (normalised) | Venue funding converted to per_8h and annualised | 7 |
+| Estimated leverage ratio | Derivatives OI ÷ relevant exchange reserve (labelled proxy) | 7 |
+| Futures basis (annualised) | (Futures price − spot) ÷ spot × (365 ÷ days to expiry) | 7 |
+| Liquidation imbalance | (Long liq − short liq) ÷ total liq over window | 7 |
+| 25-delta skew | IV(25Δ put) − IV(25Δ call) at a fixed tenor | 7 |
+| Put/call OI ratio | Put OI ÷ call OI | 7 |
+| Stablecoin supply change | Δ total supply over window, by issuer/chain | 8 |
+| Stablecoin exchange ratio | Stablecoins on exchanges ÷ relevant crypto market cap (dry-powder proxy) | 8 |
+| Market depth | Sum of resting bid/ask size within ±x% of mid | 8 |
+| Retail attention index | Composite of normalised search/app/social inputs (weights documented) | 9 |
+| Institutional–retail divergence | Difference between standardised institutional and retail composites | 12 |
+| Dominance | Asset market cap ÷ total market cap | 11 |
+| Realized volatility | Annualised std. dev. of log returns over window | 11 |
+| Rolling correlation | Correlation of returns (e.g. BTC vs. equity index) over window | 10/11 |
 
 ---
 

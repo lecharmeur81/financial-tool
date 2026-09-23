@@ -18,11 +18,12 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 | 0009 | Batch first, real-time last | **Proposed** | 2026-09-23 |
 | 0010 | UTC timestamps and exact decimals in storage | Accepted | 2026-09-23 |
 | 0011 | Git workflow and LF line endings | Accepted | 2026-09-23 |
+| 0012 | Numbered phases (0–27) instead of letters | Accepted | 2026-09-23 |
 
 ---
 
 ## ADR-0001 — Strict one-way layer architecture
-**Status:** Accepted (user requirement, Phase A)
+**Status:** Accepted (user requirement, Phase 0)
 
 **Context.** Financial dashboards often blur what was observed, what was calculated, and what was opined. That makes errors invisible and interpretations look like facts.
 
@@ -39,7 +40,7 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 
 **Decision.** The database and statistical engine are the only sources of numbers. Claude receives an immutable snapshot, must cite snapshot field IDs for every number, and its output passes a deterministic validator before storage/display. AI output is always labelled as interpretation.
 
-**Consequences.** Requires a snapshot builder and validator (Phase T). Claude cannot answer questions whose data is not in the snapshot — it must say the data is missing.
+**Consequences.** Requires a snapshot builder and validator (Phase 19). Claude cannot answer questions whose data is not in the snapshot — it must say the data is missing.
 
 ---
 
@@ -89,9 +90,9 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 ---
 
 ## ADR-0008 — Core technology stack
-**Status:** Proposed — to be confirmed at the start of Phase B/C
+**Status:** Proposed — to be confirmed at the start of Phase 1/2
 
-**Proposal.** Python 3.12+; PostgreSQL with TimescaleDB; SQLAlchemy + Alembic; Pydantic; Polars/pandas, NumPy, SciPy, statsmodels; FastAPI; a simple scheduler first; Docker Compose (Docker Desktop + WSL2 on Windows); pytest, ruff, mypy, pre-commit. Dashboard technology deferred to Phase Y.
+**Proposal.** Python 3.12+; PostgreSQL with TimescaleDB; SQLAlchemy + Alembic; Pydantic; Polars/pandas, NumPy, SciPy, statsmodels; FastAPI; a simple scheduler first; Docker Compose (Docker Desktop + WSL2 on Windows); pytest, ruff, mypy, pre-commit. Dashboard technology deferred to Phase 24.
 
 **Alternatives considered.**
 - DuckDB/Parquet only: excellent for research, weaker for a multi-user service with concurrent writes. Could still be used for offline research/backtests.
@@ -121,4 +122,15 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 ## ADR-0011 — Git workflow and LF line endings
 **Status:** Accepted
 
-**Decision.** `main` is always green; feature work on `phase-<letter>/<name>` branches; small commits prefixed with the phase letter (e.g. `[D] add provider interface`). `.gitattributes` normalises text files to LF so the repo behaves identically on Windows and Linux. Secrets are never committed (`.env` is git-ignored).
+**Decision.** `main` is always green; feature work on `phase-<number>/<name>` branches; small commits prefixed with the phase number (e.g. `[P3] add provider interface`) — amended by ADR-0012. `.gitattributes` normalises text files to LF so the repo behaves identically on Windows and Linux. Secrets are never committed (`.env` is git-ignored).
+
+---
+
+## ADR-0012 — Numbered phases instead of letters
+**Status:** Accepted (user requirement)
+
+**Context.** Phases were originally labelled A–Z. The user prefers numbers.
+
+**Decision.** Phases are numbered from 0: A→0 (Project foundation), B→1 (Architecture) … Z→25 (Security + AI + stress testing), then 26 (Production) and 27 (Real-time intelligence). Commit prefix is `[P<number>]`; branches are `phase-<number>/<name>`.
+
+**Consequences.** The first commit (`d59cb20`) keeps its original `[A]` label; `[A]` = Phase 0. No other history is affected.

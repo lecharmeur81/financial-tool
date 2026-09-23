@@ -89,48 +89,52 @@ If something cannot be verified, **say so explicitly**.
 
 Work proceeds phase by phase. Do not start a phase until the user opens it.
 
-| Phase | Name | Phase | Name |
-|---|---|---|---|
-| A | Project foundation | N | Regime engine |
-| B | Architecture | O | Historical similarity |
-| C | Infrastructure | P | Backtesting |
-| D | Data ingestion framework | Q | Quant red-team |
-| E | Market data | R | Anomaly engine |
-| F | Institutional data | S | Capital rotation |
-| G | Whale data | T | Claude AI Analyst |
-| H | Derivatives | U | Daily intelligence |
-| I | Liquidity | V | Alerts |
-| J | Retail | W | Paper trading |
-| K | Macro | X | Decision journal |
-| L | Market structure | Y | Executive dashboard |
-| M | Divergence engine | Z | Security + AI + stress testing |
+Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 
-Then: **Production → Real-time intelligence.**
+| # | Phase | # | Phase |
+|---|---|---|---|
+| 0 | Project foundation | 14 | Historical similarity |
+| 1 | Architecture | 15 | Backtesting |
+| 2 | Infrastructure | 16 | Quant red-team |
+| 3 | Data ingestion framework | 17 | Anomaly engine |
+| 4 | Market data | 18 | Capital rotation |
+| 5 | Institutional data | 19 | Claude AI Analyst |
+| 6 | Whale data | 20 | Daily intelligence |
+| 7 | Derivatives | 21 | Alerts |
+| 8 | Liquidity | 22 | Paper trading |
+| 9 | Retail | 23 | Decision journal |
+| 10 | Macro | 24 | Executive dashboard |
+| 11 | Market structure | 25 | Security + AI + stress testing |
+| 12 | Divergence engine | 26 | Production |
+| 13 | Regime engine | 27 | Real-time intelligence |
 
 Current phase and status: see `PROGRESS.md`.
 
-## 6. Conventions (initial — confirm in Phase B/C)
+## 6. Conventions (initial — confirm in Phase 1/2)
 
 - **Timezone:** all timestamps stored in UTC, ISO-8601, timezone-aware. Never naive datetimes.
 - **Money:** exact decimals for prices, sizes, and flows in storage. Floats allowed only inside statistical computation.
 - **Units:** every numeric field has an explicit unit in `DATA_DICTIONARY.md` (USD, BTC, contracts, %, bps, ratio).
 - **Naming:** `snake_case` for tables, columns, metric IDs. Metric IDs are stable and versioned (`funding_rate_oi_weighted.v1`).
 - **Identifiers:** assets use a canonical internal symbol (e.g. `BTC`), mapped per provider; never assume two providers use the same symbol.
-- **Commits:** small, one logical change, imperative subject line, prefixed with the phase letter, e.g. `[D] add provider base interface`.
-- **Branches:** `main` is always green. Feature work on `phase-<letter>/<short-name>`.
+- **Commits:** small, one logical change, imperative subject line, prefixed with the phase number, e.g. `[P3] add provider base interface`. (The very first commit, `d59cb20`, used the old `[A]` label = Phase 0.)
+- **Branches:** `main` is always green. Feature work on `phase-<number>/<short-name>`, e.g. `phase-3/provider-interface`.
 
 ## 7. Environment notes
 
 - Development machine: Windows (x64). Project root: `E:\FINANCIAL TOOL`.
   The path contains a space — always quote it in shell commands and scripts.
 - Line endings are normalised to LF by `.gitattributes`.
-- Tooling commands (test, lint, type check, run) will be listed here once chosen in Phase C:
+- **Git runs on the user's machine.** When Claude works through the remote file bridge, it cannot write
+  into `.git` or run Git there. In that case, step 5 (Git status) and step 15 (commit) are done by giving
+  the user the exact commands to run and recording the resulting hash in `PROGRESS.md`.
+- Tooling commands (test, lint, type check, run) will be listed here once chosen in Phase 2:
 
 ```
-# test:        (to be defined in Phase C)
-# lint:        (to be defined in Phase C)
-# type check:  (to be defined in Phase C)
-# run:         (to be defined in Phase C)
+# test:        (to be defined in Phase 2)
+# lint:        (to be defined in Phase 2)
+# type check:  (to be defined in Phase 2)
+# run:         (to be defined in Phase 2)
 ```
 
 ## 8. Documentation map
