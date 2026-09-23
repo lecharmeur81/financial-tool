@@ -1,299 +1,659 @@
 # ARCHITECTURE.md
 
-**Status:** Draft v0.1 (Phase 0). Principles in §1–§10 are the intended contract.
-Technology choices in §11 are **proposed** and must be confirmed in Phase 1/2 (see `DECISIONS.md`).
-Nothing described here is implemented yet.
+**Status:** v1.0 — Phase 2 architecture review. **Design only; nothing is implemented.**
+Every major decision below references an Architecture Decision Record (ADR) in `DECISIONS.md`, which gives the
+decision, reason, alternatives considered, trade-offs, and future implications.
+Decisions marked **Proposed** need the user's approval before implementation — see the
+**Architecture Approval Checklist** in `TODO.md`.
+
+Governing rules: `CLAUDE.md` Part B (R1–R13). Field and table definitions: `DATA_DICTIONARY.md`.
 
 ---
 
-## 1. Purpose and design principles
+## Contents
+
+1. Purpose and principles
+2. System context and containers
+3. Layer model and evidence hierarchy
+4. Technology stack
+5. Architecture review (30 areas)
+   - 5.1 Database architecture · 5.2 Time-series strategy · 5.3 Data ingestion · 5.4 Provider abstraction
+   - 5.5 API · 5.6 Background jobs · 5.7 Caching · 5.8 Authentication · 5.9 Authorization · 5.10 Security
+   - 5.11 Observability · 5.12 Logging · 5.13 Error handling · 5.14 Data quality · 5.15 Historical data
+   - 5.16 Backtesting · 5.17 AI architecture · 5.18 AI grounding · 5.19 Alerts · 5.20 Scalability
+   - 5.21 Cost control · 5.22 Provider outages · 5.23 Rate limits · 5.24 Time zones · 5.25 Look-ahead bias
+   - 5.26 Survivorship bias · 5.27 Data leakage · 5.28 Reproducibility · 5.29 Versioning · 5.30 Disaster recovery
+6. Entity classification
+7. User layer: decision journal and paper trading
+8. Repository layout
+9. Deployment topology
+10. Component-to-phase map
+11. Architectural risks
+
+---
+
+## 1. Purpose and principles
 
 The platform answers: **Where is money moving, who is moving it, and how is that behavior changing?**
+It is decision-support software, not a prediction oracle (R1).
 
-Design principles:
-
-1. **Evidence before interpretation.** Data flows one way through strict layers (§2).
-2. **The database and statistical engine are the source of truth.** Claude interprets; it never supplies data.
-3. **Point-in-time correctness.** Every value knows *when it happened* and *when we could have known it*.
-4. **Missing data is visible.** Gaps, staleness, and revisions are recorded and shown, never hidden.
-5. **Every number is traceable.** Any value on screen can be followed back to raw provider payloads and the code version that transformed it.
-6. **No single-provider dependency** where an abstraction reasonably prevents it.
-7. **Confidence, not certainty.** Signals, regimes, and interpretations carry confidence and caveats.
-8. **Simple first.** One database, one language for the core, batch before streaming. Add complexity only when a measured need appears.
+1. **Evidence before interpretation.** Data flows one way through strict layers (§3).
+2. **The database and statistical engine are the source of truth.** Claude interprets; it never supplies data (R6).
+3. **Point-in-time correctness.** Every value knows when it happened, when it was knowable, and when we learned it (§5.25).
+4. **Missing, stale, and conflicting data are visible**, never hidden or silently repaired (R3).
+5. **Every number is traceable** to raw provider payloads and to the code version that produced it (§5.28).
+6. **No single-provider dependency** where an adapter reasonably prevents it (R8).
+7. **Confidence, not certainty** at every derived layer.
+8. **Simple first.** One primary database, one backend language, batch before streaming (R13).
 
 ---
 
-## 2. The layer model
+## 2. System context and containers
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│ L0  RAW              Provider payloads exactly as received (immutable)   │
-├──────────────────────────────────────────────────────────────────────────┤
-│ L1  OBSERVED DATA    Normalised observations, canonical units & symbols  │
-├──────────────────────────────────────────────────────────────────────────┤
-│ L2  METRICS          Deterministic calculations over observations        │
-├──────────────────────────────────────────────────────────────────────────┤
-│ L3  SIGNALS          Statistical evaluation of metrics vs. history        │
-├──────────────────────────────────────────────────────────────────────────┤
-│ L4  REGIME           Classification of market state, with confidence      │
-├──────────────────────────────────────────────────────────────────────────┤
-│ L5  AI INTERPRETATION  Claude's explanation of L1–L4 (labelled as such)   │
-├──────────────────────────────────────────────────────────────────────────┤
-│ L6  USER DECISION    The human's decision, rationale, and outcome         │
-└──────────────────────────────────────────────────────────────────────────┘
+                    ┌──────────────────────────────────────────────────────────────┐
+  External          │ Exchanges · On-chain providers · ETF issuers/aggregators ·   │
+  providers         │ Options venues · Stablecoin sources · Macro · Sentiment      │
+                    └───────────────┬──────────────────────────────────────────────┘
+                                    │ HTTPS (pull, batch)        │ WebSocket (later, real-time)
+                                    ▼                            ▼
+┌──────────────────────────────────────────────┐   ┌──────────────────────────────┐
+│ WORKERS (Python, Celery)                     │   │ STREAM COLLECTORS (later)    │
+│  ingest · backfill · compute · ai · alerts   │   │ long-running, per venue      │
+└───────┬───────────────┬──────────────────────┘   └──────────────┬───────────────┘
+        │               │ jobs / rate-limit / cache               │ Redis Streams
+        │               ▼                                         ▼
+        │        ┌─────────────┐                          ┌───────────────┐
+        │        │   REDIS     │◀─────────────────────────│ stream writer │
+        │        │ broker·cache│                          └───────┬───────┘
+        │        │ limits·pubsub│                                 │
+        │        └──────┬──────┘                                  │
+        ▼               │                                         ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ POSTGRESQL + TIMESCALEDB  (source of truth)                                       │
+│  schemas: ref · raw · obs · calc · sig · regime · ai · usr · ops                  │
+└───────────────▲──────────────────────────────────────────────────────────────────┘
+                │                                       ┌──────────────────────────┐
+                │                                       │ RAW PAYLOAD ARCHIVE      │
+                │                                       │ filesystem (dev) /       │
+                │                                       │ S3-compatible (prod)     │
+                │                                       └──────────────────────────┘
+┌───────────────┴──────────────────────┐        ┌───────────────────────────────┐
+│ API (Python, FastAPI)  /api/v1       │◀──────▶│ ANTHROPIC CLAUDE API          │
+│ sole gateway to data; auth; SSE      │  (via  │ (called only by ai workers)   │
+└───────────────▲──────────────────────┘ workers)└───────────────────────────────┘
+                │ HTTPS (REST + SSE), session cookie
+┌───────────────┴──────────────────────┐
+│ FRONTEND (Next.js, React, TypeScript)│
+│ presentation only; no DB access      │
+└──────────────────────────────────────┘
 ```
 
-### Layer contract
+**Container responsibilities**
 
-| Layer | Written by | Reads from | Mutability | Must record |
+| Container | Responsibility | Must not |
+|---|---|---|
+| Frontend (Next.js) | Render dashboards, charts, forms; call the API | Hold business logic, connect to the database, call Claude, hold secrets beyond its own session |
+| API (FastAPI) | Authenticate, authorize, serve read models, accept user-layer writes, stream updates | Run long computations or provider calls inline |
+| Workers (Celery) | Ingestion, backfill, metric/signal/regime computation, AI jobs, alert evaluation | Write outside the schemas their DB role allows (§5.9) |
+| Stream collectors (later) | Hold venue WebSocket connections; push events to Redis Streams | Compute metrics |
+| PostgreSQL + TimescaleDB | System of record for all layers | — |
+| Raw payload archive | Immutable provider payloads (L0 bodies) | Be modified after write |
+| Redis | Broker, cache, shared rate-limit state, pub/sub, streams | Be a source of truth (it is disposable) |
+
+Decisions: ADR-0014 (stack), ADR-0015 (service boundaries).
+
+---
+
+## 3. Layer model and evidence hierarchy
+
+```
+L0 RAW → L1 OBSERVED → L2 METRICS → L3 SIGNALS → L4 REGIME → L5 AI INTERPRETATION / HYPOTHESIS → L6 USER DECISION
+```
+
+| Layer | Evidence category (R2) | DB schema | Written by (DB role) | Mutability |
 |---|---|---|---|---|
-| L0 Raw | Ingestion adapters | External providers | Append-only, never edited | provider, endpoint, request params, received_at, payload hash |
-| L1 Observed | Normalisers | L0 | Append-only; revisions are new rows | event_time, available_at, ingested_at, source, quality status, raw reference |
-| L2 Metrics | Metric engine | L1 (and other L2) | Recomputable; versioned by metric version | metric_id + version, inputs, as_of, quality status |
-| L3 Signals | Signal engine | L2 | Recomputable; versioned | method, lookback window, statistic, threshold, confidence |
-| L4 Regime | Regime engine | L3 (+ L2) | Recomputable; versioned | regime label, component signals, confidence, model version |
-| L5 AI | Claude Analyst | L1–L4 **snapshot only** | Append-only | model ID, prompt version, input snapshot ID, output, validation result |
-| L6 Decision | User | Everything | Append-only journal | decision, rationale, snapshot viewed, timestamp, later outcome |
+| L0 Raw | (source material) | `raw` + archive | `cfi_ingest` | Append-only, immutable |
+| L1 Observed | Observed Data | `obs` | `cfi_ingest` | Append-only; revisions are new rows |
+| L2 Metrics | Calculated Metric | `calc` | `cfi_compute` | Recomputable; versioned definitions |
+| L3 Signals | Statistical Signal | `sig` | `cfi_compute` | Recomputable; versioned |
+| L4 Regime | Regime Classification | `regime` | `cfi_compute` | Recomputable; versioned models |
+| L5 AI | AI Interpretation, Hypothesis | `ai` | `cfi_compute` (snapshots), `cfi_ai` (outputs) | Append-only |
+| L6 User | User Decision (and user hypotheses) | `usr` | `cfi_api` | Append-only journal; paper trades |
+| Reference | — | `ref` | `cfi_ingest` (+ admin) | Bitemporal (valid time + record time) |
+| Operations | — | `ops` | all services (own rows) | Append-mostly |
 
 **Rules**
-
-- A layer never writes into a layer to its left.
-- L5 never writes to L1–L4. If Claude's output contains a number, it must match a value in the input snapshot or the output is rejected (§8).
-- L2–L4 are **derived** and can be rebuilt from L1 for any `as_of` time. If they cannot be rebuilt, that is a bug.
-- Supporting analyses (anomalies, similarity, rotation, backtests) are L3/L4-level consumers: they read metrics/signals and write their own versioned results.
-- **Hypothesis** is a sixth evidence category (CLAUDE.md R2): an untested proposed explanation. It is not a data layer; it is a label on L5 output (AI-proposed) or L6 entries (user-proposed), and is always stored and displayed separately from interpretation.
+- A layer reads only from layers to its left and never writes to them — enforced by **database roles**, not only by code (§5.9, ADR-0027).
+- L2–L4 are derivable from L1 for any `as_of`; if not, that is a bug.
+- AI output never enters L1–L4. Numbers in AI output must match snapshot values (§5.18).
+- Hypotheses (AI- or user-proposed) are stored with category `hypothesis` and are never shown as interpretation or fact.
 
 ---
 
-## 3. Component overview
+## 4. Technology stack
+
+| Concern | Choice | Status | ADR |
+|---|---|---|---|
+| Frontend | Next.js (App Router), React, TypeScript (strict) | Proposed | 0014, 0015 |
+| Charts | TradingView Lightweight Charts (price/time-series) + Apache ECharts (analytics) | Proposed | 0043 |
+| Backend | Python 3.12+, FastAPI, Pydantic v2 | Proposed | 0014 |
+| Data access | SQLAlchemy 2.x (Core for time-series, ORM for user/ref), psycopg 3, Alembic migrations | Proposed | 0014 |
+| Numerics | NumPy, pandas and/or Polars, SciPy, statsmodels | Proposed | 0014 |
+| Database | PostgreSQL + TimescaleDB (self-hosted) | Proposed | 0016 |
+| Raw archive | Local filesystem (dev) → S3-compatible object storage (prod) | Proposed | 0019 |
+| Queue / scheduler | Celery with Redis broker; Celery beat for schedules | Proposed | 0023 |
+| Cache / limits / pub-sub | Redis (or wire-compatible Valkey) | Proposed | 0024 |
+| AI | Anthropic Claude API, structured JSON output, server-side only | Proposed | 0034 |
+| Containers | Docker, Docker Compose (dev and first production) | Proposed | 0014 |
+| Python tooling | uv (dependencies/lockfile), ruff, mypy, pytest | Proposed | 0014 |
+| Frontend tooling | pnpm, ESLint, TypeScript strict, Vitest; Playwright for end-to-end later | Proposed | 0014 |
+| Observability | Structured JSON logs, OpenTelemetry, Prometheus + Grafana | Proposed | 0029 |
+
+---
+
+## 5. Architecture review
+
+Each subsection states the design. Rationale, alternatives, trade-offs, and future implications are in the referenced ADR.
+
+### 5.1 Database architecture — ADR-0016, ADR-0017
+
+- **One primary database:** PostgreSQL with the TimescaleDB extension holds every layer. Relational metadata
+  (reference data, users, journal, configuration) and time-series live together, so point-in-time joins are plain SQL.
+- **Schemas per layer** (`ref`, `raw`, `obs`, `calc`, `sig`, `regime`, `ai`, `usr`, `ops`) make the layer rule visible and enforceable with grants.
+- **Series registry.** Every observed time series is registered once in `obs.series` (metric, subject, venue, period, unit).
+  Data rows reference `series_id`, keeping rows narrow and making "what is this number" a single lookup.
+- **Hybrid storage model** (ADR-0017):
+  - **Typed hypertables** for high-volume, multi-field market data: `obs.market_bar` (OHLCV), `obs.funding_rate`,
+    `obs.open_interest`, `obs.liquidation_event`, `obs.orderbook_depth`, `obs.option_quote`, `obs.onchain_transfer`.
+  - **Generic scalar hypertable** `obs.observation` for lower-volume single-value series: ETF flows and holdings,
+    stablecoin supply, exchange reserves, macro releases, sentiment indices, on-chain aggregates.
+  - Every L1 table carries the same **provenance columns** (DATA_DICTIONARY §2): `event_time`, `available_at`,
+    `ingested_at`, `source_provider`, `original_source`, `revision`, `quality_status`, `quality_note`, `confidence`, `raw_ref`.
+- **Multiple providers side by side.** The same series can hold values from several providers
+  (unique key includes `source_provider`). A **selection view** picks the preferred provider per point in time according to the
+  dataset's priority list and records which one was used; conflicts are flagged, not blended (R3).
+- **Keys.** Time-series rows: natural composite keys (`series_id`, `event_time`, `source_provider`, `revision`) — required
+  because TimescaleDB unique constraints must include the time column. Entities: `bigint` identities; externally exposed IDs for
+  user-layer objects use UUIDs.
+- **Numeric types.** Exact `NUMERIC` by default (ADR-0010); a benchmark in the infrastructure phase decides whether
+  high-volume families switch to `double precision` with the exact string kept in L0 (ADR-0044).
+- **Migrations** with Alembic only; additive by default; destructive steps need explicit approval (R10).
+
+### 5.2 Time-series strategy — ADR-0020
+
+- **Hypertables** partitioned on the table's time column (`event_time` for L1; `as_of` for L2–L4). Chunk intervals sized per
+  family by expected volume (e.g. 1 day for 1-minute bars, 1 month for daily series) and tuned after measurement.
+- **Compression (columnstore)** for chunks older than a family-specific age (e.g. 7 days for minute data), segmented by `series_id`.
+  Late-arriving revisions into compressed chunks are supported but slower; revisable families compress later.
+- **Continuous aggregates** (e.g. 1m → 1h → 1d bars) **only for non-revisable families** (exchange candles, trades).
+  A continuous aggregate groups by event time and cannot respect `available_at` or revision vintages, so revisable
+  datasets (ETF flows, macro, on-chain aggregates) are aggregated by the point-in-time engine instead.
+- **Retention tiers** (need approval, see checklist): full resolution kept for a defined window, then only rollups;
+  L0 raw bodies for high-frequency endpoints kept for a defined window; **no deletion of L1 low-frequency data**.
+  Retention never runs on data referenced by a stored snapshot, backtest, or journal entry without migrating the reference.
+- **Point-in-time indexes:** (`series_id`, `available_at`) in addition to (`series_id`, `event_time`) on revisable tables.
+
+### 5.3 Data ingestion architecture — ADR-0021, ADR-0009
+
+Pipeline for every ingestion job (pull, batch):
 
 ```
- External providers (exchanges, on-chain, ETF, options, macro, sentiment)
-        │
-        ▼
- ┌───────────────────┐   ┌──────────────────┐
- │ Provider adapters │──▶│ Raw store (L0)   │
- │ (one per source)  │   └──────────────────┘
- └─────────┬─────────┘
-           ▼
- ┌───────────────────┐   ┌──────────────────┐
- │ Normalisers +     │──▶│ Observation      │
- │ quality checks    │   │ store (L1)       │
- └───────────────────┘   └────────┬─────────┘
-                                  ▼
-                      ┌─────────────────────┐
-                      │ Metric engine (L2)  │
-                      └──────────┬──────────┘
-                                 ▼
-                      ┌─────────────────────┐
-                      │ Signal engine (L3)  │── divergence · anomaly · rotation
-                      └──────────┬──────────┘
-                                 ▼
-                      ┌─────────────────────┐
-                      │ Regime engine (L4)  │── historical similarity · backtesting
-                      └──────────┬──────────┘
-                                 ▼
-                      ┌─────────────────────┐
-                      │ Snapshot builder    │  (frozen, point-in-time evidence pack)
-                      └──────────┬──────────┘
-                                 ▼
-                      ┌─────────────────────┐
-                      │ Claude Analyst (L5) │── output validator
-                      └──────────┬──────────┘
-                                 ▼
-          ┌──────────────────────┼──────────────────────┐
-          ▼                      ▼                      ▼
-   API / Dashboard         Daily brief · Alerts    Paper trading · Decision journal (L6)
+schedule/trigger → rate-limit token → fetch (adapter) → write L0 (archive + raw.payload row)
+   → validate against expected schema → normalise to canonical (units, symbols, UTC)
+   → quality checks → idempotent upsert into L1 → record job_run + coverage
+   → publish "dataset_updated(series, time range)" → downstream compute jobs
 ```
 
-### Components
+- **Dataset registry** (`ops.dataset`, `ops.dataset_provider`): for each dataset — eligible providers with priority,
+  schedule, freshness limit, availability rule (how to set `available_at`), history start date, conflict tolerance, retention.
+- **Idempotency:** re-running any job for the same window produces no duplicates (upsert on natural key);
+  a changed value for an existing key becomes a new `revision`, never an overwrite.
+- **Job types:** `ingest` (scheduled, recent window), `backfill` (history, low priority, resumable with checkpoints),
+  `reconcile` (re-fetch recent windows to catch late corrections), `gap_fill` (triggered by gap detection).
+- **High-frequency ingestion** (1-minute and faster) is supported in batch by fetching windows; true streaming comes later
+  through stream collectors → Redis Streams → batched writer (§5.20). The L1 schema is identical for both paths.
+- **Batch first, real-time last** (ADR-0009).
 
-| Component | Responsibility | Phase |
+### 5.4 Provider abstraction — ADR-0022
+
+- **One adapter per provider** implementing a small interface: `fetch(dataset, window) → RawResponse`,
+  `parse(RawResponse) → list[ProviderRecord]`, `normalise(ProviderRecord) → CanonicalRecord`, plus declared
+  capabilities (datasets, history depth, granularity, auth type, rate limits) and terms (storage/redistribution).
+- A shared **HTTP client layer** gives every adapter the same timeouts, retries with exponential backoff and jitter,
+  rate-limit tokens, circuit breaker, request ledger (for cost), and payload archiving — adapters contain only
+  provider-specific mapping. This covers every failure mode in R8.
+- **Anti-corruption boundary:** provider symbols, field names, units, and time conventions stop at `normalise()`.
+  Canonical models are the only types the rest of the system sees (R8).
+- **Symbol mapping** via `ref.asset_symbol_map` / `ref.instrument_map` (bitemporal) — never string matching at runtime.
+- **Selection and fallback:** described in §5.22. A fallback is recorded in `source_provider`; values are never blended.
+- **Single-source datasets** get a simple adapter and a documented dependency ADR — no speculative abstraction (R13).
+
+### 5.5 API architecture — ADR-0025
+
+- **REST over HTTPS, versioned** at `/api/v1`. OpenAPI generated by FastAPI; the frontend's TypeScript client is generated
+  from it, so both sides share one contract.
+- **Resource groups:** `reference`, `series` (observations), `metrics`, `signals`, `regimes`, `divergences`, `similarity`,
+  `backtests`, `snapshots`, `interpretations`, `alerts`, `journal`, `paper`, `quality`, `providers/health`, `lineage`, `auth`, `admin`.
+- **Evidence envelope** on every data response: `evidence_category`, `as_of`, `knowledge_time`, `quality_status`
+  (and coverage), `sources` (provider + original source), `definition_version`, and a `lineage` link. The UI cannot
+  render a value without knowing what kind of value it is (R2).
+- **Point-in-time parameter:** every read endpoint accepts `as_of` (default: now) so any dashboard can be viewed
+  "as it would have looked" at a past time.
+- **Read-only for L0–L5.** Writes only for user-layer objects (journal, paper trading, alert rules, settings) and admin operations.
+  Recomputations and AI analyses are **requested** via the API and executed by workers (returns a job ID).
+- **Live updates:** Server-Sent Events first (one-way, simple, works through proxies); WebSockets only if two-way need appears.
+- **Errors** use RFC 9457 "problem details" JSON with a stable `error_code` (§5.13).
+- **Pagination:** cursor-based on time; mandatory time bounds and server-side row limits to prevent unbounded queries.
+
+### 5.6 Background jobs — ADR-0023
+
+- **Celery** workers with **Redis as broker**; **Celery beat** for schedules (schedule definitions in code/config, versioned).
+- **Queues by workload** so slow work never starves urgent work:
+  `ingest_fast` (minute-level), `ingest` (hourly/daily), `backfill` (low priority), `compute`, `ai`, `alerts`, `maintenance`.
+- **Task rules:** idempotent; late acknowledgement (a task is acknowledged after it finishes, so a crashed worker's task is
+  redelivered); explicit time limits; retries only for transient errors; a dead-letter record for exhausted retries.
+- **Postgres `ops.job_run` is the job history of record** (start, end, status, rows, error, code version) — not the broker.
+- **Dependency chaining:** `dataset_updated` events trigger the minimal downstream recomputation (metrics → signals →
+  regime → alert evaluation), debounced so a burst of updates causes one recomputation.
+- Celery does not support Windows as a worker platform; workers run in Linux containers (Docker) — also on the Windows dev machine.
+
+### 5.7 Caching — ADR-0024
+
+- **Redis is never a source of truth.** Every cached item can be rebuilt from Postgres; a cache failure degrades speed, not correctness.
+- **What is cached:** API read responses for heavy queries; reference data; latest dashboard tiles; provider-health summaries.
+- **Invalidation by data version**, not only time: each series/metric has a version counter bumped on write; cache keys include
+  the version, so updates invalidate naturally. Short TTLs as a safety net.
+- **Historical point-in-time queries** (fixed past `as_of` and fixed `knowledge_time`) are immutable and cache well.
+- **Cached payloads carry their `as_of`**, so staleness stays visible (R3).
+- Not cached: AI generations (they are stored records), auth decisions, anything user-private beyond the session.
+- Next.js data caching is disabled for live data routes to avoid serving stale market data from the frontend layer.
+
+### 5.8 Authentication — ADR-0026
+
+- **FastAPI owns authentication.** Users in `usr.app_user`; passwords hashed with **Argon2id**; **TOTP two-factor mandatory** for owner/admin.
+- **Server-side sessions** (session ID in an `HttpOnly`, `Secure`, `SameSite=Lax` cookie; session record in Redis with Postgres audit),
+  so sessions can be revoked instantly. CSRF protection on state-changing requests.
+- Next.js and the API are served under the same site (reverse proxy), so the cookie works for both without exposing tokens to JavaScript.
+- **Machine access** (scripts, notebooks): personal API tokens, hashed at rest, scoped, expiring.
+- **Single user first**, but the model supports multiple users. OIDC login (Google, etc.) can be added later without redesign.
+
+### 5.9 Authorization — ADR-0027
+
+- **Application roles:** `owner` (everything incl. admin and secrets rotation), `analyst` (read all data, run analyses, own journal
+  and paper accounts, alert rules), `viewer` (read dashboards only). Checked in API dependencies, per endpoint.
+- **Ownership:** user-layer rows carry `user_id`; users see and modify only their own journal, paper accounts, and alert rules.
+- **Database roles enforce the layer rule** (defence in depth):
+
+| DB role | Can write | Can read |
 |---|---|---|
-| Provider adapters | Fetch from one provider; handle auth, rate limits, retries, pagination; write L0 | 3 (framework), 4–10 (sources) |
-| Scheduler | Run ingestion and computation jobs on a schedule; record job runs | 2/3 |
-| Normalisers | Map provider payloads to canonical observations, units, symbols | 3–10 |
-| Data quality | Freshness, completeness, range, cross-source consistency checks | 3 onward |
-| Metric engine | Pure functions `f(observations, as_of) → metric`, registered with IDs and versions | 4–11 |
-| Signal engine | Z-scores, percentiles, regime-relative thresholds, divergence tests | 12 |
-| Regime engine | Combine signals into a labelled market state with confidence | 13 |
-| Similarity engine | Find historical periods whose feature vectors resemble the present | 14 |
-| Backtester | Point-in-time, walk-forward evaluation of signals and scenarios | 15 |
-| Red-team harness | Adversarial checks: leakage, overfitting, multiple testing, regime drift | 16 |
-| Anomaly engine | Flag statistically unusual observations/metrics, incl. data-error candidates | 17 |
-| Rotation engine | Relative flows between BTC / ETH / alts / stablecoins / sectors | 18 |
-| Snapshot builder | Freeze all evidence for a given `as_of` into an immutable, ID'd pack | 19 |
-| Claude Analyst | Turn a snapshot into a labelled interpretation; validated before storage | 19 |
-| Daily intelligence | Scheduled snapshot + interpretation + delivery | 20 |
-| Alerts | Rule-based triggers on signals/regimes; never on AI text alone | 21 |
-| Paper trading | Simulated positions from user-chosen scenarios | 22 |
-| Decision journal | Record what the user decided, why, with the snapshot they saw | 23 |
-| API + Dashboard | Read-only presentation of every layer with drill-down lineage | 24 |
+| `cfi_ingest` | `raw`, `obs`, `ref`, own `ops` rows | `ref`, `ops` |
+| `cfi_compute` | `calc`, `sig`, `regime`, `ai.snapshot` (snapshot builder), own `ops` rows | `ref`, `obs`, `calc`, `sig`, `regime` |
+| `cfi_ai` | `ai.interpretation`, `ai.usage`, own `ops` rows | `ai.snapshot`, `ref` — nothing else, so Claude's worker cannot see un-snapshotted data |
+| `cfi_alerts` | `usr.alert_event`, own `ops` rows | `ref`, `calc`, `sig`, `regime`, `usr.alert_rule`, `ops` quality results |
+| `cfi_api` | `usr`, request records in `ops` | all schemas (read) |
+| `cfi_readonly` | — | all except secrets/auth tables (for research notebooks) |
+| `cfi_migrator` | schema changes (migrations only) | — |
+
+  A bug in AI code therefore *cannot* write a metric, and a bug in the API *cannot* alter observed data.
+
+### 5.10 Security — ADR-0028
+
+- **Secrets:** never in code or Git (R9). `.env` locally (git-ignored), `.env.example` with placeholders; Docker secrets or a cloud secret
+  manager in production. Secrets never logged; log scrubbing for known key patterns.
+- **Exchange credentials:** read-only keys only. The platform **never** stores keys with trading or withdrawal permission — paper trading
+  needs none (§6).
+- **Network:** only the reverse proxy is exposed; Postgres and Redis bind to the internal network with passwords; TLS everywhere outside the host.
+- **Web:** strict CORS (same site), CSRF tokens, Content-Security-Policy, secure cookies, input validation (Pydantic), parameterised SQL only.
+- **Prompt-injection defence:** ingested text (social posts, news titles, provider free text) is **data** — delimited, length-limited,
+  never placed in Claude's instructions, and never able to trigger actions; Claude has no tools that act on the world (§5.17).
+- **Supply chain:** lockfiles (uv, pnpm), pinned container image digests, dependency vulnerability scanning in CI, minimal non-root containers.
+- **Audit log** (`ops.audit_log`, append-only): logins, role changes, alert-rule changes, admin actions, data corrections, AI budget changes.
+- **Backups encrypted** at rest and in transit (§5.30).
+
+### 5.11 Observability — ADR-0029
+
+Three signals, all tagged with service, job, dataset, and provider:
+- **Metrics** (Prometheus): request latency/errors, queue depth and task duration, ingestion lag per dataset, **data freshness**
+  (age of latest point vs. freshness limit), coverage %, provider error rates and circuit state, AI tokens/cost and validation-failure rate,
+  DB size and compression ratio.
+- **Traces** (OpenTelemetry): API request → DB; job → provider call → DB; AI job → Claude call → validator.
+- **Logs:** §5.12.
+- **Dashboards (Grafana):** System health · Data freshness & quality · Provider health · AI usage & validation · Cost.
+- **Health endpoints:** `/health/live` (process up), `/health/ready` (DB, Redis reachable). Data health is separate and shown to the user.
+- A lighter start is possible (logs + DB health tables only); see checklist.
+
+### 5.12 Logging — ADR-0029
+
+- **Structured JSON logs** to stdout (container-native), one event per line.
+- **Correlation IDs** on every line: `request_id`, `job_id`, `task_id`, `snapshot_id`, `provider`, `dataset`.
+- **Levels:** `ERROR` (needs attention), `WARNING` (degraded: fallback used, stale data, retry), `INFO` (lifecycle), `DEBUG` (off in production).
+- **Never logged:** secrets, tokens, passwords, full raw payloads (those go to the L0 archive), personal data beyond user ID.
+- **Retention:** short (e.g. 14–30 days) for application logs; the audit log and `ops.job_run` are kept in the database long-term.
+
+### 5.13 Error handling — ADR-0030
+
+- **Error taxonomy** (typed exceptions):
+  `ProviderTransientError` (timeouts, 5xx, 429) → retry with backoff ·
+  `ProviderPermanentError` (auth failure, 4xx, discontinued endpoint) → no retry, alert ·
+  `SchemaMismatchError` (payload shape changed) → store L0, mark `provider_error`, alert, stop that dataset ·
+  `DataValidationError` (values out of range) → keep row as `suspect` ·
+  `InsufficientDataError` (computation lacks inputs) → result `missing`, not an exception to the user ·
+  `ComputationError` (bug) → fail job loudly ·
+  `AIValidationError` (unsupported numbers/claims) → reject or flag output (§5.18).
+- **Never swallow errors** (R3/R7). Every failure lands in `ops.job_run` with its error and shows in observability.
+- **Partial failure is explicit:** if 5 of 6 venues succeed, the aggregate is computed with `partial` quality and the missing venue named.
+- **API errors:** problem-details JSON with `error_code`, human message, and correlation ID; no stack traces to clients.
+
+### 5.14 Data quality — ADR-0031
+
+- **Checks per dataset** declared in the registry, executed after each ingest:
+  freshness · completeness/coverage · range and unit sanity · monotonicity where applicable · duplicate detection ·
+  cross-provider consistency (tolerance per dataset) · schema conformity · continuity (unexpected gaps).
+- **Results stored** in `ops.quality_check_result` (history kept) and **propagated**: L1 rows get `quality_status`; L2–L4 inherit the worst
+  status of required inputs; snapshots, dashboards, and alerts show it.
+- **Quality statuses:** `ok` · `missing` · `stale` · `partial` · `estimated` · `revised` · `suspect` · `conflicting` · `provider_error`.
+- **Filling** only where a metric definition explicitly permits it; result flagged `estimated`.
+- **Data-quality alerts** (stale feed, conflict, schema change) are first-class alerts (§5.19).
+- A **Data Quality dashboard** shows coverage and freshness per dataset, so the user always sees how strong the foundation is.
+
+### 5.15 Historical data — ADR-0032
+
+- **History start per dataset** recorded in the registry (when data truly begins); signals are not evaluated before all inputs exist (R4).
+- **Point-in-time reliability** tag per row (`pit_reliability`):
+  - `native` — we recorded it live; `available_at` and vintage are real.
+  - `vendor_pit` — provider supplies historical vintages/publication times.
+  - `backfilled_latest` — historical values as they look *today* (may include later revisions or re-labelling).
+  Backtests declare which reliability levels they accept and report it; `backfilled_latest` data is flagged as a look-ahead risk.
+- **Own vintages:** for sources that overwrite history (web pages, holdings files), we keep every version we fetched (L0 archive + revisions).
+- **Backfill jobs** are resumable, rate-limit aware, low priority, and write `job_run` checkpoints.
+- **Research exports:** point-in-time extracts to Parquet for notebooks (DuckDB/Polars), always generated through the point-in-time loader.
+
+### 5.16 Backtesting architecture — ADR-0033
+
+```
+Experiment spec (versioned) ─▶ Point-in-time loader ─▶ Feature builder (as_of-aligned)
+      │                              ▲ only data door              │
+      ▼                              │                             ▼
+Walk-forward splitter ─▶ Signal/strategy evaluation ─▶ Execution & cost model ─▶ Results + report
+      │                                                                              │
+      └────────────── Experiment registry (params, code SHA, data knowledge_time, trials count) ◀┘
+```
+
+- **Point-in-time loader is the only data path** into research and backtests: every read is `as_of`-bound on `available_at`,
+  optionally also `knowledge_time`-bound (§5.25), with revision and label vintages respected.
+- **Two engines sharing one cost model:**
+  - *Vectorised research engine* for fast signal evaluation (hit rates, forward-return distributions, information coefficients).
+  - *Event-driven simulator* for strategies and paper trading, modelling order timing, fills, and position state.
+- **Cost and constraint model (R4):** fees (venue fee schedules) · slippage (function of size vs. liquidity/depth) · liquidity caps ·
+  execution assumptions (signal time → earliest executable time → fill price) · funding payments for perpetuals · turnover · position sizing ·
+  missing-data handling (no trade when inputs missing) · data latency.
+- **Validation defaults:** walk-forward / out-of-sample; purged and embargoed splits where labels overlap; multiple-testing accounting via the
+  registry's trial count; results reported as distributions with drawdowns and turnover, never one headline number (R4).
+- **Universe as-of:** asset/instrument/venue universes are taken as they existed at each date (§5.26).
+- Backtests run as `backfill`/`compute` queue jobs and store results in `sig`-adjacent research tables; they never change live signals.
+
+### 5.17 AI architecture — ADR-0034
+
+```
+trigger (schedule / user request)
+  → Snapshot builder (reads L1–L4 via point-in-time loader) → immutable ai.snapshot (JSON, hash)
+  → Prompt assembly (versioned templates in repo; snapshot as delimited data)
+  → Claude API (server-side, ai worker; structured JSON output schema)
+  → Validator (deterministic) → pass: store ai.interpretation · fail: retry once with errors → still failing: store as failed, show deterministic summary only
+  → API/UI (labelled as AI Interpretation; hypotheses labelled separately)
+```
+
+- **Claude is called only by `ai` workers**, never by the frontend or the API request path; the API key never leaves the server.
+- **Structured output** with the nine R6 sections; every statement tagged with its evidence category and the snapshot field IDs it relies on.
+- **Model tiering by configuration** (model IDs are config values, never hard-coded): a smaller/cheaper model for routine summaries,
+  a stronger model for deep analysis. Chosen models and prompt versions are stored with each output.
+- **Cost controls:** prompt caching for the stable system prompt and schema; batch processing for non-urgent jobs (e.g. daily briefs);
+  per-day and per-month budget ceilings enforced before each call; usage recorded in `ai.usage`.
+- **No action tools.** Claude cannot query the internet, write data, trigger alerts, or place trades. If later it gets read-only "fetch more
+  evidence" tools, every tool result is appended to the snapshot so its citations remain verifiable.
+- **Evaluation harness (R12):** golden snapshots with expected properties, adversarial snapshots (missing data, conflicting providers,
+  misleading free text), regression runs on every prompt/model change; metrics: unsupported-number rate, missing-section rate,
+  "Insufficient data." compliance, conflict-reporting compliance, and calibration tracking of stated confidence over time.
+
+### 5.18 AI grounding — ADR-0034
+
+- **Snapshot = the complete evidence Claude may use.** JSON with a stable **field ID** per value, and for each value: evidence category,
+  value, unit, `as_of`, quality status, provider(s), original source, and, where relevant, historical context (percentile, z-score) that the
+  statistical engine already computed.
+- **Explicit absences:** expected-but-missing inputs appear as entries with `quality_status = missing`, so Claude can say **"Insufficient data."**
+  instead of guessing. Conflicts appear with all provider values.
+- **No arithmetic by Claude.** Any number in the output must be a snapshot value (within display rounding). Needed derived numbers are
+  computed by the statistical engine and added to the snapshot before the call.
+- **Validator checks:** all nine sections present and in order · every numeric token maps to a cited field ID with matching value ·
+  every cited ID exists · statements about missing inputs use "Insufficient data." · conflicts in the snapshot are reported ·
+  no buy/sell instructions · evidence-category tags present. Failures are stored with details (R12 evidence).
+- **Display:** AI text is visually distinct from data; each cited number links back to its snapshot field and from there to lineage.
+
+### 5.19 Alert architecture — ADR-0035
+
+- **Rule-based alerts on L1–L4 and data-quality events only** — never on AI text (R6).
+- **Rule types:** threshold, crossing, percentile/z-score extreme, change-over-window, divergence (institutional vs. retail composites),
+  regime change, data quality (stale, conflict, schema change, provider outage).
+- **Evaluation** in the `alerts` queue after the relevant computation completes (event-driven), plus a periodic sweep for time-based rules.
+- **Noise control:** hysteresis (separate trigger and reset levels), cooldowns, deduplication, grouping, and minimum-quality requirements —
+  if inputs are stale or missing, the alert reports a *data* problem instead of firing a *market* alert.
+- **Alert record** (`usr.alert_event`) stores the rule version, triggering values with IDs, quality, and a snapshot reference.
+- **Channels:** in-app first; email and a messaging channel (e.g. Telegram) via a notification adapter — choice needs approval.
+- Optional: an AI explanation may be attached **after** an alert fires, labelled as interpretation; it never decides whether to fire.
+
+### 5.20 Scalability — ADR-0037
+
+- **Scale up before out.** One well-sized Postgres node with compression handles large volumes; illustration: 1-minute bars for
+  500 series ≈ 720,000 rows/day ≈ 263 million rows/year (compression makes this manageable; to be benchmarked).
+- **Scale out by role:** add Celery workers per queue; separate `ingest_fast` workers from heavy `compute`/`backfill`.
+- **Read replica** for API and research reads when needed; heavy research moves to Parquet exports.
+- **Real-time path (later):** stream collectors → Redis Streams → batched writer to Postgres → incremental metric updates → pub/sub → SSE.
+  Kafka/Redpanda only if Redis Streams becomes a measured bottleneck.
+- **Stateless API and workers**, so horizontal scaling needs no redesign.
+
+### 5.21 Cost control — ADR-0038
+
+- **Data providers:** budget per provider; `ops.request_ledger` records every request (endpoint, weight, cost class) so spend is visible
+  before invoices; free/public sources first; paid sources added per dataset with a written justification.
+- **Claude:** per-day/month ceilings enforced in code; model tiering; prompt caching; batch processing for non-urgent work; token usage dashboard.
+- **Storage:** compression, retention tiers, raw-archive lifecycle rules (move old L0 to cheaper storage class).
+- **Compute:** debounced recomputation; backfills off-peak; no polling faster than a dataset's real update frequency.
+- **Infrastructure:** single-host Docker Compose until load justifies more.
+
+### 5.22 Provider outages — ADR-0022
+
+- **Circuit breaker per provider/endpoint** (closed → open after repeated failures → half-open probe). State in Redis, events in `ops.provider_health_event`.
+- **Fallback policy per dataset:** if the primary is down/stale and a secondary is eligible, fetch from the secondary; rows record the actual
+  `source_provider`; the UI and snapshots show "fallback provider in use". If no eligible fallback, values become `missing`/`stale` — never guessed.
+- **Staleness propagates** to metrics, signals, regime confidence, alerts (data alert instead of market alert), and AI snapshots.
+- **Recovery:** gap detection schedules `gap_fill` jobs when the provider returns; reconciliation compares fallback and primary values for the outage window.
+- **Provider scorecard** (uptime, latency, conflict rate) informs future provider choices.
+
+### 5.23 Rate limits — ADR-0022
+
+- **Central token buckets in Redis** per provider, API key, and endpoint weight, shared by all workers (no worker can exceed limits alone).
+- **Honour provider signals:** `Retry-After`, remaining-quota and weight headers adjust the bucket dynamically.
+- **Priority:** `ingest_fast` > `ingest` > `reconcile` > `backfill`; backfills yield when budget is tight.
+- **Capacity planning:** the dataset registry's schedules are checked against each provider's limits before activation.
+- **Backoff:** exponential with jitter; 429s counted in provider health.
+
+### 5.24 Time zones — ADR-0039
+
+- **Store and compute in UTC** with timezone-aware types (`timestamptz`); naive datetimes are rejected at the boundary.
+- **Convert at the edges only:** provider-local times → UTC at normalisation; UTC → the user's display time zone in the UI
+  (default `Asia/Manila`, configurable).
+- **Calendars:** crypto days are UTC days (00:00–24:00 UTC; weekly bars start Monday 00:00 UTC). US-listed products (ETFs), equities,
+  and macro releases use an exchange/release calendar with daylight-saving transitions handled (US Eastern → UTC).
+- **Bar semantics:** `event_time` = bar open; `available_at` ≥ bar close (+ publication latency). Each dataset documents its convention.
+
+### 5.25 Look-ahead bias — ADR-0018, ADR-0040
+
+- **Two time axes for knowledge** (bitemporal):
+  - `available_at` — when the value was *publicly knowable* → used by backtests and historical signals.
+  - `ingested_at` — when *our system* knew it → used to reproduce exactly what the system showed at a past moment (`knowledge_time`).
+- **Every engine function takes `as_of` explicitly;** there is no "latest" default inside computation code.
+- **Revisions and label changes** are new rows/versions; the loader returns the latest version with `available_at ≤ as_of`.
+- **Bar-close rule:** a bar is not usable until its close time plus latency.
+- **Availability rules:** when a source gives no publication time, the dataset's documented rule sets a conservative `available_at`
+  (e.g. ETF daily flow → next US business day, morning ET) and the row is flagged `available_at_estimated = true`.
+- **Automated leakage tests:** "future poison" tests insert sentinel values after `as_of` and assert results are unchanged; tests assert no
+  engine query lacks an `as_of` bound.
+
+### 5.26 Survivorship bias — ADR-0040
+
+- **Master data keeps the dead:** assets, instruments, venues, and ETFs have listing/launch and delisting/closure dates and status history;
+  delisted and failed ones stay in the database with their data.
+- **Universes are defined as-of:** "top N by market cap", "all perps on venue X", "all spot ETFs" are evaluated with membership at each date.
+- **Events retained:** collapses, depegs, and delistings are data, not noise to clean away.
+- Where history for dead assets is unavailable, the gap is recorded and backtest reports state the survivorship limitation.
+
+### 5.27 Data leakage — ADR-0040
+
+Beyond look-ahead:
+- **Normalisation leakage:** z-scores/percentiles use rolling or expanding windows ending at `as_of`, never full-sample statistics.
+- **Model-selection leakage:** parameters are chosen on training windows only; the test window is untouched; trial counts recorded.
+- **Label overlap:** purged/embargoed splits when forward-return labels overlap.
+- **Regime leakage:** regime models used historically must be *filtered* (information up to `as_of`), not *smoothed* with future data.
+- **Entity-label leakage:** wallet labels applied historically only within their `valid_from`/`valid_to` and `available_at`.
+- **Similarity leakage:** historical analogue search excludes periods whose outcome window overlaps the query period.
+
+### 5.28 Reproducibility — ADR-0041
+
+Every derived result (metric, signal, regime, snapshot, AI output, backtest) records:
+- definition/model/prompt **version**, **parameters**, **code version** (Git SHA and container image digest),
+- **data coordinates**: `as_of` and `knowledge_time` (and for backtests, accepted `pit_reliability` levels),
+- **input fingerprint** (hash of the input set) and random seeds where applicable.
+
+A **recompute-and-compare** maintenance job periodically recomputes a sample of historical results and reports differences (expected ones
+explained by late data or revisions; unexpected ones are bugs). Dependency lockfiles and pinned images make environments reproducible.
+
+### 5.29 Versioning — ADR-0041
+
+| Thing | Scheme |
+|---|---|
+| API | URL major version (`/api/v1`); additive changes within a version; breaking changes → `/v2` with overlap period |
+| Database schema | Alembic revisions; additive-first; destructive changes only with approval (R10) |
+| Metric / signal / regime definitions | `name.vN`; a formula change creates a new version; old versions and their values are retained |
+| Prompts and AI output schema | `prompt_id.vN`, `schema.vN`; stored with each interpretation |
+| Provider payload schemas | expected schema per adapter version; mismatch → alert (§5.13) |
+| Datasets (vintages) | revisions and `ingested_at` |
+| Application releases | Semantic versioning; Git tags; changelog in `PROGRESS.md` |
+
+### 5.30 Disaster recovery — ADR-0042
+
+- **Postgres:** continuous WAL archiving + scheduled full backups with a mature tool (pgBackRest or WAL-G) to off-site, encrypted object
+  storage → point-in-time recovery. Development: nightly logical dump is sufficient.
+- **Raw archive:** replicated/versioned object storage — together with L0 metadata it allows **rebuilding L1 and everything above** if needed.
+- **Redis:** disposable; rebuilt from Postgres (sessions may be lost → users log in again).
+- **Configuration and infrastructure** as code in Git; secrets recoverable from the secret manager.
+- **Targets (need approval):** proposed production **RPO ≤ 15 minutes**, **RTO ≤ 4 hours**.
+- **Restore drills** on a schedule (e.g. quarterly), recorded in `PROGRESS.md`; an untested backup is not a backup.
+- **Provider-side loss:** because we keep our own copies and vintages, a provider deleting history does not delete ours.
 
 ---
 
-## 4. Time model (point-in-time correctness)
+## 6. Entity classification ("who is moving it") — ADR-0006
 
-Every observation carries three timestamps (all UTC):
+"Institutional", "ETF", "exchange", "market maker", "hedge fund", "government", "whale", "retail" are **claims** that need evidence (R5).
 
-| Field | Meaning | Example |
-|---|---|---|
-| `event_time` | When the thing happened / the period it describes | ETF flow for trading day 2026-03-02 |
-| `available_at` | The earliest time the value was publicly knowable | Issuer publishes it the next morning |
-| `ingested_at` | When *we* received it | Our job ran at 09:14 UTC |
-
-**Point-in-time query rule:** a computation "as of" time *T* may use only rows with `available_at <= T`,
-and for revised values, only the latest revision with `available_at <= T`.
-
-Why this matters:
-- ETF flows, 13F filings, macro releases, and some on-chain aggregates are **published with a lag** and sometimes **revised**.
-- Wallet/entity labels **change over time**. A wallet labelled "exchange" today may not have been known as one in 2021.
-- Using today's knowledge to compute yesterday's signal creates look-ahead bias, which silently inflates backtests.
-
-When a provider does not give a publication time, `available_at` is set by an explicit, documented
-**availability rule** per dataset (e.g. `event_time + 1 day`) and flagged as `available_at_estimated = true`.
-For data we started collecting ourselves, `ingested_at` is the conservative bound.
+- Labels live in `ref.entity_label` and are **bitemporal**: `valid_from`/`valid_to` (when the label is true in the world) and
+  `available_at`/`recorded_at` (when the label became knowable / when we stored it). Historical analysis uses only labels knowable at `as_of`.
+- Each label records `evidence_class` — `direct` (the source identifies the actor: issuer reports, filings, exchange-published data),
+  `attributed` (a named third party's label, provider recorded), or `inferred` (heuristic, e.g. size band, venue mix, cross-venue premium) —
+  plus `confidence` and the rule or source that produced it.
+- Composites such as "institutional flow" and "retail activity" record the evidence mix of their inputs, and the UI shows it
+  (e.g. "ETF inflow — direct" vs. "large-wallet accumulation — inferred").
+- Large ≠ institutional. Small ≠ retail. Unlabelled entities are `unknown`.
 
 ---
 
-## 5. Provider abstraction
+## 7. User layer: decision journal and paper trading — ADR-0036
 
-- Each provider has **one adapter** implementing a common interface (fetch, paginate, rate-limit, map to canonical).
-- Every adapter must handle (CLAUDE.md R8): authentication · rate limits · retries · exponential backoff · timeouts ·
-  malformed responses · provider outages · stale data · duplicate data · missing data · schema changes.
-  Schema changes are detected by validating each payload against the expected schema; a mismatch is stored in L0,
-  marked `provider_error`, and alerted — never coerced silently.
-- Duplicate deliveries are made harmless by idempotent writes keyed on (dataset, entity, event_time, provider, revision).
-- Each **dataset** (e.g. "perpetual funding rate", "spot ETF daily net flow") declares a list of eligible providers with priority.
-- Provider-specific symbols, units, and field names never leak beyond the normaliser.
-- Adapters record provider **licence/terms constraints** (redistribution, storage, rate limits) in configuration.
-- If the primary provider fails or diverges, the system either falls back (and marks the source) or marks the value `missing` — it never silently blends providers.
-- Cross-provider disagreement above a tolerance is itself a data-quality signal.
-
-Rule of thumb: abstract where two or more realistic providers exist for a dataset. Do not build abstraction
-for a dataset with exactly one source; wrap it simply and document the dependency in `DECISIONS.md`.
+- **Decision journal (L6):** append-only entries linking the decision, rationale, the `snapshot_id` and `interpretation_id` viewed,
+  the user's own hypotheses (tagged `hypothesis`), planned invalidation conditions, and a later outcome review. Edits create new versions.
+- **Paper trading:** simulated accounts, orders, fills, positions, and PnL using the **same execution and cost model** as backtesting (§5.16),
+  with fills priced from point-in-time market data plus latency and slippage. Every paper order can link to a journal entry.
+- **No live execution:** the platform holds no trading-enabled keys and has no order-routing component (ADR-0007).
 
 ---
 
-## 6. Data quality and missing data
-
-Every observation and metric has a `quality_status`:
-
-`ok` · `missing` · `stale` · `partial` · `estimated` · `revised` · `suspect` · `conflicting` · `provider_error`
-
-- Missing values are never filled with zero. Forward-fill or interpolation is allowed only when the metric
-  definition in `DATA_DICTIONARY.md` explicitly permits it, and the result is flagged `estimated`.
-- Metrics inherit the worst quality status of their required inputs.
-- The dashboard and the AI snapshot always show quality status next to the value.
-- Coverage (what % of the expected points exist) is tracked per dataset per day.
-
----
-
-## 7. Lineage and reproducibility
-
-- Every L2–L4 row records: definition ID + version, input references (or input query + as_of), code version (Git commit), parameters.
-- Recomputing any metric for any past `as_of` must reproduce the stored value (or explain the difference, e.g. a revision became available).
-- Snapshots given to Claude are stored immutably with an ID, so any interpretation can be audited later against exactly what Claude saw.
-
----
-
-## 8. AI Analyst guardrails (Claude inside the product)
-
-1. **Input:** an immutable snapshot (L1–L4 values, quality flags, caveats, historical comparisons). Nothing else — no free web browsing for data.
-2. **Output contract:** structured (e.g. JSON) with exactly these sections, in order (CLAUDE.md R6):
-   Summary · Evidence · Contradicting Evidence · Market Regime · Key Changes · Risks · Scenarios · Invalidation Conditions · Data Quality.
-   Each statement inside is tagged with its evidence category (R2); hypotheses are tagged `hypothesis`.
-   - When required data is missing, the affected section states **"Insufficient data."** rather than inferring.
-   - When sources disagree, the output names the sources and their values in Contradicting Evidence and Data Quality.
-3. **Citation rule:** every number in the output must reference a snapshot field ID.
-4. **Validator:** a deterministic post-check extracts every number/claim reference and verifies it against the snapshot. Failures are rejected or flagged; they are never silently shown.
-5. **Labelling:** AI output is always displayed as *interpretation*, visually distinct from observed data.
-6. **No advice:** output describes scenarios and evidence; it does not instruct the user to buy or sell.
-7. **Versioning:** model ID and prompt version are stored with every output.
-
----
-
-## 9. Entity classification ("who is moving it")
-
-"Institutional", "whale", "retail", "exchange", "fund", "miner", "market maker" are **claims**, and every claim needs evidence.
-
-Each classification records:
-- the entity/address/flow being classified;
-- the label;
-- the **evidence class**:
-  - `direct` — the source itself identifies the actor (e.g. ETF issuer flow reports, regulatory filings, exchange-published data);
-  - `attributed` — a third-party label (e.g. an on-chain analytics provider's cluster label), with the provider named;
-  - `inferred` — a heuristic proxy (e.g. transfer size bands, venue mix, premium between venues);
-- confidence, the rule or source that produced it, and `valid_from` / `valid_to`.
-
-The UI must distinguish "ETF inflow (direct)" from "large-wallet accumulation (inferred)".
-A large transfer is **not** an institution by default; a small transfer is **not** retail by default.
-
----
-
-## 10. Backtesting integrity
-
-- Backtests run only through the point-in-time query layer (§4). There is no other data path.
-- Walk-forward / out-of-sample splits are the default; in-sample-only results are labelled as such.
-- Explicitly modelled (CLAUDE.md R4): fees · slippage · liquidity (position size vs. available depth/volume) · execution assumptions
-  (fill price, delay, venue) · turnover · position sizing · funding costs · data latency · missing data · unavailable historical data
-  (a signal is not evaluated before all its inputs existed).
-- Survivorship and selection bias: the asset/venue universe at each historical date is the universe that existed *then*,
-  including delisted assets and defunct exchanges where data exists.
-- Every backtest records how many variants were tried (to account for multiple testing).
-- Results are reported with dispersion and drawdowns, never as a single headline number, and never as proof of future performance.
-
----
-
-## 11. Proposed technology (NOT yet accepted — see DECISIONS.md ADR-0008)
-
-| Concern | Proposal | Reason |
-|---|---|---|
-| Core language | Python 3.12+ | Strongest ecosystem for data, statistics, and backtesting |
-| Database | PostgreSQL + TimescaleDB extension | One database for relational metadata and time-series; SQL for point-in-time queries |
-| Data processing | Polars and/or pandas, NumPy, SciPy, statsmodels | Standard, well-tested statistical tooling |
-| Validation / schemas | Pydantic | Typed provider payloads and canonical models |
-| Migrations | Alembic (with SQLAlchemy) | Versioned schema changes |
-| Jobs | Simple scheduler first (e.g. APScheduler), orchestrator later only if needed | Simplicity |
-| API | FastAPI | Typed, lightweight |
-| Dashboard | Decide in Phase 24 (options: React/Next.js; Streamlit for internal prototypes) | Defer until data layer exists |
-| AI | Anthropic API (Claude), structured output + validator | Phase 19 |
-| Runtime | Docker Compose for local dev (Docker Desktop + WSL2 on Windows) | Reproducible environment |
-| Quality | pytest, ruff, mypy, pre-commit | Tests, lint, types |
-| Secrets | `.env` locally (git-ignored); secret manager in production | Never in Git |
-
----
-
-## 12. Proposed repository layout (NOT yet created)
+## 8. Repository layout (proposed, not created) — ADR-0015
 
 ```
 FINANCIAL TOOL/
-├── CLAUDE.md, README.md, ARCHITECTURE.md, DATA_DICTIONARY.md,
-│   DECISIONS.md, PROGRESS.md, TODO.md
-├── src/cfi/
-│   ├── core/            # config, time utilities, logging, errors
-│   ├── providers/       # one adapter per provider
-│   ├── ingestion/       # jobs, scheduling, raw storage
-│   ├── normalize/       # provider → canonical observations
-│   ├── quality/         # data-quality checks
-│   ├── metrics/         # L2 metric registry and definitions
-│   ├── signals/         # L3 statistics, divergence
-│   ├── regime/          # L4 regime classification
-│   ├── analysis/        # similarity, anomaly, rotation
-│   ├── backtest/        # point-in-time backtester
-│   ├── ai/              # snapshot builder, Claude analyst, validator
-│   ├── api/             # FastAPI app
-│   └── journal/         # decisions, paper trading
-├── migrations/
-├── tests/               # unit, integration, point-in-time leakage tests
-├── docs/                # extended docs, ADRs if DECISIONS.md grows too large
-└── docker/
+├── CLAUDE.md  README.md  ARCHITECTURE.md  DATA_DICTIONARY.md  DECISIONS.md  PROGRESS.md  TODO.md
+├── backend/
+│   ├── pyproject.toml  uv.lock
+│   ├── src/cfi/
+│   │   ├── core/          # config, time (UTC, calendars), errors, logging, ids
+│   │   ├── domain/        # canonical models (no provider code)
+│   │   ├── db/            # engine, schemas, point-in-time loader, repositories
+│   │   ├── providers/     # http client layer, rate limits, circuit breaker; adapters/<provider>/
+│   │   ├── ingestion/     # dataset registry, pipeline, backfill, reconcile
+│   │   ├── quality/       # checks, propagation
+│   │   ├── metrics/  signals/  regime/  analysis/   # L2–L4 and similarity/anomaly/rotation/divergence
+│   │   ├── backtest/      # experiments, splitters, cost model, engines
+│   │   ├── ai/            # snapshot builder, prompts/, client, validator, evals/
+│   │   ├── alerts/  journal/  paper/
+│   │   ├── api/           # FastAPI app, routers, auth, schemas
+│   │   └── workers/       # Celery app, queues, schedules
+│   ├── migrations/        # Alembic
+│   └── tests/             # unit/ integration/ db/ api/ quant/ (historical fixtures) leakage/ ai_eval/
+├── frontend/
+│   ├── package.json  pnpm-lock.yaml
+│   └── src/ (app/, components/, charts/, lib/api-client/ generated)
+├── infra/
+│   ├── docker/            # Dockerfiles
+│   ├── compose/           # docker-compose.yml (+ overrides)
+│   └── observability/     # Prometheus, Grafana dashboards
+└── docs/                  # extended docs if needed
 ```
 
 ---
 
-## 13. Deployment stages
+## 9. Deployment topology — ADR-0014, ADR-0037
 
-1. **Local research** — batch jobs on the development machine, daily/hourly granularity.
-2. **Production (batch)** — hosted database and scheduler, daily intelligence, alerts.
-3. **Real-time intelligence** — streaming sources (websockets) only for datasets where latency matters (liquidations, funding, order book). Added last, and only where batch is demonstrably insufficient.
+**Development (Windows + Docker Desktop with WSL2):** one Compose project:
+`postgres` (TimescaleDB image) · `redis` · `api` · `worker` (one per queue group) · `beat` · `frontend` · optional `prometheus`/`grafana`.
+Named Docker volumes for data (not bind-mounted from `E:`). Source code bind-mounted for hot reload.
+Note: bind mounts from Windows drives into Linux containers are slow; placing the working copy inside the WSL2 filesystem is faster — needs a decision.
+
+**First production (later phase):** a single Linux host (VPS) running the same Compose project behind a reverse proxy with TLS,
+off-site backups, and monitoring. Managed Postgres/Timescale is an alternative. Container orchestration (Kubernetes) only if load demands it.
+The hosting location must allow access to the chosen exchange APIs (jurisdiction restrictions vary by provider and must be verified).
+
+---
+
+## 10. Component-to-phase map
+
+Phases 0–2 are defined by the user's guide; later phase numbers in `CLAUDE.md` §C3 are provisional until the user issues each phase.
+
+| Component | Planned phase (provisional) |
+|---|---|
+| Infrastructure (Compose, DB, migrations baseline, CI, tooling) | unscheduled — to be placed by the user |
+| Ingestion framework, provider client layer, dataset registry, quality framework | 3 |
+| Market, institutional, whale, derivatives, liquidity, retail, macro, market-structure datasets and metrics | 4–11 |
+| Divergence, regime, similarity, backtesting, red-team, anomaly, rotation | 12–18 |
+| AI analyst (snapshot, prompts, validator, evals) | 19 |
+| Daily intelligence, alerts, paper trading, decision journal | 20–23 |
+| Executive dashboard (frontend) | 24 |
+| Security + AI + stress testing | 25 |
+| Production, real-time intelligence | 26–27 |
+
+---
+
+## 11. Architectural risks
+
+| # | Risk | Impact | Mitigation |
+|---|---|---|---|
+| 1 | Look-ahead via backfilled/revised data | Inflated backtests, false confidence | Bitemporal model, `pit_reliability`, leakage tests (§5.25) |
+| 2 | "Institutional" labels are mostly inference | Misleading conclusions | `evidence_class` + confidence everywhere; UI separates direct from inferred (R5) |
+| 3 | Paid data costs and restrictive terms | Budget overrun; unusable data | Provider budgets, request ledger, terms recorded before ingestion |
+| 4 | Exchange API geo-restrictions | Missing datasets depending on host location | Verify per provider from the actual host before committing |
+| 5 | Short crypto history (few cycles) | Overfit regimes/similarity | Walk-forward, trial counting, Phase 16 red-team |
+| 6 | AI hallucinated numbers | Wrong decisions | Snapshot grounding + deterministic validator + eval harness |
+| 7 | TimescaleDB licence (TSL) limits | Cannot offer the DB itself as a service | Our use (own application) is permitted; revisit if the business model changes |
+| 8 | Scope size (28 phases) vs. one developer | Stalled project | Batch-first, vertical slices, strict phase gates |
+| 9 | Windows development friction (Celery unsupported natively, slow bind mounts, path with space) | Slow/fragile dev loop | Everything in Linux containers; consider WSL2 working copy |
+| 10 | Single Postgres node as single point of failure | Downtime/data loss | Backups + PITR, restore drills, replica later |

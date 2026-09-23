@@ -318,8 +318,8 @@ Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 | # | Phase | # | Phase |
 |---|---|---|---|
 | 0 | Project foundation | 14 | Historical similarity |
-| 1 | Architecture | 15 | Backtesting |
-| 2 | Infrastructure | 16 | Quant red-team |
+| 1 | Master engineering rules | 15 | Backtesting |
+| 2 | Architecture | 16 | Quant red-team |
 | 3 | Data ingestion framework | 17 | Anomaly engine |
 | 4 | Market data | 18 | Capital rotation |
 | 5 | Institutional data | 19 | Claude AI Analyst |
@@ -332,9 +332,13 @@ Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 | 12 | Divergence engine | 26 | Production |
 | 13 | Regime engine | 27 | Real-time intelligence |
 
+Phases 0–2 follow the user's guide: 0 foundation, 1 master engineering rules (Part B), 2 architecture.
+Phase numbers from 3 onward are **provisional** until the user issues each phase. **Infrastructure** (Compose, database,
+migrations baseline, tooling) is not yet placed and must precede any ingestion code (see `TODO.md`).
+
 Current phase and status: see `PROGRESS.md`.
 
-## C4. Conventions (initial — confirm in Phase 1/2)
+## C4. Conventions (initial — confirm before infrastructure work starts)
 
 - **Timezone:** all timestamps stored in UTC, ISO-8601, timezone-aware. Never naive datetimes.
 - **Money:** exact decimals for prices, sizes, and flows in storage. Floats allowed only inside statistical computation.

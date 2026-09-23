@@ -1,8 +1,9 @@
 # DATA_DICTIONARY.md
 
-**Status:** Draft v0.1 (Phase 0). Defines conventions, shared fields, and the planned dataset/metric catalogue.
-**Nothing here is implemented.** Entries marked `planned` have no table, code, or data yet.
-Exact column types and table names are finalised when each phase is implemented; this file is updated in the same commit.
+**Status:** v0.2 (Phase 2 — architecture). Defines conventions, shared fields, the **logical schema** (§4), and the planned
+dataset/metric catalogue. **Nothing here is implemented.** Tables and columns are logical designs; exact types, indexes, and
+constraints are finalised in migrations when each phase is implemented, and this file is updated in the same commit.
+Design rationale: `ARCHITECTURE.md` §5 and `DECISIONS.md` (ADR-0016 – ADR-0018).
 
 ---
 
@@ -24,29 +25,47 @@ Exact column types and table names are finalised when each phase is implemented;
 
 ---
 
-## 2. Universal fields (every L1 observation)
+## 2. Universal fields
+
+Observed data is split between the **series** (what is being measured — constant for the series) and the **row**
+(one value at one time from one provider — ADR-0017). Together they satisfy the required fields of `CLAUDE.md` R3.
+
+### 2a. Series-level fields (`obs.series`)
 
 | Field | Type | Description |
 |---|---|---|
-| `observation_id` | id | Unique ID |
-| `dataset_id` | text | Which dataset this belongs to (see §5) |
+| `series_id` | bigint | Primary key |
+| `dataset_id` | text | Dataset in the registry (`ops.dataset`) |
 | `metric` | text | What is measured, e.g. `perp_funding_rate`, `etf_net_flow` (canonical name) |
-| `asset` | text | Canonical asset symbol, e.g. `BTC`; `NULL` only for non-asset series (e.g. macro) |
-| `entity_ref` | text | What it describes: asset, instrument, venue, ETF, address cluster, macro series |
-| `event_time` | timestamptz | When the event happened / start of the period described |
-| `period` | text | Granularity: `tick`, `1m`, `1h`, `8h`, `1d`, `1w`, `1q` |
+| `asset` | text, nullable | Canonical asset symbol, e.g. `BTC`; `NULL` only for non-asset series (e.g. macro) |
+| `subject_type` | enum | `asset` · `instrument` · `venue` · `etf` · `entity` · `address_cluster` · `macro_series` · `market` |
+| `subject_ref` | text | Canonical ID of the subject (e.g. instrument ID, ETF ticker, macro series code) |
+| `venue` | text, nullable | Canonical venue ID where relevant |
+| `period` | text | Granularity: `event`, `tick`, `1m`, `5m`, `1h`, `8h`, `1d`, `1w`, `1mo`, `1q` |
+| `unit` | text | Unit of the value (DATA_DICTIONARY §1 conventions) |
+| `revisable` | bool | Whether the source may revise published values (drives aggregation and compression rules) |
+| `created_at` | timestamptz | When the series was registered |
+
+### 2b. Row-level provenance fields (every L1 row, scalar or typed table)
+
+| Field | Type | Description |
+|---|---|---|
+| `series_id` | bigint | The series this value belongs to |
+| `event_time` | timestamptz | When the event happened / start of the period described (bar open) |
 | `available_at` | timestamptz | Earliest time the value was publicly knowable (point-in-time key) |
-| `available_at_estimated` | bool | `true` if `available_at` comes from a documented rule rather than the source |
-| `ingested_at` | timestamptz | When our system received it |
-| `value` | decimal | The observed value |
-| `unit` | text | Unit of `value` |
+| `available_at_estimated` | bool | `true` if `available_at` comes from a documented availability rule rather than the source |
+| `ingested_at` | timestamptz | When our system stored it (knowledge-time key) |
+| `value` / typed columns | numeric | The observed value(s) (scalar table: `value`; typed tables: e.g. `open`, `high`, `low`, `close`, `volume`) |
 | `source_provider` | text | Provider we fetched it from (e.g. an aggregator or API vendor) |
-| `original_source` | text | Who first published it (e.g. the ETF issuer, the exchange), if different from the provider; `unknown` if the provider does not say |
-| `raw_ref` | id | Pointer to the L0 raw payload |
+| `original_source` | text | Who first published it (e.g. the ETF issuer, the exchange); `unknown` if the provider does not say |
+| `raw_ref` | bigint | Pointer to `raw.payload` (L0) |
 | `revision` | int | 0 = first publication; increments on each revision |
+| `pit_reliability` | enum | `native` · `vendor_pit` · `backfilled_latest` (§3) |
 | `quality_status` | enum | See §3 |
 | `quality_note` | text | Human-readable reason when status is not `ok` |
 | `confidence` | decimal 0–1, nullable | Where appropriate: for estimated, attributed, or inferred values. `NULL` for values reported directly by the source |
+
+Natural key (uniqueness): (`series_id`, `event_time`, `source_provider`, `revision`).
 
 ---
 
@@ -65,6 +84,25 @@ Exact column types and table names are finalised when each phase is implemented;
 | `conflicting` | Two or more providers disagree beyond tolerance; all values kept and shown |
 | `provider_error` | Provider returned an error or malformed payload |
 
+### `evidence_category` (R2 — attached to every value the API or AI returns)
+`observed` · `metric` · `signal` · `regime` · `ai_interpretation` · `hypothesis` · `user_decision`
+
+### `pit_reliability`
+| Value | Meaning |
+|---|---|
+| `native` | Recorded live by this system; `available_at` and vintage are real |
+| `vendor_pit` | Provider supplies historical vintages / publication times |
+| `backfilled_latest` | Historical values as the provider shows them today; may include later revisions or re-labelling (look-ahead risk) |
+
+### `job_status`
+`queued` · `running` · `succeeded` · `partial` · `failed` · `cancelled`
+
+### `circuit_state`
+`closed` · `open` · `half_open`
+
+### `app_role`
+`owner` · `analyst` · `viewer`
+
 ### `evidence_class` (entity classification)
 | Value | Meaning |
 |---|---|
@@ -79,17 +117,110 @@ Every non-`unknown` assignment requires an `evidence_class`, `confidence` (0–1
 
 ---
 
-## 4. Core reference entities (planned)
+## 4. Logical schema (planned — Phase 2 design)
 
-| Entity | Key fields | Notes |
+Tables are grouped by PostgreSQL schema (one per layer, ADR-0016). **HT** = TimescaleDB hypertable (time column in brackets).
+"Provenance" = the row-level fields of §2b. Write access per schema follows the DB roles in `ARCHITECTURE.md` §5.9.
+
+### `ref` — reference data (bitemporal: `valid_from`/`valid_to` + `recorded_at`)
+
+| Table | Purpose | Key columns |
 |---|---|---|
-| `asset` | `asset_id`, `symbol`, `name`, `asset_type` (coin, stablecoin, token), `chain` | Canonical symbols |
-| `venue` | `venue_id`, `name`, `venue_type` (cex, dex, cme, etf_issuer, otc) | |
-| `instrument` | `instrument_id`, `venue_id`, `type` (spot, perp, future, option, etf), `base`, `quote`, `expiry`, `strike`, `option_type`, `contract_size`, `contract_unit` | Contract size needed to convert contracts → coin/USD |
-| `provider` | `provider_id`, `name`, `licence_notes`, `rate_limits`, `status` | Terms of use recorded before ingestion |
-| `dataset` | `dataset_id`, `category`, `period`, `availability_rule`, `freshness_limit`, `eligible_providers` | See §5 |
-| `entity_label` | `subject`, `actor_class`, `evidence_class`, `confidence`, `rule_or_source`, `valid_from`, `valid_to` | Time-versioned labels |
-| `job_run` | `job_id`, `started_at`, `finished_at`, `status`, `rows_written`, `error` | Ingestion audit |
+| `asset` | Canonical assets | `asset_id`, `symbol`, `name`, `asset_type` (coin, stablecoin, token), `chain`, `launched_at`, `retired_at` |
+| `asset_symbol_map` | Provider symbol → canonical asset | `provider_id`, `provider_symbol`, `asset_id`, `valid_from`, `valid_to` |
+| `venue` | Exchanges, CME, ETF issuers, DEXs | `venue_id`, `name`, `venue_type` (cex, dex, cme, etf_issuer, otc), `jurisdiction`, `opened_at`, `closed_at` |
+| `instrument` | Tradable instruments | `instrument_id`, `venue_id`, `type` (spot, perp, future, option, etf), `base`, `quote`, `expiry`, `strike`, `option_type`, `contract_size`, `contract_unit`, `listed_at`, `delisted_at` |
+| `instrument_map` | Provider instrument code → canonical | `provider_id`, `provider_code`, `instrument_id`, `valid_from`, `valid_to` |
+| `instrument_status_history` | Listing/suspension/delisting events (survivorship) | `instrument_id`, `status`, `effective_at`, `available_at` |
+| `etf_fund` | Spot crypto ETFs/ETPs | `fund_id`, `ticker`, `issuer`, `underlying_asset`, `listing_venue`, `launched_at`, `closed_at` |
+| `entity` | Real-world actors (funds, exchanges, companies, governments) | `entity_id`, `name`, `entity_type` |
+| `address` | On-chain addresses | `chain`, `address`, `first_seen_at` |
+| `entity_label` | Label of an address/cluster/entity (R5) | `subject_type`, `subject_ref`, `actor_class`, `evidence_class`, `confidence`, `rule_or_source`, `label_provider`, `valid_from`, `valid_to`, `available_at`, `recorded_at` |
+| `calendar` | Trading/release calendars | `calendar_id`, `date`, `is_open`, `open_at_utc`, `close_at_utc` |
+| `universe_membership` | As-of universes (survivorship) | `universe_id`, `member_ref`, `valid_from`, `valid_to`, `rule_version` |
+
+### `raw` — L0
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `payload` (HT [`received_at`]) | Index of archived provider responses | `payload_id`, `provider_id`, `endpoint`, `request_params` (redacted), `http_status`, `received_at`, `content_hash`, `archive_uri`, `bytes`, `schema_version`, `schema_check` (pass/fail + details), `job_run_id` |
+
+### `obs` — L1 observed data
+
+| Table | Purpose | Key columns (plus provenance) |
+|---|---|---|
+| `series` | Series registry (§2a) | see §2a |
+| `observation` (HT [`event_time`]) | Generic scalar series: ETF flows/holdings, stablecoin supply, exchange reserves, macro, sentiment, on-chain aggregates | `value` |
+| `market_bar` (HT) | OHLCV bars | `open`, `high`, `low`, `close`, `volume_base`, `volume_quote`, `trade_count` |
+| `funding_rate` (HT) | Perpetual funding | `rate`, `interval_hours`, `rate_per_8h`, `mark_price`, `index_price`, `is_predicted` |
+| `open_interest` (HT) | Open interest | `oi_contracts`, `oi_base`, `oi_usd` |
+| `liquidation_event` (HT) | Liquidations (event or aggregated) | `side` (long/short), `quantity_base`, `notional_usd`, `price`, `is_aggregated` |
+| `orderbook_depth` (HT) | Depth bands around mid | `mid_price`, `band_bps`, `bid_notional_usd`, `ask_notional_usd` |
+| `option_quote` (HT) | Option chain snapshots | `instrument_id`, `mark_iv`, `bid_iv`, `ask_iv`, `delta`, `gamma`, `vega`, `open_interest`, `volume`, `underlying_price` |
+| `onchain_transfer` (HT) | Individual large transfers | `chain`, `tx_hash`, `from_address`, `to_address`, `asset`, `amount`, `amount_usd`, `block_time` |
+| `selected_observation` (view) | Preferred-provider value per point in time with provider used and conflict flag | derived |
+
+### `calc` — L2 metrics
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `metric_definition` | Registered metric versions (template §6) | `metric_id` (`name.vN`), `formula_ref`, `inputs`, `unit`, `missing_policy`, `fill_policy`, `status` |
+| `metric_value` (HT [`as_of`]) | Computed metric values | `metric_id`, `subject_ref`, `as_of`, `knowledge_time`, `value`, `quality_status`, `coverage`, `input_fingerprint`, `code_version`, `computed_at`, `pit_reliability_min` |
+
+### `sig` — L3 signals and research
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `signal_definition` | Signal versions | `signal_id`, `method`, `lookback`, `thresholds`, `inputs` |
+| `signal_value` (HT [`as_of`]) | Signal outputs (§8) | `signal_id`, `subject_ref`, `as_of`, `statistic`, `value`, `state`, `confidence`, `quality_status`, `input_fingerprint`, `code_version` |
+| `divergence_value` (HT [`as_of`]) | Institutional vs. retail (and other) divergences | `divergence_id`, `as_of`, `left_composite`, `right_composite`, `spread`, `state`, `evidence_mix`, `confidence` |
+| `anomaly_event` | Unusual observations/metrics | `ref`, `as_of`, `method`, `score`, `is_data_error_candidate` |
+| `experiment` | Backtest/research registry | `experiment_id`, `spec` (JSON), `code_version`, `knowledge_time`, `accepted_pit_levels`, `trial_count`, `created_by` |
+| `experiment_result` | Backtest outputs | `experiment_id`, `split`, `metrics` (JSON), `equity_curve_ref`, `drawdowns`, `turnover`, `costs` |
+
+### `regime` — L4
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `regime_model` | Versioned regime models | `model_id`, `method`, `features`, `labels`, `filtered_only` (must be true) |
+| `regime_state` (HT [`as_of`]) | Classified state | `model_id`, `as_of`, `label`, `probabilities` (JSON), `confidence`, `component_signals`, `quality_status` |
+| `similarity_result` | Historical analogues | `as_of`, `method`, `matches` (periods, distance), `excluded_windows` |
+
+### `ai` — L5
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `snapshot` | Immutable evidence pack (§9a) | `snapshot_id`, `as_of`, `knowledge_time`, `content` (JSON), `content_hash`, `builder_version`, `created_at` |
+| `interpretation` | Claude output (§9) | see §9 |
+| `usage` | Token/cost accounting | `interpretation_id`, `model_id`, `input_tokens`, `output_tokens`, `cached_tokens`, `cost_usd`, `batch` |
+| `eval_run` | AI evaluation results (R12) | `eval_id`, `prompt_version`, `model_id`, `suite`, `results` (JSON), `run_at` |
+
+### `usr` — L6 user layer
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `app_user` | Accounts | `user_id` (uuid), `email`, `password_hash` (Argon2id), `role`, `totp_secret` (encrypted), `display_timezone`, `created_at`, `disabled_at` |
+| `api_token` | Personal API tokens | `token_id`, `user_id`, `token_hash`, `scopes`, `expires_at`, `last_used_at` |
+| `journal_entry` | Decision journal (versioned, append-only) | `entry_id`, `version`, `user_id`, `decision`, `rationale`, `hypotheses`, `invalidation_conditions`, `snapshot_id`, `interpretation_id`, `created_at`, `outcome_review` |
+| `paper_account` / `paper_order` / `paper_fill` / `paper_position` | Paper trading | `account_id`, `user_id`; orders: `instrument_id`, `side`, `qty`, `order_type`, `submitted_at`, `journal_entry_id`; fills: `price`, `fee`, `slippage`, `filled_at`, `cost_model_version` |
+| `alert_rule` | User-defined rules (versioned) | `rule_id`, `version`, `user_id`, `rule_type`, `definition` (JSON), `min_quality`, `cooldown`, `channels`, `enabled` |
+| `alert_event` | Fired alerts | `event_id`, `rule_id`, `rule_version`, `fired_at`, `triggering_values` (IDs + values), `quality_status`, `snapshot_id`, `delivered` |
+
+### `ops` — operations
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `provider` | Provider catalogue | `provider_id`, `name`, `auth_type`, `terms_notes`, `storage_allowed`, `redistribution_allowed`, `status` |
+| `provider_endpoint` | Endpoint limits | `provider_id`, `endpoint`, `rate_limit`, `weight`, `cost_class` |
+| `dataset` | Dataset registry | `dataset_id`, `category`, `schedule`, `freshness_limit`, `availability_rule`, `history_start`, `conflict_tolerance`, `retention_policy`, `revisable` |
+| `dataset_provider` | Eligible providers per dataset | `dataset_id`, `provider_id`, `priority`, `enabled` |
+| `provider_health_event` (HT) | Circuit/outage history | `provider_id`, `endpoint`, `at`, `circuit_state`, `error_class`, `latency_ms` |
+| `request_ledger` (HT) | Every provider request (cost/limits) | `provider_id`, `endpoint`, `at`, `weight`, `status`, `job_run_id` |
+| `job_run` | Job history of record | `job_run_id`, `job_type`, `queue`, `dataset_id`, `window_start`, `window_end`, `status`, `rows_written`, `error_code`, `error_detail`, `code_version`, `started_at`, `finished_at`, `checkpoint` |
+| `quality_check_result` (HT) | Data-quality check history | `dataset_id`, `series_id`, `check`, `at`, `status`, `details` |
+| `coverage_daily` | Coverage per dataset/day | `dataset_id`, `day`, `expected_points`, `present_points` |
+| `audit_log` | Security/admin audit (append-only) | `at`, `user_id`, `action`, `target`, `details`, `ip` |
+| `data_version` | Version counters for cache invalidation | `scope`, `version`, `updated_at` |
 
 ---
 
@@ -211,3 +342,20 @@ exact inputs depend on verified provider data.
 | `validation_status` | `passed` · `failed` · `flagged` |
 | `validation_errors` | Numbers/claims that did not match the snapshot |
 | `created_at` | Timestamp |
+
+---
+
+## 9a. AI snapshot content (planned — ADR-0034)
+
+An immutable JSON document; the only evidence Claude may use.
+
+| Element | Description |
+|---|---|
+| `snapshot_id`, `as_of`, `knowledge_time`, `builder_version` | Identity and point-in-time coordinates |
+| `fields[]` | One entry per value: `field_id` (stable, e.g. `m.etf_net_flow_7d.BTC`), `evidence_category`, `label`, `value`, `unit`, `as_of`, `quality_status`, `source_provider`, `original_source`, `confidence`, `context` (pre-computed percentile / z-score / change, each with its own field ID) |
+| `missing[]` | Expected inputs that are absent: `field_id`, `reason` — Claude must answer "Insufficient data." for conclusions depending on them |
+| `conflicts[]` | Disagreeing providers: `field_id`, values per provider, tolerance |
+| `regime` | Current regime state with model version and confidence (field IDs) |
+| `changes[]` | Pre-computed changes since the previous snapshot (field IDs) |
+| `caveats[]` | Known limitations (e.g. `backfilled_latest` inputs, fallback provider in use) |
+| `free_text[]` | Untrusted ingested text (if any), delimited and length-limited; never instructions |

@@ -6,7 +6,7 @@
 
 ## Status
 
-**Phase 0 — Project foundation.** Documentation and repository setup only.
+**Phase 2 — Architecture** (design complete, awaiting approval). Documentation only.
 No application code exists yet. See [`PROGRESS.md`](PROGRESS.md).
 
 ## What it is
@@ -72,7 +72,7 @@ AI-assisted analysis (Claude)
 
 ## Getting started
 
-Not applicable yet. Setup, installation, and run instructions will be added in **Phase 2 (Infrastructure)**.
+Not applicable yet. Setup, installation, and run instructions will be added in the **infrastructure phase**.
 
 ## Disclaimer
 

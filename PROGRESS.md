@@ -2,8 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 1 — Architecture → 🔄 in progress (master engineering rules done; design items in `TODO.md` pending)
-**Next phase:** 2 — Infrastructure (waits for the user to open it)
+**Current phase:** 2 — Architecture → ✅ review complete, **awaiting approval** (checklist in `TODO.md`)
+**Next phase:** 3 — to be defined by the user (infrastructure not yet placed)
 
 ---
 
@@ -12,8 +12,8 @@ Single source of truth for what has been done. Updated at the end of every task.
 | Phase | Name | Status |
 |---|---|---|
 | 0 | Project foundation | ✅ Complete |
-| 1 | Architecture | 🔄 In progress |
-| 2 | Infrastructure | ⏳ Not started |
+| 1 | Master engineering rules | ✅ Complete |
+| 2 | Architecture | ✅ Review complete — awaiting approval |
 | 3 | Data ingestion | ⏳ Not started |
 | 4 | Market data | ⏳ Not started |
 | 5 | Institutional data | ⏳ Not started |
@@ -89,7 +89,32 @@ Single source of truth for what has been done. Updated at the end of every task.
 **Tests run:** None applicable (documentation only, no code). Checks: every rule in the user's brief located in `CLAUDE.md`
 by search; cross-references between files checked; files read back from `E:\FINANCIAL TOOL` and compared byte-for-byte.
 
-**Known limitations:** Phase 1 design items (data model, point-in-time contract, adapter interface, metric registry,
-snapshot/validator contract, quality checks, ADR-0008/0009) are not started. Q1–Q10 in `TODO.md` remain open.
+**Known limitations:** Architecture design items (data model, point-in-time contract, adapter interface, metric registry,
+snapshot/validator contract, quality checks, ADR-0008/0009) are not started and are unscheduled. Q1–Q10 in `TODO.md` remain open.
 
-**Git commit:** pending — user to commit as `[P1] add master engineering rules`.
+**Git commit:** `e4cca71` — `[P1] add master engineering rules` (created by the user).
+
+**Phase 1 closed** (2026-09-23): the user confirmed Phase 1 consists only of the master engineering rules.
+Phase 1 renamed from "Architecture" to "Master engineering rules" in `CLAUDE.md` and here; architecture design work moved to
+"Unscheduled" in `TODO.md`. This closing update was to be committed by the user as `[P1] close phase 1` (hash not reported; verify with `git log`).
+
+### 2026-09-23 — Phase 2: Architecture (design only, no code)
+
+**What changed**
+- `ARCHITECTURE.md` rewritten as v1.0: system containers, layer/DB-schema/role mapping, technology stack, and all 30 review areas
+  (§5.1–5.30), entity classification, user layer, repository layout, deployment topology, component-to-phase map, risk register.
+- `DECISIONS.md`: 31 new ADRs (0014–0044), each with decision, reason, alternatives, trade-offs, future implications; ADR-0008 superseded
+  by ADR-0014; ADR-0010 cross-referenced to ADR-0044; ADR-0012 amended for the phase plan.
+- `DATA_DICTIONARY.md` v0.2: series-level vs. row-level fields, new enums (`evidence_category`, `pit_reliability`, `job_status`,
+  `circuit_state`, `app_role`), full logical schema for 9 DB schemas (§4), AI snapshot format (§9a).
+- `TODO.md`: Architecture Approval Checklist (Parts A–D) replaces the open-questions list; infrastructure tasks listed as unscheduled.
+- `CLAUDE.md` §C3: Phase 2 = Architecture; later phase numbers provisional.
+
+**Verification:** Licence facts checked against primary sources on 2026-09-23 (Timescale License terms, Redis licences,
+Lightweight Charts licence/attribution). Cross-references (ADR numbers, section numbers) checked by script.
+No software tests apply (no code).
+
+**Known issues:** All Phase 2 ADRs are *Proposed* until the user approves the checklist. Storage volumes, retention, and numeric-type
+performance are estimates to be benchmarked. Provider capabilities remain unverified.
+
+**Git commit:** pending — user to commit as `[P2] architecture review`.
