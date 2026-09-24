@@ -85,6 +85,9 @@ export function TreasuryPanel({ treasury }: { treasury: Treasury }) {
                 <th scope="col">Company</th>
                 <th scope="col">BTC</th>
                 <th scope="col">Cost</th>
+                <th scope="col" title="Calculated: |cost ÷ BTC|">
+                  Cost per BTC (calculated)
+                </th>
                 <th scope="col">Holdings after</th>
                 <th scope="col">Public by</th>
               </tr>
@@ -103,6 +106,11 @@ export function TreasuryPanel({ treasury }: { treasury: Treasury }) {
                   </td>
                   <td>{formatSignedGrouped(p.btc_acquired, 4)}</td>
                   <td>{formatUsdMillions(p.cost_usd)}</td>
+                  <td>
+                    {p.implied_cost_per_btc_usd === null
+                      ? "—"
+                      : `${formatNumber(p.implied_cost_per_btc_usd)} USD`}
+                  </td>
                   <td>{formatNumber(p.holdings_after_btc)}</td>
                   <td>
                     {p.available_at.slice(0, 10)}

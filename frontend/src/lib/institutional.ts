@@ -206,6 +206,7 @@ export type Treasury = {
       btc_acquired: string | null;
       cost_usd: string | null;
       unit_cost_usd: string | null;
+      implied_cost_per_btc_usd: string | null;
       holdings_after_btc: string | null;
       available_at: string;
       available_at_estimated: boolean;

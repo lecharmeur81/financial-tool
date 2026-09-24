@@ -91,6 +91,13 @@ def _day_start(day: date) -> datetime:
     return date_label(day)
 
 
+def _implied_price(usd: Decimal | None, coins: Decimal | None) -> str | None:
+    """Calculated cost per coin (|USD ÷ coins|, 2 decimals) — shown labelled as calculated."""
+    if usd is None or not coins:
+        return None
+    return format(abs(usd / coins).quantize(Decimal("0.01")), "f")
+
+
 def _pct(value: Decimal | None) -> str | None:
     return None if value is None else format(value.quantize(Decimal("0.0001")), "f")
 
@@ -811,6 +818,7 @@ class InstitutionalService:
                 "btc_acquired": num(r["flow_native"]),
                 "cost_usd": num(r["flow_usd"]),
                 "unit_cost_usd": num(r["unit_cost_usd"]),
+                "implied_cost_per_btc_usd": _implied_price(r["flow_usd"], r["flow_native"]),
                 "holdings_after_btc": num(r["holdings_native"]),
                 "available_at": r["available_at"],
                 "available_at_estimated": r["available_at_estimated"],
@@ -849,7 +857,11 @@ class InstitutionalService:
                     "provider's; disclosure is assumed public within 7 days (or when received, "
                     "if earlier)."
                 ),
-                "units": {"btc_acquired": "BTC", "cost_usd": "usd"},
+                "units": {
+                    "btc_acquired": "BTC",
+                    "cost_usd": "usd",
+                    "implied_cost_per_btc_usd": "usd per BTC, calculated as |cost ÷ BTC|",
+                },
                 "evidence_category": "metric",
             },
             "source": src,

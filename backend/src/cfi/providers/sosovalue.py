@@ -24,7 +24,12 @@ Verified 2026-09-24 against the official documentation
 - ``GET /btc-treasuries`` → ``[{"ticker", "name", "list_location"}]``;
 - ``GET /btc-treasuries/{ticker}/purchase-history?limit=`` (max 100; optional ``start_date`` /
   ``end_date``) → ``date``, ``ticker``, ``btc_holding``, ``btc_acq``, ``acq_cost`` (USD),
-  ``avg_btc_cost`` (USD per BTC).
+  ``avg_btc_cost`` (documented as USD per BTC — **contradicted by real data**, see below).
+
+Observed on the first real run (2026-09-24): ``avg_btc_cost`` is not a USD price per BTC (MSTR:
+0.09 while acq_cost ÷ btc_acq ≈ 79,700 USD; other companies 2.7 … 657). It is not stored. A few
+``acq_cost`` values imply impossible prices (e.g. 2 BTC for 111.84 M), probably another currency;
+such rows are kept and flagged ``suspect`` by the implied-price plausibility check.
 
 The documentation does not state the date format of ``start_date`` / ``end_date`` for purchase
 history; ``yyyy-MM-dd`` (the format of the response dates) is used, and pagination stops as soon as
@@ -382,7 +387,9 @@ class SoSoValue(ProviderAdapter):
         coins = _optional(p, "btc_acq")
         cost = _optional(p, "acq_cost")
         holding = _optional(p, "btc_holding")
-        unit_cost = _optional(p, "avg_btc_cost")
+        # ``avg_btc_cost`` is NOT stored: documented as "per-unit cost (USD)", but real values
+        # (2026-09-24) are small company-specific numbers (e.g. 0.09 for MSTR while cost ÷ BTC is
+        # about 79,700 USD). Its meaning is unverified; the raw value stays in the L0 archive.
         missing = coins is None and cost is None and holding is None
         available_at, estimated = dataset.available_at(event_time, None, ctx.ingested_at)
         name = p.get("entity_name")
@@ -404,7 +411,6 @@ class SoSoValue(ProviderAdapter):
             flow_native=coins,
             flow_usd=cost if cost is None or coins is None or coins >= 0 else -abs(cost),
             holdings_native=holding,
-            unit_cost_usd=unit_cost,
             source_provider=PROVIDER_ID,
             original_source=CAPABILITIES.original_source,
             raw_ref=ctx.raw_ref,
@@ -414,6 +420,7 @@ class SoSoValue(ProviderAdapter):
             transformations=tuple(
                 [
                     *transformations,
+                    "avg_btc_cost not stored: its meaning does not match the documentation",
                     *(
                         ["flow_usd: acquisition cost signed like btc_acq (sale → negative)"]
                         if coins is not None and coins < 0 and cost is not None

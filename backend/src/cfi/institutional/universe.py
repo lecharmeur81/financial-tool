@@ -105,7 +105,7 @@ TREASURY_PURCHASE_BTC = DatasetSpec(
     description=(
         "Bitcoin acquisitions disclosed by one listed company, as compiled by the provider: "
         "flow_native = BTC acquired (negative = sold), flow_usd = acquisition cost (USD), "
-        "unit_cost_usd = cost per BTC, holdings_native = company BTC holdings after the "
+        "holdings_native = company BTC holdings after the "
         "transaction. event_time = purchase date given by the provider (00:00 UTC label)."
     ),
 )

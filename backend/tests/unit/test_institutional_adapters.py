@@ -289,12 +289,12 @@ def test_purchase_is_attributed_and_dated_conservatively() -> None:
     assert flow.evidence_class is EvidenceClass.ATTRIBUTED
     assert flow.entity_type == "public_company"
     assert flow.entity_name == "Test Treasury Co C"
-    assert (flow.flow_native, flow.flow_usd, flow.holdings_native, flow.unit_cost_usd) == (
+    assert (flow.flow_native, flow.flow_usd, flow.holdings_native) == (
         Decimal(500),
         Decimal(55000000),
         Decimal(30000),
-        Decimal(110000),
     )
+    assert flow.unit_cost_usd is None  # avg_btc_cost is not a USD price (real data, 2026-09-24)
     assert flow.available_at == datetime(2026, 8, 27, tzinfo=UTC)  # date + 7 days
     assert flow.consistency_problems() == []
 
@@ -334,21 +334,39 @@ def test_sale_cost_is_signed_like_the_coins_and_recorded() -> None:
     assert flow.consistency_problems() == []
 
 
-def test_inconsistent_unit_cost_is_suspect_not_repaired() -> None:
+def test_real_avg_btc_cost_shape_is_not_taken_as_a_price() -> None:
+    """Shape of a real row seen on 2026-09-24: 950 BTC for 75.7 M USD, avg_btc_cost 0.09."""
     flow = purchase(
         {
-            "date": "2026-08-20",
+            "date": "2026-09-21",
             "ticker": "TSTC",
-            "btc_holding": 30000,
-            "btc_acq": 500,
-            "acq_cost": 55000000,
-            "avg_btc_cost": 90000,
+            "btc_holding": 846000,
+            "btc_acq": 950,
+            "acq_cost": 75700000,
+            "avg_btc_cost": 0.09,
+        }
+    )
+    assert flow.unit_cost_usd is None
+    assert "avg_btc_cost not stored" in " ".join(flow.transformations)
+    assert flow.consistency_problems() == []  # 75.7 M ÷ 950 ≈ 79,684 USD per BTC: plausible
+
+
+def test_implausible_implied_price_is_suspect_not_repaired() -> None:
+    """Shape of a real row seen on 2026-09-24: 2 BTC for 111.84 M (probably not USD)."""
+    flow = purchase(
+        {
+            "date": "2026-09-04",
+            "ticker": "TSTC",
+            "btc_holding": 1506,
+            "btc_acq": 2,
+            "acq_cost": 111840000,
+            "avg_btc_cost": 49.3,
         }
     )
     problems = flow.consistency_problems()
     assert len(problems) == 1
-    assert "unit cost" in problems[0]
-    assert flow.unit_cost_usd == Decimal(90000)  # kept exactly as reported
+    assert "implied price 55,920,000.00 USD per BTC" in problems[0]
+    assert flow.flow_usd == Decimal(111840000)  # kept exactly as reported
 
 
 # --------------------------------------------------------------------------- CoinGecko

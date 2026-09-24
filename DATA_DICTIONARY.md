@@ -296,14 +296,18 @@ dated by its receipt time (`known_when_received`), and `available_at_estimated =
 |---|---|---|---|---|---|---|
 | `institutional.etf_flow.us_spot.1d` | `US-SPOT-ETF:<A>` | `etf_group` / direct | `flow_usd` (net inflow), `holdings_usd` (total net assets), `cum_flow_usd`, `value_traded_usd` | SoSoValue `/etfs/summary-history` | next US trading day 18:00 New York | calendar-aware (read); engine limit 5 d |
 | `institutional.etf_fund_flow.us_spot.1d` | `ETF:<TICKER>` | `etf_fund` / direct | as above per fund, plus `premium_discount` | SoSoValue `/etfs`, `/etfs/{ticker}/history` | same | same |
-| `institutional.treasury_purchase.btc` | `COMPANY:<TICKER>` | `public_company` / attributed | `flow_native` (BTC acquired, negative = sold), `flow_usd` (cost, signed like the coins), `unit_cost_usd`, `holdings_native` (holdings after) | SoSoValue BTC Treasuries | purchase date + 7 days | last successful sweep ≤ 36 h (no engine check) |
+| `institutional.treasury_purchase.btc` | `COMPANY:<TICKER>` | `public_company` / attributed | `flow_native` (BTC acquired, negative = sold), `flow_usd` (cost, signed like the coins), `holdings_native` (holdings after). `unit_cost_usd` stays NULL: SoSoValue's `avg_btc_cost` is not a USD price (see below) | SoSoValue BTC Treasuries | purchase date + 7 days | last successful sweep ≤ 36 h (no engine check) |
 | `institutional.treasury_holdings.public_companies` | `PUBLIC-COMPANIES:<A>` | `public_company_group` / attributed | `holdings_native`, `holdings_usd` | CoinGecko `/companies/public_treasury/{coin}` | receipt time (no timestamp in the response) | 26 h |
 
 `<A>` ∈ {BTC, ETH, SOL, XRP} for ETF data; {BTC, ETH, SOL} for holdings totals; BTC only for purchases.
 `event_time`: ETF rows and purchases = the date (US trading date for ETFs) as a 00:00 UTC label; holdings = receipt
 time. ETF figures settle T+1: the current day's row without figures is skipped as not final; an older row without
 figures is stored as explicit missing. Consistency checks mark rows `suspect` (kept): negative holdings or value
-traded, flow in USD and coins with opposite signs, unit cost differing from cost ÷ coins by more than 2 %.
+traded, flow in USD and coins with opposite signs, a reported unit cost differing from cost ÷ coins by more than
+2 %, and — for BTC — an implied price (|cost ÷ coins|) outside 1,000 to 1,000,000 USD (e.g. a cost reported in another
+currency). SoSoValue's `avg_btc_cost` is documented as "per-unit cost (USD)" but real values (2026-09-24) are small
+company-specific numbers (MSTR 0.09 while cost ÷ BTC ≈ 79,700 USD); it is not stored. The API shows a calculated
+`implied_cost_per_btc_usd` = |cost ÷ BTC| instead.
 
 ### Read-time aggregations (Phase 6)
 

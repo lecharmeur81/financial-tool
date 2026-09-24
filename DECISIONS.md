@@ -962,3 +962,11 @@ divergence engine (institutional vs retail) consumes the score's components with
 every 7.5 s with no bursts (`RateLimitSpec.burst = 1`), and provider-requested waits of up to 90 s are honoured
 before retrying (`ProviderCapabilities.max_retry_wait_seconds`). Other providers are unchanged.
 
+**Amendment 2 (2026-09-24, first real purchase sweep).** 333 of 521 purchases were flagged by the unit-cost check.
+Cause: SoSoValue's `avg_btc_cost`, documented as USD per BTC, is not (MSTR 0.09 while cost ÷ BTC ≈ 79,700 USD). It is
+no longer stored; the check is replaced by an implied-price plausibility band for BTC (1,000 to 1,000,000 USD per BTC),
+which still catches genuinely inconsistent rows (e.g. 2 BTC for 111.84 M — probably another currency). Re-ingested rows
+become new revisions; nothing is overwritten. **Farside Investors** (second ETF source requested by the user): not
+used — its pages answer automated clients with a bot-check page, and the site is "All rights reserved" with no data
+terms. HYPE ETF flows (Farside only) are deferred.
+

@@ -44,6 +44,9 @@ from the raw archive (`data/raw/…`) and added here with its capture date.
 
 ## Design of the treasury data (BTC)
 
+The fixtures carry `avg_btc_cost` because the documented shape has it; the adapter ignores it (real values are not
+USD per BTC — see the SoSoValue adapter docstring).
+
 | Company | Older purchase | Purchase in the 30-day window | Holdings after |
 |---|---|---|---|
 | TSTA | 2026-06-01: +59,000 BTC | 2026-08-31: +1,000 BTC for 110 M USD | 60,000 |

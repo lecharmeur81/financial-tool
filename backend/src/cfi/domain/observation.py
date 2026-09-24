@@ -312,6 +312,17 @@ class CanonicalFlow(ObservedRecord):
             and (self.flow_usd > 0) != (self.flow_native > 0)
         ):
             problems.append("flow in USD and flow in coins have opposite signs")
+        bounds = PLAUSIBLE_PRICE_USD.get(self.asset or "")
+        if bounds and self.flow_usd is not None and self.flow_native not in (None, 0):
+            assert self.flow_native is not None  # noqa: S101 — narrowed above
+            implied = abs(self.flow_usd / self.flow_native)
+            low, high = bounds
+            if not low <= implied <= high:
+                problems.append(
+                    f"implied price {implied:,.2f} USD per {self.asset} (flow_usd / flow_native) "
+                    f"is outside the plausible range {low:,} to {high:,} USD: the amount may be in "
+                    "another currency, or the coin amount and cost do not match"
+                )
         if (
             self.unit_cost_usd is not None
             and self.flow_usd is not None
@@ -332,3 +343,10 @@ class CanonicalFlow(ObservedRecord):
 # Reported per-unit cost may be rounded or include fees; beyond this relative difference the
 # three reported numbers do not describe the same transaction.
 UNIT_COST_TOLERANCE = Decimal("0.02")
+
+# Deliberately wide sanity bands for the price implied by a flow (USD ÷ coins). Bitcoin has traded
+# far inside this band since listed companies began buying it (2020); a value outside it means the
+# record cannot be a USD purchase of that many coins (e.g. a cost reported in another currency).
+PLAUSIBLE_PRICE_USD: dict[str, tuple[Decimal, Decimal]] = {
+    "BTC": (Decimal(1_000), Decimal(1_000_000)),
+}

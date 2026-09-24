@@ -394,4 +394,26 @@ Nothing was invented. Because only 5 funds were loaded, the "sum of funds" cross
 **Tests:** 233 passed (5 new: pacing, 58 s wait honoured, >90 s wait fails and holds the circuit, burst default for
 other providers, New York date range). Lint and types clean.
 
-**Git commit:** pending — `[P6] SoSoValue pacing fix`.
+**Git commit:** `a1ed9f7` — `[P6] SoSoValue pacing fix` (verified on Windows: 233 passed; all 12 BTC funds loaded and
+reconcile with the totals except 2026-08-24, the edge of the one-month window; BTC flows match Farside Investors for
+14–22 Sep to within 0.1 M).
+
+---
+
+### 2026-09-24 — Phase 6 follow-up: treasury purchase check corrected
+
+**What the user's run showed:** the purchase sweep succeeded (521 disclosed purchases), but 333 were flagged `suspect`
+by the unit-cost check. The rows showed that SoSoValue's `avg_btc_cost` is not a USD price per BTC as documented
+(MSTR 0.09 while cost ÷ BTC ≈ 79,700 USD; other companies 2.7 … 657). One row is genuinely inconsistent: 2 BTC for
+111.84 M (company 3825), probably a cost in another currency.
+
+**Fix:** `avg_btc_cost` is no longer stored (raw value kept in the archive; transformation recorded). New BTC
+implied-price plausibility check (1,000 to 1,000,000 USD per BTC). The purchases table shows a calculated cost per BTC.
+On the next sweep, affected rows become new revisions with the corrected status; nothing is overwritten.
+
+**Farside / HYPE:** Farside answered every automated request with a bot-check page ("Just a moment...") — not usable;
+the downloaded samples were removed from the commit. HYPE deferred.
+
+**Tests:** 234 passed (backend), 46 passed (frontend); lint and types clean.
+
+**Git commit:** pending — `[P6] treasury purchase check`.

@@ -138,7 +138,7 @@ async def test_inconsistent_purchase_is_kept_but_flagged_suspect(
     inst: InstitutionalHarness,
 ) -> None:
     rows = inst.soso.data("sosovalue_purchase_history_TSTB.json")
-    rows[0]["avg_btc_cost"] = 90_000  # 55 M USD / 500 BTC = 110,000, not 90,000
+    rows[0]["acq_cost"] = 55_000_000_000  # 55 bn for 500 BTC = 110 M per BTC: implausible
     (result,) = await inst.run("sosovalue", TREASURY_PURCHASE_BTC.dataset_id)
     assert result.suspect == 1
     stored = await inst.rows(
@@ -146,8 +146,8 @@ async def test_inconsistent_purchase_is_kept_but_flagged_suspect(
         d=TREASURY_PURCHASE_BTC.dataset_id,
     )
     assert len(stored) == 1
-    assert stored[0]["unit_cost_usd"] == Decimal(90_000)  # never repaired
-    assert "unit cost" in stored[0]["quality_note"]
+    assert stored[0]["flow_usd"] == Decimal(55_000_000_000)  # never repaired
+    assert "implied price" in stored[0]["quality_note"]
 
 
 async def test_coingecko_holdings_snapshot(inst: InstitutionalHarness) -> None:

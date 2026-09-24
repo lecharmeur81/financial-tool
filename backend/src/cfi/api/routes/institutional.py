@@ -203,6 +203,7 @@ class PurchaseEvent(BaseModel):
     btc_acquired: str | None
     cost_usd: str | None
     unit_cost_usd: str | None
+    implied_cost_per_btc_usd: str | None
     holdings_after_btc: str | None
     available_at: datetime
     available_at_estimated: bool
