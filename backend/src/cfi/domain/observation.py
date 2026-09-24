@@ -19,7 +19,8 @@ Two record families share this provenance (ADR-0017):
 - :class:`CanonicalObservation` — one scalar ``value`` (stored in ``obs.observation``);
 - :class:`CanonicalBar` — an OHLCV bar (stored in ``obs.market_bar``);
 - :class:`CanonicalFlow` — capital flow / holdings of an identified institutional vehicle or
-  entity (stored in ``obs.institutional_flow``).
+  entity (stored in ``obs.institutional_flow``);
+- :class:`CanonicalTransfer` — one large on-chain transfer (stored in ``obs.large_transfer``).
 
 Invariants enforced here:
 - all timestamps are timezone-aware and converted to UTC;
@@ -34,6 +35,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Self
 
+from cfi.core.addresses import is_valid_address
 from cfi.core.time import ensure_utc
 from cfi.domain.enums import EvidenceClass, PitReliability, QualityStatus
 
@@ -350,3 +352,80 @@ UNIT_COST_TOLERANCE = Decimal("0.02")
 PLAUSIBLE_PRICE_USD: dict[str, tuple[Decimal, Decimal]] = {
     "BTC": (Decimal(1_000), Decimal(1_000_000)),
 }
+
+
+TRANSFER_CHAINS = frozenset({"bitcoin", "ethereum"})
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CanonicalTransfer(ObservedRecord):
+    """One large on-chain transfer. ``event_time`` is the time of the block that contains it.
+
+    ``value_native`` is in units of ``asset`` (``unit``); ``value_usd`` is the provider's USD
+    value at the time of the block (``None`` when not reported — never estimated here).
+
+    Bitcoin transfers are transaction **outputs**: ``recipient`` is the output's address and
+    ``output_index`` its position; the sending addresses are not part of an output record, so
+    ``sender`` is ``None``. An output is not necessarily a payment to another owner (it can be
+    change or a wallet consolidation). Ethereum transfers are transactions: ``sender`` and
+    ``recipient`` are the accounts, ``output_index`` is ``None``, and value moved by internal
+    contract calls is not included.
+
+    Addresses are stored in canonical form when valid; an address that fails validation is kept
+    as reported and the record is marked ``suspect`` (never silently corrected).
+    """
+
+    chain: str
+    tx_hash: str
+    output_index: int | None = None
+    block_height: int | None = None
+    sender: str | None = None
+    recipient: str | None = None
+    value_native: Decimal | None = None
+    value_usd: Decimal | None = None
+
+    def __post_init__(self) -> None:
+        if self.chain not in TRANSFER_CHAINS:
+            raise ValueError(f"unknown chain {self.chain!r}")
+        if not self.tx_hash:
+            raise ValueError("tx_hash must not be empty")
+        ObservedRecord.__post_init__(self)
+
+    @property
+    def is_missing(self) -> bool:
+        return self.value_native is None
+
+    def comparable(self) -> object:
+        return (
+            self.tx_hash,
+            self.output_index,
+            self.block_height,
+            self.sender,
+            self.recipient,
+            self.value_native,
+            self.value_usd,
+        )
+
+    @property
+    def conflict_value(self) -> Decimal | None:
+        return self.value_native
+
+    def describe(self) -> str:
+        if self.is_missing:
+            return "missing"
+        return f"{self.value_native} {self.unit} {self.sender or '?'} -> {self.recipient or '?'}"
+
+    def consistency_problems(self) -> list[str]:
+        """Sanity checks. Violations mark the record ``suspect`` (kept, flagged), never fixed."""
+        if self.is_missing:
+            return []
+        problems = []
+        if self.value_native is not None and self.value_native <= 0:
+            problems.append("non-positive transfer value")
+        if self.value_usd is not None and self.value_usd < 0:
+            problems.append("negative USD value")
+        for role in ("sender", "recipient"):
+            address = getattr(self, role)
+            if address is not None and not is_valid_address(self.chain, address):
+                problems.append(f"{role} {address!r} is not a valid {self.chain} address")
+        return problems

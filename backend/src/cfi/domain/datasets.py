@@ -18,7 +18,7 @@ from cfi.core.time import ensure_utc, parse_period
 from cfi.domain.enums import PitReliability
 
 AvailabilityKind = Literal["provider", "period_end_plus", "event_time_plus", "next_us_trading_day"]
-RecordKind = Literal["scalar", "bar", "flow"]
+RecordKind = Literal["scalar", "bar", "flow", "transfer"]
 
 
 @dataclass(frozen=True, slots=True)

@@ -28,14 +28,21 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/flows",
     label: "Flows",
     description:
-      "Institutional capital: US spot ETF flows (BTC, ETH, SOL, XRP), corporate treasuries and the transparent Institutional Flow Score — with evidence class shown for every actor label. Whale and exchange flows later.",
-    plannedPhase: "6 (institutional capital); whale and exchange flows later",
+      "Institutional capital: US spot ETF flows (BTC, ETH, SOL, XRP), corporate treasuries and the transparent Institutional Flow Score — with evidence class shown for every actor label.",
+    plannedPhase: "6 (institutional capital)",
+  },
+  {
+    href: "/whales",
+    label: "Whales",
+    description:
+      "Whale intelligence: exchange inflows and outflows, largest addresses with evidence-based labels, large transfers, dormant-coin and miner activity, the Whale Flow Score and contradiction indicators (BTC, ETH).",
+    plannedPhase: "7 (whale intelligence)",
   },
   {
     href: "/derivatives",
     label: "Derivatives",
     description: "Open interest, funding, liquidations, basis, and options positioning.",
-    plannedPhase: "7",
+    plannedPhase: "not yet scheduled",
   },
   {
     href: "/liquidity",

@@ -20,6 +20,9 @@ x-backend-env: &backend-env
   # Institutional capital (Phase 6): SoSoValue needs a free API key; without it its jobs are skipped.
   CFI_INSTITUTIONAL_PROVIDERS: ${CFI_INSTITUTIONAL_PROVIDERS:-sosovalue,coingecko}
   CFI_PROVIDER_SOSOVALUE_API_KEY: ${CFI_PROVIDER_SOSOVALUE_API_KEY:-}
+  # Whale intelligence (Phase 7): Coin Metrics Community and Blockchair, both work without a key.
+  CFI_WHALE_PROVIDERS: ${CFI_WHALE_PROVIDERS:-coinmetrics,blockchair}
+  CFI_PROVIDER_BLOCKCHAIR_API_KEY: ${CFI_PROVIDER_BLOCKCHAIR_API_KEY:-}
 
 x-backend-build: &backend-build
   context: ./backend

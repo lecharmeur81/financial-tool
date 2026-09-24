@@ -19,6 +19,9 @@ from cfi.institutional.sources import credential_configured, source, sources_for
 from cfi.market.jobs import backfill_days, backfill_step, ingest_latest
 from cfi.market.sources import ADAPTERS, datasets_for
 from cfi.market.universe import ASSET_SYMBOLS, dataset_by_id
+from cfi.whales.jobs import ingest_source as ingest_whale_source
+from cfi.whales.sources import source as whale_source
+from cfi.whales.sources import sources_for as whale_sources_for
 from cfi.worker.runtime import WorkerRuntime
 from cfi.worker.schedule import beat_schedule
 
@@ -37,7 +40,11 @@ app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_default_queue="ingest",
-    beat_schedule=beat_schedule(settings.market_provider_ids, settings.institutional_provider_ids),
+    beat_schedule=beat_schedule(
+        settings.market_provider_ids,
+        settings.institutional_provider_ids,
+        settings.whale_provider_ids,
+    ),
 )
 
 BACKFILL_BUDGET_SECONDS = 45.0
@@ -73,13 +80,20 @@ def ingest_latest_task(provider_id: str, dataset_id: str) -> dict[str, Any]:
 @signals.beat_init.connect
 def _kick_institutional(**_: Any) -> None:
     """Beat's first run of an interval entry comes one interval after start (hours for
-    institutional data), so each institutional job is also queued once when beat starts."""
+    institutional and whale data), so each of those jobs is also queued once when beat starts."""
     for item in sources_for(settings.institutional_provider_ids):
         app.send_task(
             "institutional.ingest",
             args=(item.provider_id, item.dataset.dataset_id),
             queue=item.queue,
             expires=item.interval_seconds,
+        )
+    for w in whale_sources_for(settings.whale_provider_ids):
+        app.send_task(
+            "whales.ingest",
+            args=(w.provider_id, w.dataset.dataset_id, w.subject),
+            queue=w.queue,
+            expires=w.interval_seconds,
         )
 
 
@@ -98,6 +112,22 @@ def institutional_ingest_task(provider_id: str, dataset_id: str) -> dict[str, An
         ctx = await rt.context()
         results = await ingest_source(ctx, source(provider_id, dataset_id))
         return {"runs": [(r.subject, r.status, r.inserted, r.revisions) for r in results]}
+
+    return rt.run(go())
+
+
+@app.task(name="whales.ingest", time_limit=1800, soft_time_limit=1700)
+def whale_ingest_task(provider_id: str, dataset_id: str, subject: str) -> dict[str, Any]:
+    """One whale dataset from one provider for one asset: the recent window, then one history
+    chunk while history is incomplete. Skipped (not failed) when the provider is disabled."""
+    if provider_id not in settings.whale_provider_ids:
+        return {"skipped": f"provider {provider_id} is disabled"}
+    rt = runtime()
+
+    async def go() -> dict[str, Any]:
+        ctx = await rt.context()
+        results = await ingest_whale_source(ctx, whale_source(provider_id, dataset_id, subject))
+        return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
 
     return rt.run(go())
 

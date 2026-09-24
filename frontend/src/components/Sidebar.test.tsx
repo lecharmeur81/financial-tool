@@ -1,6 +1,8 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { NAV_ITEMS } from "@/lib/navigation";
+
 import { Sidebar } from "./Sidebar";
 
 const pathname = vi.hoisted(() => ({ current: "/" }));
@@ -11,7 +13,7 @@ afterEach(cleanup);
 describe("Sidebar", () => {
   it("renders all navigation links", () => {
     render(<Sidebar />);
-    expect(screen.getAllByRole("link")).toHaveLength(8);
+    expect(screen.getAllByRole("link")).toHaveLength(NAV_ITEMS.length);
   });
 
   it("marks only the current page", () => {

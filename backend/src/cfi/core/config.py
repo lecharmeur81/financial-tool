@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     # skipped and the dashboard says so.
     institutional_providers: str = "sosovalue,coingecko"
 
+    # Whale intelligence (Phase 7). Comma-separated provider IDs the workers ingest from. Both
+    # work without a key (Blockchair: optional CFI_PROVIDER_BLOCKCHAIR_API_KEY).
+    whale_providers: str = "coinmetrics,blockchair"
+
+    @property
+    def whale_provider_ids(self) -> list[str]:
+        return [p.strip() for p in self.whale_providers.split(",") if p.strip()]
+
     @property
     def market_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.market_providers.split(",") if p.strip()]

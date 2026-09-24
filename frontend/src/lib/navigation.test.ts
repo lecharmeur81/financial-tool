@@ -8,11 +8,12 @@ import { NAV_ITEMS, isActive, navItem } from "./navigation";
 const APP_DIR = join(__dirname, "..", "app");
 
 describe("navigation", () => {
-  it("contains exactly the Phase 3 sections, in order", () => {
+  it("contains exactly the sections built so far, in order", () => {
     expect(NAV_ITEMS.map((i) => i.label)).toEqual([
       "Dashboard",
       "Market",
       "Flows",
+      "Whales",
       "Derivatives",
       "Liquidity",
       "Analytics",

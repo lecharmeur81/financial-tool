@@ -12,7 +12,7 @@ describe("PagePlaceholder", () => {
     render(<PagePlaceholder item={navItem("/derivatives")} />);
     expect(screen.getByRole("heading", { level: 1, name: "Derivatives" })).toBeDefined();
     expect(screen.getByText("No data sources connected")).toBeDefined();
-    expect(screen.getByText("Planned phase: 7")).toBeDefined();
+    expect(screen.getByText("Planned phase: not yet scheduled")).toBeDefined();
   });
 
   it("does not display any numbers as data", () => {

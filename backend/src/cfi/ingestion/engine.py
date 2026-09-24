@@ -11,8 +11,8 @@
       → quality findings + job_run finish
 
 The same pipeline stores scalar observations (``obs.observation``), OHLCV bars
-(``obs.market_bar``) and institutional flows (``obs.institutional_flow``); the dataset's ``kind``
-selects the store.
+(``obs.market_bar``), institutional flows (``obs.institutional_flow``) and large on-chain transfers
+(``obs.large_transfer``); the dataset's ``kind`` selects the store.
 
 Nothing is silently dropped or repaired: every skipped, rejected, missing, suspect, stale or
 conflicting item is counted on the job run and (except not-yet-final records, which are simply
@@ -54,7 +54,14 @@ from cfi.ingestion.detection import (
     split_batch,
 )
 from cfi.ingestion.repository import IngestionRepository
-from cfi.ingestion.stores import BarStore, FlowStore, GapContext, ObservationStore, RecordStore
+from cfi.ingestion.stores import (
+    BarStore,
+    FlowStore,
+    GapContext,
+    ObservationStore,
+    RecordStore,
+    TransferStore,
+)
 from cfi.providers.base import FetchWindow, NormaliseContext, ProviderAdapter, RequestSpec
 from cfi.providers.http import ProviderHttpClient
 
@@ -111,6 +118,7 @@ class IngestionEngine:
             "scalar": ObservationStore(repo.engine),  # type: ignore[dict-item]
             "bar": BarStore(repo.engine),  # type: ignore[dict-item]
             "flow": FlowStore(repo.engine),  # type: ignore[dict-item]
+            "transfer": TransferStore(repo.engine),  # type: ignore[dict-item]
         }
         self._series_cache: dict[SeriesKey, int] = {}
         self._series_template: dict[int, ObservedRecord] = {}

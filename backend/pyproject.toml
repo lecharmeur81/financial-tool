@@ -59,6 +59,8 @@ select = [
 "migrations/**" = ["N999"]
 # User-facing formulas use real math symbols (−, ×, ÷, –); they are intentional, not confusables.
 "src/cfi/institutional/**" = ["RUF001", "RUF002"]
+"src/cfi/whales/**" = ["RUF001", "RUF002"]
+"src/cfi/providers/blockchair.py" = ["RUF002"]
 "src/cfi/core/calendars.py" = ["RUF002"]
 
 # ---------------------------------------------------------------- mypy (type checking)

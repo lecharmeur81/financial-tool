@@ -6,6 +6,11 @@
 
 ## Status
 
+**Phase 7 — Whale intelligence.** Exchange inflows and outflows (BTC, ETH), the 100 largest addresses with
+evidence-based labels (known exchange, institution, fund, market maker, protocol, miner, government — or *unknown large
+holder* from size only, never "institution"), large transfers, Bitcoin coin-age and miner activity, a transparent
+**Whale Flow Score** and contradiction indicators — on the **Whales** page.
+
 **Phase 6 — Institutional capital.** US spot ETF flows for BTC, ETH, SOL and XRP (total and per fund; daily,
 weekly, monthly), listed-company bitcoin purchases and treasury holdings, and a transparent **Institutional Flow
 Score** whose every component is shown — on the **Flows** page. Phase 5 added market data (spot OHLCV, last trade,
@@ -90,8 +95,8 @@ AI-assisted analysis (Claude)
    ```
    First start downloads images and builds; later starts are fast.
 4. Open:
-   - Frontend: http://localhost:3000 (Market shows charts; Flows shows institutional capital; Settings shows
-     live system status)
+   - Frontend: http://localhost:3000 (Market shows charts; Flows shows institutional capital; Whales shows on-chain
+     whale data; Settings shows live system status)
    - API docs: http://localhost:8000/api/docs
    - Readiness: http://localhost:8000/health/ready
 
@@ -118,6 +123,12 @@ key** — register at https://sosovalue.com/developer/dashboard, wait for approv
 `CFI_PROVIDER_SOSOVALUE_API_KEY` (never commit it). Without a key those jobs are skipped and the Flows page says so.
 After adding the key run `docker compose up -d`: it recreates the services with the new setting, and `beat` queues
 every institutional job once when it starts (no need to wait hours for the schedule).
+Whale data (Phase 7) needs no key: Coin Metrics Community (licence CC BY-NC 4.0 — non-commercial use) and Blockchair
+(free for personal / non-commercial use up to 1,440 requests a day). History loads over the first runs (one chunk per
+run); 7-day balance changes of the largest addresses appear after a week of daily snapshots. Address labels are
+imported from `backend/src/cfi/whales/seed_labels/*.csv` when the worker starts; more can be added with
+`docker compose exec worker python -m cfi.whales.label_store import <file.csv>` (every row needs evidence, source and
+confidence; bad rows reject the whole file).
 Third-party attributions: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## Disclaimer

@@ -9,6 +9,9 @@ from sqlalchemy import make_url
 from cfi.core.config import Settings
 from cfi.institutional.universe import all_datasets as institutional_datasets
 from cfi.market.universe import all_datasets
+from cfi.whales.label_store import SEED_FILES, seed_text
+from cfi.whales.labels import parse_label_csv
+from cfi.whales.universe import all_datasets as whale_datasets
 from cfi.worker.runtime import WorkerRuntime
 from tests.integration.conftest import requires_services
 
@@ -41,6 +44,7 @@ def test_runtime_registers_every_enabled_dataset(test_settings: Settings) -> Non
         update={
             "market_providers": "coinbase,kraken,binance,okx,bybit,coingecko",
             "institutional_providers": "sosovalue,coingecko",
+            "whale_providers": "coinmetrics,blockchair",
         }
     )
     runtime = WorkerRuntime(settings)
@@ -54,6 +58,8 @@ def test_runtime_registers_every_enabled_dataset(test_settings: Settings) -> Non
             "bybit",
             "coingecko",
             "sosovalue",
+            "coinmetrics",
+            "blockchair",
         }
         assert runtime.run(runtime.context()) is ctx  # one context per process
     finally:
@@ -63,9 +69,15 @@ def test_runtime_registers_every_enabled_dataset(test_settings: Settings) -> Non
     with psycopg.connect(url.render_as_string(hide_password=False)) as conn:
         datasets = {r[0] for r in conn.execute("SELECT dataset_id FROM ops.dataset")}
         links = conn.execute("SELECT count(*) FROM ops.dataset_provider").fetchone()
-    expected = {d.dataset_id for d in all_datasets()} | {
-        d.dataset_id for d in institutional_datasets()
-    }
+        labels = conn.execute("SELECT count(*) FROM ref.entity_label").fetchone()
+    expected = (
+        {d.dataset_id for d in all_datasets()}
+        | {d.dataset_id for d in institutional_datasets()}
+        | {d.dataset_id for d in whale_datasets()}
+    )
+    # the address labels shipped with the code are imported once at start
+    assert labels is not None
+    assert labels[0] == len(parse_label_csv(seed_text(SEED_FILES[0])).labels)
     assert expected <= datasets  # (Coinbase 4h is derived at read time; Kraken supplies usd 4h)
     assert links is not None
     assert links[0] >= len(expected)
@@ -99,3 +111,25 @@ def test_institutional_task_skips_disabled_provider_and_missing_key(
     monkeypatch.delenv("CFI_PROVIDER_SOSOVALUE_API_KEY", raising=False)
     result = worker.institutional_ingest_task.run("sosovalue", "institutional.etf_flow.us_spot.1d")
     assert result == {"skipped": "provider sosovalue has no API key configured"}
+
+
+def test_whale_jobs_are_scheduled_per_asset_and_skip_disabled_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cfi.worker import app as worker
+    from cfi.worker.schedule import whale_entries
+
+    assert "whales.ingest" in worker.app.tasks
+    entries = whale_entries(["coinmetrics", "blockchair"])
+    assert "whales:coinmetrics:whale.exchange_inflow.btc.1d:BTC" in entries
+    assert "whales:blockchair:whale.large_transfer.ethereum:ETH" in entries
+    assert all(v["options"]["expires"] == v["schedule"] for v in entries.values())
+    # Blockchair work shares one process (its daily request budget), Coin Metrics is light
+    assert {v["options"]["queue"] for k, v in entries.items() if ":blockchair:" in k} == {
+        "backfill"
+    }
+    monkeypatch.setattr(
+        worker, "settings", worker.settings.model_copy(update={"whale_providers": "coinmetrics"})
+    )
+    result = worker.whale_ingest_task.run("blockchair", "whale.large_transfer.bitcoin", "BTC")
+    assert result == {"skipped": "provider blockchair is disabled"}

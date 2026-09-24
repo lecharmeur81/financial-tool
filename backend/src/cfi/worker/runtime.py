@@ -21,6 +21,8 @@ from cfi.market.jobs import JobContext
 from cfi.market.sources import ADAPTERS, PRIORITY, datasets_for
 from cfi.providers.base import ProviderAdapter
 from cfi.providers.http import ProviderHttpClient
+from cfi.whales import sources as whales
+from cfi.whales.label_store import import_seed_files
 
 
 class WorkerRuntime:
@@ -57,6 +59,12 @@ class WorkerRuntime:
                 await engine.register(
                     item.dataset, adapter, institutional.PRIORITY[item.provider_id]
                 )
+            for w in whales.sources_for(self.settings.whale_provider_ids):
+                adapter = whales.ADAPTERS[w.provider_id]
+                client_for(adapter)
+                await engine.register(w.dataset, adapter, whales.PRIORITY[w.provider_id])
+            # Address labels shipped with the code (idempotent; stored labels are never changed).
+            await import_seed_files(db, engine.clock())
             self._context = JobContext(engine=engine, db=db, clients=clients)
         return self._context
 

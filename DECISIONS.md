@@ -55,6 +55,8 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 | 0045 | Phase 3 foundation implementation choices | Accepted | 2026-09-23 |
 | 0046 | Phase 4 ingestion engine implementation choices | Accepted | 2026-09-23 |
 | 0047 | Phase 5 market-data layer: providers, storage, workers, API, dashboard | Accepted | 2026-09-23 |
+| 0048 | Phase 6 institutional capital: sources, storage, aggregation, transparent score | Accepted (amended twice: pacing; `avg_btc_cost`, Farside, HYPE) | 2026-09-24 |
+| 0049 | Phase 7 whale intelligence: sources, entity classification, transfers, transparent score | Accepted | 2026-09-24 |
 
 ---
 
@@ -970,3 +972,68 @@ become new revisions; nothing is overwritten. **Farside Investors** (second ETF 
 used — its pages answer automated clients with a bot-check page, and the site is "All rights reserved" with no data
 terms. HYPE ETF flows (Farside only) are deferred.
 
+
+---
+
+## ADR-0049 — Phase 7 whale intelligence: sources, entity classification, transfers, transparent score
+
+**Status:** Accepted (implemented in Phase 7; within approved ADR-0006, 0017, 0018, 0021, 0022, 0023, 0032)
+
+**Decision.**
+- **Sources (free; verified 2026-09-24).**
+  - **Coin Metrics Community API** (no key, 10 requests / 6 s; checked against real responses): daily exchange inflow,
+    outflow and exchange supply (`FlowInExNtv`, `FlowOutExNtv`, `SplyExNtv`) and network supply / issuance
+    (`SplyCur`, `IssTotNtv`) for **BTC and ETH**. Exchange metrics carry a status (`flash` / `reviewed`) and a status
+    time, used as `available_at`; `flash` rows are stored `estimated`. Licence **CC BY-NC 4.0** (attribution shown;
+    non-commercial only).
+  - **Blockchair API** (no key up to 1,440 requests a day, 30 a minute; personal / non-commercial; documented shapes —
+    the host is not reachable from Claude's workspace): top-100 address balances (BTC; ETH accounts, contracts
+    excluded), large transfers (BTC outputs ≥ 500 BTC; ETH transactions ≥ 5,000 ETH, exact threshold re-applied on
+    read because the wei filter is approximate), and Bitcoin daily aggregations — coin days destroyed, BTC spent from
+    outputs ≥ 365 days / ≥ 155 days old, BTC spent from coinbase outputs.
+  - **BitInfoCharts** top-100 page: 27 Bitcoin address labels copied once into a versioned CSV (attributed,
+    confidence 0.6; nicknames without an identifiable entity skipped). Every address checksum-verified.
+  - **Not available free (shown in the UI):** dormant / long-term-holder supply stock, miner → exchange flows, SOL and
+    XRP whale data, labelled Ethereum addresses, balance bands, real-time alerts (Whale Alert is paid).
+- **Entity classification (R5).** `ref.entity` (known actors) and `ref.entity_label` (address labels: chain, canonical
+  address, class, entity, evidence class, confidence, evidence text, source, source URL, `valid_from`/`valid_to`,
+  `available_at`, `recorded_at`; append-only). Known classes: exchange, institution, fund, market maker, protocol,
+  miner, government, other — each needs a named entity and a direct or attributed label. Size alone only ever gives
+  `unknown_large_holder` (inferred, confidence 0.5, no entity). Enforced three times: label validation in code, the
+  import (a file with any invalid row is rejected whole), and **database CHECK constraints** (an inferred institution,
+  fund or market maker cannot be stored). Classification happens at read time: labels that count at the classified
+  time for the view (`available_at ≤ as_of`, `recorded_at ≤ knowledge_time`, inside the validity period); precedence
+  direct > attributed > confidence > newest; disagreeing labels are returned as conflicts. Addresses are validated by
+  checksum (Base58Check, Bech32/Bech32m, Ethereum hex) before any storage or match.
+- **Storage.** Fourth record family `CanonicalTransfer` → `obs.large_transfer` (hypertable, 30-day chunks, one series per
+  transfer; same provenance and append-only revisions). Balances and daily aggregates are scalar observations.
+  A transfer address failing validation is kept as reported and the row is flagged `suspect`, never corrected.
+- **Jobs.** One Celery task `whales.ingest(provider, dataset, asset)`: the recent window (complete UTC days for daily
+  data; catch-up after downtime for transfers), then **one** older history chunk while history is incomplete
+  (`ops.backfill_state`), so first starts spread their load and stay inside Blockchair's daily budget. Blockchair runs on
+  the `backfill` queue (one process owns its rate limit). Seed labels are imported when the worker starts.
+- **Whale Flow Score v1** (calculated metric; positive = accumulation, negative = distribution): 7-day net flow to
+  exchanges as % of exchange supply (0.35, scale 1 %), 30-day exchange-supply change (0.15, scale 3 %), 7-day balance
+  change of unknown large holders in the top 100 — membership taken from the earlier snapshot, ≥ 80 % still listed
+  (0.25, scale 1 %), BTC coins ≥ 1 year old moving: 7-day vs prior-90-day daily average (0.25, scale 1.0 on ratio − 1).
+  Same method as ADR-0048: capped sub-scores, components below 90 % coverage excluded (never filled), renormalised
+  weights, "Insufficient data" below weight 0.5; bands ±15 / ±50. Coinbase-origin spending ÷ issuance is shown but not
+  scored (mostly pool payouts, not miner selling).
+- **Contradiction indicators.** Pairs of readings compared by direction (sub-score ±0.25, score ±15 points, balance
+  change ±0.5 %): exchange flows vs old coins moving; exchange flows vs unknown large holders; Whale Flow Score vs the
+  Institutional Flow Score (Phase 6); labelled top-100 exchange balances vs Coin Metrics exchange supply. Status:
+  contradiction / consistent / no clear direction / insufficient data — shown, never averaged away.
+- **API / UI.** `/api/v1/whales/*` (catalog, overview, flows, holders, transfers, addresses, entities, score) with
+  `as_of` / `knowledge_time`; the **Whales** page shows the score with every component (source, timestamp, unit,
+  calculation, freshness, quality), contradictions, daily flows chart and table, top holders with classifications
+  (evidence, source, confidence one click away), large transfers and coverage limits.
+
+**Alternatives considered.** Glassnode / CryptoQuant / Nansen / Arkham (better labels and cohorts, paid — B2 budget
+$0); Whale Alert (paid); running our own nodes (too heavy for now); labelling large wallets as whales or institutions by
+size (rejected by R5); storing inferred classifications (not needed: they are recomputed from observed balances at read
+time, so a changed threshold never rewrites history).
+
+**Consequences.** On-chain whale behaviour for BTC and ETH is observable with provenance and point-in-time reads, but
+coverage is thinner than paid analytics: exchange attribution is Coin Metrics', labels are few (27 BTC addresses, no
+ETH labels), and holder changes need a week of snapshots. Parameters are judgments, published and versioned. Licences
+restrict commercial use (Coin Metrics CC BY-NC, Blockchair free tier).

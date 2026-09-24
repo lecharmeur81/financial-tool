@@ -4,7 +4,8 @@ The ingestion engine is the same for every family; only these few operations dif
 
 - ``ObservationStore`` → ``obs.observation`` (one scalar ``value``);
 - ``BarStore``         → ``obs.market_bar`` (OHLCV);
-- ``FlowStore``        → ``obs.institutional_flow`` (flows and holdings of identified entities).
+- ``FlowStore``        → ``obs.institutional_flow`` (flows and holdings of identified entities);
+- ``TransferStore``    → ``obs.large_transfer`` (large on-chain transfers).
 
 All tables share the provenance columns and the natural key
 (``series_id``, ``event_time``, ``source_provider``, ``revision``). Stores only ever *insert*
@@ -29,6 +30,7 @@ from cfi.domain.observation import (
     CanonicalBar,
     CanonicalFlow,
     CanonicalObservation,
+    CanonicalTransfer,
     ObservedRecord,
 )
 
@@ -303,4 +305,43 @@ class FlowStore(_TableStore):
             entity_type=template.entity_type,
             evidence_class=template.evidence_class,
             entity_name=template.entity_name,
+        )
+
+
+TRANSFER_VALUE_COLUMNS = (
+    "tx_hash",
+    "output_index",
+    "block_height",
+    "sender",
+    "recipient",
+    "value_native",
+    "value_usd",
+)
+
+
+class TransferStore(_TableStore):
+    table = t.large_transfer
+    value_columns = TRANSFER_VALUE_COLUMNS
+    conflict_column = "value_native"
+
+    async def insert(self, rows: Sequence[tuple[int, CanonicalTransfer]]) -> int:
+        return await self._insert(
+            [
+                {
+                    **_provenance(sid, x),
+                    "chain": x.chain,
+                    **{c: getattr(x, c) for c in TRANSFER_VALUE_COLUMNS},
+                }
+                for sid, x in rows
+            ]
+        )
+
+    def missing(
+        self, template: CanonicalTransfer, event_time: datetime, gap: GapContext
+    ) -> CanonicalTransfer:
+        return CanonicalTransfer(
+            **_missing_provenance(template, event_time, gap),
+            chain=template.chain,
+            tx_hash=template.tx_hash,
+            output_index=template.output_index,
         )

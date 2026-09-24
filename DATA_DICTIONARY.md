@@ -111,7 +111,13 @@ Natural key (uniqueness): (`series_id`, `event_time`, `source_provider`, `revisi
 | `inferred` | Heuristic proxy (size band, venue mix, cross-venue premium) |
 
 ### `actor_class`
-`institutional` · `professional` · `whale` · `retail` · `exchange` · `miner` · `market_maker` · `fund` · `treasury_company` · `unknown`
+Planned general set: `institutional` · `professional` · `whale` · `retail` · `exchange` · `miner` · `market_maker` · `fund` · `treasury_company` · `unknown`
+
+**Implemented for on-chain addresses (Phase 7, `ref.entity_label.actor_class`):** known classes `exchange`,
+`institution`, `fund`, `market_maker`, `protocol`, `miner`, `government`, `other` (each names an entity in `ref.entity`
+and needs a label from a named source), and `unknown_large_holder` (no entity; `inferred` from size only). Read-time
+classification adds `unlabelled` (no label, balance unknown or below the size threshold). Database checks: `inferred`
+⇒ `unknown_large_holder`; `institution` / `fund` / `market_maker` ⇒ `direct` or `attributed`; known class ⇔ entity set.
 
 Every non-`unknown` assignment requires an `evidence_class`, `confidence` (0–1), `rule_or_source`, `valid_from`, `valid_to`.
 
@@ -128,6 +134,8 @@ checkpoint: `dataset_id`, `provider_id`, `subject`, `covered_from`, `covered_to`
 `empty_chunks`, `note`, `updated_at`), `ops.dataset.kind` (`scalar` | `bar`), `ops.job_run.subject` (asset the run
 covered), `ops.job_run.skipped` (records not final yet — skipped, fetched later), `ops.job_run.suspect`
 (records failing a consistency check), `ops.job_run.job_type` ∈ {`ingest`, `backfill`}.
+**Implemented in Phase 7 (migration `0005`):** `ref.entity`, `ref.entity_label` (below), `obs.large_transfer`,
+`ops.dataset.kind` also `transfer`.
 Still planned: the other typed market tables, `ref.*`, `calc`/`sig`/`regime`/`ai`/`usr` tables, `ops.coverage_daily`.
 **Implemented in Phase 3 (migration `0001`):** the nine
 schemas exist and are empty; no tables have been created yet. **HT** = TimescaleDB hypertable (time column in brackets).
@@ -144,9 +152,9 @@ schemas exist and are empty; no tables have been created yet. **HT** = Timescale
 | `instrument_map` | Provider instrument code → canonical | `provider_id`, `provider_code`, `instrument_id`, `valid_from`, `valid_to` |
 | `instrument_status_history` | Listing/suspension/delisting events (survivorship) | `instrument_id`, `status`, `effective_at`, `available_at` |
 | `etf_fund` | Spot crypto ETFs/ETPs | `fund_id`, `ticker`, `issuer`, `underlying_asset`, `listing_venue`, `launched_at`, `closed_at` |
-| `entity` | Real-world actors (funds, exchanges, companies, governments) | `entity_id`, `name`, `entity_type` |
+| `entity` (**implemented** Phase 7) | Real-world actors (exchanges, institutions, funds, market makers, protocols, miners, governments, other) | `entity_id`, `name`, `actor_class` (a known class), `description`, `created_at` |
 | `address` | On-chain addresses | `chain`, `address`, `first_seen_at` |
-| `entity_label` | Label of an address/cluster/entity (R5) | `subject_type`, `subject_ref`, `actor_class`, `evidence_class`, `confidence`, `rule_or_source`, `label_provider`, `valid_from`, `valid_to`, `available_at`, `recorded_at` |
+| `entity_label` (**implemented** Phase 7 for addresses) | Label of an on-chain address (R5); append-only | `label_id`, `chain` (`bitcoin`/`ethereum`), `address` (checksum-validated canonical form), `actor_class`, `entity_id`, `evidence_class`, `confidence` (0–1), `evidence` (text, required), `source` (required), `source_url`, `valid_from`, `valid_to` (NULL = open), `available_at` (when the label was published), `recorded_at` (when stored). Unique (chain, address, actor_class, entity_id, source, available_at) |
 | `calendar` | Trading/release calendars | `calendar_id`, `date`, `is_open`, `open_at_utc`, `close_at_utc` |
 | `universe_membership` | As-of universes (survivorship) | `universe_id`, `member_ref`, `valid_from`, `valid_to`, `rule_version` |
 
@@ -169,7 +177,7 @@ schemas exist and are empty; no tables have been created yet. **HT** = Timescale
 | `liquidation_event` (HT) | Liquidations (event or aggregated) | `side` (long/short), `quantity_base`, `notional_usd`, `price`, `is_aggregated` |
 | `orderbook_depth` (HT) | Depth bands around mid | `mid_price`, `band_bps`, `bid_notional_usd`, `ask_notional_usd` |
 | `option_quote` (HT) | Option chain snapshots | `instrument_id`, `mark_iv`, `bid_iv`, `ask_iv`, `delta`, `gamma`, `vega`, `open_interest`, `volume`, `underlying_price` |
-| `onchain_transfer` (HT) | Individual large transfers | `chain`, `tx_hash`, `from_address`, `to_address`, `asset`, `amount`, `amount_usd`, `block_time` |
+| `large_transfer` (HT [`event_time`], **implemented** Phase 7; planned as `onchain_transfer`) | Individual large transfers, one series per transfer (`subject_ref` = `chain:tx_hash[:output_index]`) | `chain`, `tx_hash`, `output_index` (Bitcoin output; NULL for Ethereum), `block_height`, `sender` (NULL for Bitcoin outputs), `recipient`, `value_native` (asset units), `value_usd` (provider value at block time; NULL if not reported). `event_time` = block time. An address failing validation is kept as reported and the row is `suspect` |
 | `selected_observation` (view) | Preferred-provider value per point in time with provider used and conflict flag | derived |
 
 ### `calc` — L2 metrics
@@ -250,9 +258,10 @@ Evidence class indicates how directly the dataset tells us *who* is acting.
 | Institutional | Regulatory position filings (e.g. quarterly holdings) | 1q, lagged | direct, heavily lagged | 5 |
 | Institutional | Public company / treasury holdings — **implemented (Phase 6)**: BTC purchases per company; BTC/ETH/SOL totals | event | attributed (disclosures compiled by a provider) | 6 |
 | Institutional | Cross-venue premium (e.g. US-regulated vs offshore spot) | 1m–1h | inferred | 5 |
-| Whale | Large on-chain transfers | event | inferred (size) / attributed (labels) | 6 |
-| Whale | Balances by holder-size band | 1d | inferred | 6 |
-| Exchange flows | Exchange net inflow/outflow, reserves | 1h–1d | attributed (exchange address labels) | 6 |
+| Whale | Large on-chain transfers — **implemented (Phase 7)**: BTC outputs ≥ 500 BTC, ETH transactions ≥ 5,000 ETH | event | labels (attributed) or size (inferred) | 7 |
+| Whale | Balances by holder-size band — not available free; top-100 address balances **implemented (Phase 7)** instead | 1d | inferred / attributed | 7 |
+| Exchange flows | Exchange net inflow/outflow, reserves — **implemented (Phase 7)**: BTC, ETH daily (Coin Metrics) | 1d | attributed (exchange address labels) | 7 |
+| Coin age | Coin days destroyed, revived ≥ 1 y, ≥ 155 d spent, coinbase-origin spent — **implemented (Phase 7)**: BTC daily | 1d | n/a | 7 |
 | Derivatives | Perpetual funding rates per venue | 1h–8h | n/a | 7 |
 | Derivatives | Open interest per venue/instrument | 5m–1d | n/a | 7 |
 | Derivatives | Liquidations (long/short) | event–1h | n/a | 7 |
@@ -349,6 +358,57 @@ caveats:          ETF flows are fund flows, not proof of institutional buyers; p
 owner_phase:      6
 status:           implemented
 ```
+
+## 5c. Whale datasets (implemented in Phase 7)
+
+`<a>` ∈ {btc, eth}; `<chain>` ∈ {bitcoin, ethereum}. Units are the asset's coins (`btc`, `eth`) unless stated.
+
+| Dataset ID | Subject | Values | Provider | `available_at` | Evidence of actor |
+|---|---|---|---|---|---|
+| `whale.exchange_inflow.<a>.1d` / `exchange_outflow` / `exchange_supply` | `EXCHANGES:<A>` | coins into / out of / held by exchange addresses per UTC day | Coin Metrics Community (`FlowInExNtv`, `FlowOutExNtv`, `SplyExNtv`) | the value's status time (publication); `flash` values stored as `estimated` | attributed (Coin Metrics' exchange attribution) |
+| `whale.supply.<a>.1d` / `whale.issuance.<a>.1d` | `NETWORK:<A>` | current supply / new issuance per UTC day | Coin Metrics (`SplyCur`, `IssTotNtv`) | day start + 30 h (estimated; receipt time if earlier) | n/a |
+| `whale.coin_days_destroyed.btc.1d` | `NETWORK:BTC` | Σ coin days destroyed (unit `coin_days`) | Blockchair `/bitcoin/blocks?a=date,sum(cdd_total)` | day end + 2 h | n/a |
+| `whale.revived_supply_1y.btc.1d` / `lth_spent_155d` / `miner_origin_spent` | `NETWORK:BTC` | BTC spent that day from outputs ≥ 365 d old / ≥ 155 d old / coinbase outputs | Blockchair `/bitcoin/outputs?a=spending_date,sum(value)` + `lifespan` / `is_from_coinbase` filter | day end + 2 h | n/a (coin age / origin, not owners) |
+| `whale.address_balance.<chain>` | `<chain>:<address>` | balance of each of the 100 largest addresses (ETH: accounts, contracts excluded) | Blockchair `/{chain}/addresses` | receipt time (list has no timestamp, estimated) | classified at read time (labels, else size) |
+| `whale.large_transfer.<chain>` | `<chain>:<tx>[:<output>]` | `obs.large_transfer` row | Blockchair `/bitcoin/outputs`, `/ethereum/transactions` | block time + 10 min (receipt time if earlier) | classified at read time (labels, else size from the latest snapshot) |
+
+Only complete UTC days are requested; the current day is skipped as not final. History: Coin Metrics 730 days,
+Blockchair aggregates 120 days, transfers 7 days — one chunk per run (`ops.backfill_state`). Rich lists have no history:
+7-day changes need a week of daily snapshots.
+
+### Whale Flow Score v1 (`whale_flow_score.v1`, calculated metric — ADR-0049)
+
+```
+sign:             positive = accumulation, negative = distribution (on-chain behaviour; not price)
+metric_id:        exchange_netflow_7d_pct_exchange_supply.v1 (weight 0.35, scale 1.0 %)
+formula:          Σ (inflow − outflow) over the last 7 complete UTC days ÷ exchange supply on the last day × 100;
+                  sub_score = clip(−value ÷ scale)
+metric_id:        exchange_supply_change_30d_pct.v1 (weight 0.15, scale 3.0 %)
+formula:          (supply on day D − supply on D−30) ÷ supply on D−30 × 100; sub_score = clip(−value ÷ scale)
+metric_id:        unknown_large_holder_balance_change_7d_pct.v1 (weight 0.25, scale 1.0 %)
+formula:          addresses classed unknown large holder in the top-100 snapshot 7 days (± 1 day) before the
+                  latest one and still listed: Σ(balance now − then) ÷ Σ balance then × 100; ≥ 80 % still listed
+metric_id:        revived_supply_1y_7d_vs_90d.v1 (weight 0.25, scale 1.0; BTC only)
+formula:          (Σ ≥ 1 y coins moved over 7 days ÷ 7) ÷ (Σ over the 90 days before ÷ days with data);
+                  sub_score = clip(−(ratio − 1) ÷ scale)
+window end:       the later of the last day due (day end + 12 h Coin Metrics, + 16 h Blockchair) and the last
+                  complete day received
+score:            100 × Σ(weight × sub_score) ÷ Σ(available weights), 1 decimal
+missing_policy:   component excluded below 90 % coverage (never filled); "Insufficient data" below weight 0.5
+bands:            ≥ +50 strong accumulation · ≥ +15 accumulation · ≥ −15 neutral · ≥ −50 distribution · below: strong
+                  distribution
+owner_phase:      7
+status:           implemented
+```
+
+Not in the score (shown next to it): `miner_origin_spent_vs_issuance_7d.v1` = Σ coinbase-origin BTC moved ÷ Σ BTC
+issued over the same 7 days (≥ 90 % coverage).
+
+**Contradiction indicators** (read-time, per asset): exchange flows vs old coins moving; exchange flows vs unknown large
+holders; Whale Flow Score vs Institutional Flow Score (Phase 6); labelled top-100 exchange balances (7 days) vs Coin
+Metrics exchange supply (the days before the two snapshots). Direction thresholds: sub-score ±0.25, score ±15 points,
+balance change ±0.5 %. Status: `contradiction` (opposite directions), `consistent`, `no_clear_direction`,
+`insufficient_data`.
 
 ---
 

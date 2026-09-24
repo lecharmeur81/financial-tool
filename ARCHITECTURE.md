@@ -181,8 +181,9 @@ Each subsection states the design. Rationale, alternatives, trade-offs, and futu
 - **Migrations** with Alembic only; additive by default; destructive steps need explicit approval (R10).
 - **Implemented:** `obs.series`, `obs.observation` (Phase 4), `obs.market_bar` (Phase 5, 30-day chunks, no compression
   yet), `obs.institutional_flow` (Phase 6, 180-day chunks; ETF flows and treasury flows/holdings with entity type and
-  evidence class — `inferred` rejected by a database check). The other typed tables and the `selected_observation`
-  view are still planned.
+  evidence class — `inferred` rejected by a database check), `obs.large_transfer` (Phase 7, 30-day chunks; one series
+  per transfer), `ref.entity` and `ref.entity_label` (Phase 7, address labels with R5 rules as database checks). The
+  other typed tables and the `selected_observation` view are still planned.
 
 ### 5.2 Time-series strategy — ADR-0020
 
@@ -247,6 +248,12 @@ behaviour as built:
 `check_freshness` (off for sporadic events), Celery task `institutional.ingest` (SoSoValue on the `backfill` queue,
 CoinGecko holdings on `ingest`; queued once when beat starts).
 
+**Implemented in Phase 7** (ADR-0049): fourth record family (`CanonicalTransfer` → `obs.large_transfer`), address
+checksum validation (`cfi/core/addresses.py`), Coin Metrics Community and Blockchair adapters, Celery task
+`whales.ingest` (one run = the recent window plus one history chunk while history is incomplete; Blockchair on the
+`backfill` queue so one process owns its daily request budget), address labels imported from versioned CSV files
+(`cfi/whales/seed_labels`, idempotent, never overwritten).
+
 | Situation | What happens |
 |---|---|
 | Current, unfinished bar (or CoinGecko's running value) | Skipped and counted (`job_run.skipped`); fetched again once final (period end + 60 s) |
@@ -302,6 +309,10 @@ in-process until workers share them via Redis. Mock providers for tests only: `c
   1d/1w/1mo, start, end), `/etf-funds`, `/treasury`, `/score` — all take `as_of` (cut-off on `available_at`) and
   `knowledge_time` (cut-off on `ingested_at`). Every metric carries source, timestamp, unit, calculation, freshness and
   data quality, its evidence category and evidence class. Types hand-written in `frontend/src/lib/institutional.ts`.
+- **Implemented in Phase 7:** `GET /api/v1/whales/catalog`, `/overview`, `/flows`, `/holders`, `/transfers`,
+  `/addresses/{chain}/{address}`, `/entities`, `/score` (with contradiction indicators) — same `as_of` /
+  `knowledge_time` cut-offs; labels count only from their `available_at` and within `valid_from`/`valid_to`. Every
+  address carries its classification with evidence, source and confidence. Types in `frontend/src/lib/whales.ts`.
 
 ### 5.6 Background jobs — ADR-0023
 
@@ -626,6 +637,11 @@ explained by late data or revisions; unexpected ones are bugs). Dependency lockf
 - Composites such as "institutional flow" and "retail activity" record the evidence mix of their inputs, and the UI shows it
   (e.g. "ETF inflow — direct" vs. "large-wallet accumulation — inferred").
 - Large ≠ institutional. Small ≠ retail. Unlabelled entities are `unknown`.
+- **Implemented in Phase 7** (ADR-0049) for on-chain addresses: classes `exchange`, `institution`, `fund`,
+  `market_maker`, `protocol`, `miner`, `government`, `other` (each needs a named entity and a direct or attributed
+  label) and `unknown_large_holder` (inferred from size only, no entity). Database checks make an inferred
+  institution, fund or market maker impossible to store. Precedence: direct > attributed > confidence > newest;
+  disagreeing labels are shown as conflicts.
 
 ---
 
@@ -696,7 +712,8 @@ Phases 0–5 are defined by the user's guide; later phase numbers in `CLAUDE.md`
 | Ingestion engine, provider client layer, dataset registry, quality detection | 4 — done |
 | Market data: OHLCV, last trade, market cap, workers, market API, Market page | 5 — done |
 | Institutional capital: ETF flows (BTC, ETH, SOL, XRP), treasuries, Institutional Flow Score, Flows page | 6 — done |
-| Whale, derivatives, liquidity, retail, macro, market-structure datasets and metrics | 7+ (to be issued) |
+| Whale intelligence: exchange flows, top holders, large transfers, coin age, entity labels, Whale Flow Score, Whales page | 7 — done |
+| Derivatives, liquidity, retail, macro, market-structure datasets and metrics | 8+ (to be issued) |
 | Divergence, regime, similarity, backtesting, red-team, anomaly, rotation | 12–18 |
 | AI analyst (snapshot, prompts, validator, evals) | 19 |
 | Daily intelligence, alerts, paper trading, decision journal | 20–23 |

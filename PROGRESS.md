@@ -2,8 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 6 — Institutional capital → ✅ complete (`ef852b6`)
-**Next phase:** 7 — to be defined by the user (do not start automatically)
+**Current phase:** 7 — Whale intelligence → built, awaiting the user's Windows run and commit
+**Next phase:** 8 — to be defined by the user (do not start automatically)
 
 ---
 
@@ -18,7 +18,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 4 | Data ingestion engine | ✅ Complete — verified on Windows (`69b5442`) |
 | 5 | Market data | ✅ Complete — verified on Windows with real data (`6ad4eaf`) |
 | 6 | Institutional capital | ✅ Complete — verified on Windows (`ef852b6`); real data pending a SoSoValue API key |
-| — | Whale data | ⏳ Not started |
+| 7 | Whale intelligence | 🟡 Built and tested in Claude's workspace; Windows run and commit pending |
 | — | Derivatives | ⏳ Not started |
 | — | Liquidity | ⏳ Not started |
 | — | Retail | ⏳ Not started |
@@ -41,7 +41,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | — | Production | ⏳ Not started |
 | — | Real-time intelligence | ⏳ Not started |
 
-Phases 0–6 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
+Phases 0–7 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
 
 ---
 
@@ -416,4 +416,75 @@ the downloaded samples were removed from the commit. HYPE deferred.
 
 **Tests:** 234 passed (backend), 46 passed (frontend); lint and types clean.
 
-**Git commit:** pending — `[P6] treasury purchase check`.
+**Verified on Windows:** 234 passed; purchase re-sweep: 468 revisions, 53 unchanged, 1 suspect (company 3825, 2 BTC
+for 111.84 M — probably a cost in another currency; kept as reported).
+
+**Git commit:** `9dcf2f1` — `[P6] treasury purchase check`.
+
+---
+
+### 2026-09-24 — Phase 7: Whale intelligence
+
+**What changed**
+- **Sources** (verified 2026-09-24, $0, no keys): **Coin Metrics Community** — daily exchange inflow, outflow and
+  exchange supply, current supply and issuance for BTC and ETH (checked against real responses; licence CC BY-NC 4.0);
+  **Blockchair** — top-100 address balances (BTC; ETH accounts), large transfers (BTC outputs ≥ 500 BTC, ETH
+  transactions ≥ 5,000 ETH) and Bitcoin daily coin days destroyed, coins ≥ 1 y / ≥ 155 d old moved and coinbase-origin
+  coins moved (documented shapes; the host is not reachable from Claude's workspace); **BitInfoCharts** — 27 Bitcoin
+  address labels (Binance, Robinhood, Bitfinex, OKX, Coincheck, Crypto.com, bitbank, Gate.io, Tether, Binance Pool, US
+  and UK government seizures, Bitfinex and Mt. Gox hack funds), each address checksum-verified. Not available free
+  (shown in the UI): dormant supply stock, miner → exchange flows, SOL/XRP whale data, ETH labels, balance bands.
+- **Entity classification:** migration `0005` — `ref.entity`, `ref.entity_label` (evidence, source, confidence,
+  validity period, publication and record times; append-only) with database checks: an inferred label can only be
+  "unknown large holder"; institution / fund / market maker need direct or attributed evidence. Classes: known
+  exchange, institution, fund, market maker, protocol, miner, government, other; unknown large holder (size only,
+  never an institution); unlabelled. Point-in-time label use, precedence rules, conflicts shown. Label files import
+  idempotently (worker start, or `python -m cfi.whales.label_store import <csv>`); any bad row rejects the file.
+- **Storage / engine:** `obs.large_transfer` hypertable (fourth record family `CanonicalTransfer`); address checksum
+  validation (Base58Check, Bech32/Bech32m, Ethereum); invalid addresses kept as reported and flagged `suspect`.
+- **Jobs:** Celery task `whales.ingest` per provider / dataset / asset — recent window plus one history chunk per run
+  (Coin Metrics 730 days, Blockchair aggregates 120 days, transfers 7 days); queued once when beat starts.
+- **Metrics:** daily net flow to exchanges; cohort balances and 7-day changes by class; transfer directions (to / from
+  labelled exchanges); **Whale Flow Score v1** (net flow 7 d, exchange supply 30 d, unknown large holders 7 d, coins
+  ≥ 1 y moving 7 d vs 90 d) with every component's value, calculation, source, freshness and quality; miner spending
+  ratio (shown, not scored); **four contradiction indicators** (exchange flows vs old coins, vs large holders; whale vs
+  institutional score; labelled exchange balances vs Coin Metrics).
+- **API:** `/api/v1/whales/catalog`, `/overview`, `/flows`, `/holders`, `/transfers`, `/addresses/{chain}/{address}`,
+  `/entities`, `/score` (all with `as_of` / `knowledge_time`).
+- **Whales page** (new navigation item): score card, contradictions, net-flow chart and daily table, largest addresses
+  with classification (evidence, source, confidence), cohorts, large transfers, rules and coverage.
+- **Historical fixtures:** `backend/tests/fixtures/whales/README.md` — synthetic values with hand-derived results
+  (BTC score 22.5, ETH −37.2, point-in-time view −1.4).
+- **Docs:** ADR-0049 (and the missing ADR-0048 index row), DATA_DICTIONARY §3/§4/§5/§5c, ARCHITECTURE §5.1/§5.3/§5.5/§6/§11,
+  CLAUDE.md §C3 (7 = Whale intelligence), README, TODO, THIRD_PARTY_NOTICES.md, `.env.example`, `compose.yaml`.
+
+**Tests run (Claude's workspace: PostgreSQL 17 + TimescaleDB 2.30.1, Redis 8.8, Python 3.12, Node 22)**
+
+| Check | Result |
+|---|---|
+| Backend `uv run pytest` (unit + integration + API) | 364 passed (129 new) |
+| Backend without database/Redis | 266 passed, 98 skipped |
+| `ruff format --check` / `ruff check` / `mypy` (strict) | clean |
+| Frontend `pnpm test` / `lint` / `format:check` / `typecheck` / `build` | 59 passed / clean / clean / clean / built |
+| Running stack (API + built frontend + Playwright) | Whales page renders for BTC and ETH with the synthetic fixtures shifted to yesterday, in a scratch database; score, contradictions, chart, holders and transfers as expected |
+
+Covered by tests: address checksums (BIP-173/350 vectors, mistyped, testnet, mixed case); every label rule in code and
+as database constraints (inferred institution / fund / market maker / exchange rejected); size rule never gives a known
+class; precedence and conflicts; label validity and publication time; label file rejection listing every bad row;
+seed file validity; Coin Metrics real row, flash → estimated, status time as `available_at`, pagination, unfinished
+day skipped, schema changes; Blockchair documented queries, rich-list units, transfer normalisation, invalid addresses
+flagged, offset pagination, aggregations, provider errors; chunked history and resumable checkpoints; revisions
+appended; hand-computed score values and coverage exclusions; contradiction statuses; point-in-time leakage (data,
+snapshots and labels published after `as_of`, and rows stored after `knowledge_time`, never used).
+
+**Known limitations**
+- No live Blockchair response seen (host unreachable from the workspace): shapes are the documented ones; a change
+  fails the run with a schema error, visible in ingestion runs.
+- Free sources are thinner than paid analytics: Coin Metrics' exchange attribution only, 27 BTC labels, no ETH labels;
+  7-day holder changes need a week of daily snapshots; transfers keep 7 days of history at first.
+- Licences: Coin Metrics CC BY-NC and Blockchair's free tier are non-commercial; BitInfoCharts label terms unverified.
+- Bitcoin "transfers" are outputs (may be change or consolidation); Ethereum transfers exclude internal calls.
+- Score parameters and thresholds are judgments awaiting the user's review (TODO.md, Phase 7).
+
+**Git commit:** pending — the user commits on Windows.
+

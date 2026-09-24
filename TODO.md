@@ -137,6 +137,29 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 - [ ] **Availability estimates.** ETF: next US trading day 18:00 New York; purchases: date + 7 days. Review once native
       receipt times show when the data really appears.
 
+## Phase 7 — Whale intelligence (built 2026-09-24; see PROGRESS.md)
+
+- [x] Address validation, `ref.entity` / `ref.entity_label` / `obs.large_transfer`, Coin Metrics + Blockchair adapters,
+      label import, classification, Whale Flow Score, contradiction indicators, API, Whales page.
+- [ ] **User:** run the tests and `docker compose up --build` on Windows; check `/api/v1/ingestion/runs` for
+      `coinmetrics` and `blockchair` (neither host is reachable from Claude's workspace, so no live response has been
+      seen for Blockchair; Coin Metrics was checked with real responses).
+- [ ] After the first real run: copy one real Blockchair payload per endpoint from the raw archive into the test
+      fixtures and confirm the documented shapes (aggregation keys, `context.total_rows`, ETH `value` strings).
+- [ ] Watch Blockchair's request cost (`context.request_cost` in archived payloads) against the 1,440/day free limit.
+
+### Decisions needed from the user (Phase 7)
+
+- [ ] **Licences.** Coin Metrics Community is CC BY-NC 4.0 (non-commercial only); Blockchair's free tier is for
+      personal / non-commercial use. Fine for personal decision support; a commercial use needs paid licences.
+- [ ] **BitInfoCharts labels.** 27 Bitcoin address labels copied once (2026-09-24) as attributed evidence, confidence
+      0.6. Their terms for reuse were not found. Keep, replace with another source, or remove the seed file.
+- [ ] **Judgment parameters (v1).** Large transfer ≥ 500 BTC / ≥ 5,000 ETH; unknown large holder ≥ 1,000 BTC /
+      ≥ 10,000 ETH (confidence 0.5); score weights 0.35 / 0.15 / 0.25 / 0.25, scales 1 % / 3 % / 1 % / 1.0, band edges
+      ±15 / ±50, contradiction thresholds ±0.25 sub-score, ±15 points, ±0.5 %. Approve or name changes (creates v2).
+- [ ] **Not available free (recorded in the UI):** dormant / long-term-holder supply stock, miner → exchange flows,
+      SOL and XRP whale data, labelled Ethereum addresses, balance bands, real-time transfer alerts (Whale Alert: paid).
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.
@@ -163,7 +186,7 @@ against official documentation before any adapter is written.
 | Spot / perps / funding / OI / liquidations | Exchange public APIs (e.g. Binance, Bybit, OKX, Coinbase, Kraken, Deribit); aggregators (e.g. Coinglass, Kaiko, Amberdata, CoinAPI) |
 | Options | Deribit public API; options analytics vendors (e.g. Laevitas, Amberdata) |
 | ETF flows / holdings | **Implemented (Phase 6): SoSoValue OpenAPI.** Still candidates: issuer websites and filings; SEC EDGAR |
-| On-chain / exchange flows / whales | Glassnode, CryptoQuant, Coin Metrics, Santiment, Arkham, Nansen; self-hosted node / public explorers for raw data |
+| On-chain / exchange flows / whales | **Implemented (Phase 7): Coin Metrics Community, Blockchair; BitInfoCharts labels.** Still candidates: Glassnode, CryptoQuant, Santiment, Arkham, Nansen (paid); self-hosted node |
 | Stablecoins | DefiLlama; issuer transparency pages; on-chain supply queries |
 | Macro | FRED (St. Louis Fed); other official statistical releases |
 | Retail / sentiment | Search-interest sources, app-ranking sources, social data vendors — terms need careful review |

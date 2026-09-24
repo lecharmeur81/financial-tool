@@ -224,6 +224,65 @@ institutional_flow = Table(
     schema="obs",
 )
 
+large_transfer = Table(
+    "large_transfer",
+    metadata,
+    Column("series_id", BigInteger, primary_key=True),
+    Column("event_time", TS, primary_key=True),
+    Column("available_at", TS, nullable=False),
+    Column("available_at_estimated", Boolean, nullable=False),
+    Column("ingested_at", TS, nullable=False),
+    Column("chain", Text, nullable=False),
+    Column("tx_hash", Text, nullable=False),
+    Column("output_index", Integer),
+    Column("block_height", BigInteger),
+    Column("sender", Text),
+    Column("recipient", Text),
+    Column("value_native", Numeric),
+    Column("value_usd", Numeric),
+    Column("source_provider", Text, primary_key=True),
+    Column("original_source", Text, nullable=False),
+    Column("raw_ref", BigInteger),
+    Column("revision", Integer, primary_key=True),
+    Column("pit_reliability", Text, nullable=False),
+    Column("quality_status", Text, nullable=False),
+    Column("quality_note", Text),
+    Column("confidence", Numeric),
+    Column("transformations", ARRAY(Text), nullable=False),
+    schema="obs",
+)
+
+entity = Table(
+    "entity",
+    metadata,
+    Column("entity_id", Text, primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("actor_class", Text, nullable=False),
+    Column("description", Text),
+    Column("created_at", TS, nullable=False),
+    schema="ref",
+)
+
+entity_label = Table(
+    "entity_label",
+    metadata,
+    Column("label_id", BigInteger, Identity(always=True), primary_key=True),
+    Column("chain", Text, nullable=False),
+    Column("address", Text, nullable=False),
+    Column("actor_class", Text, nullable=False),
+    Column("entity_id", Text),
+    Column("evidence_class", Text, nullable=False),
+    Column("confidence", Numeric, nullable=False),
+    Column("evidence", Text, nullable=False),
+    Column("source", Text, nullable=False),
+    Column("source_url", Text),
+    Column("valid_from", TS),
+    Column("valid_to", TS),
+    Column("available_at", TS, nullable=False),
+    Column("recorded_at", TS, nullable=False),
+    schema="ref",
+)
+
 backfill_state = Table(
     "backfill_state",
     metadata,

@@ -33,6 +33,9 @@ DATA_TABLES = (
     "ops.quality_check_result",
     "ops.backfill_state",
     "obs.institutional_flow",
+    "obs.large_transfer",
+    "ref.entity_label",
+    "ref.entity",
     "obs.market_bar",
     "obs.observation",
     "obs.series",
@@ -101,3 +104,4 @@ async def db(test_settings: Settings) -> AsyncIterator[AsyncEngine]:
 # Market-data harness fixture (defined with its helpers in market_support.py).
 from tests.integration.institutional_support import inst  # noqa: E402, F401
 from tests.integration.market_support import market  # noqa: E402, F401
+from tests.integration.whale_support import whales  # noqa: E402, F401
