@@ -48,10 +48,19 @@ class RateLimitSpec:
 
     requests: int
     per_seconds: float
+    # Largest burst sent back to back. Default: ``requests`` (a full bucket). Providers that count
+    # requests in fixed windows need a small burst, or two bursts can land in one window.
+    burst: int | None = None
 
     def __post_init__(self) -> None:
         if self.requests <= 0 or self.per_seconds <= 0:
             raise ValueError("rate limit must be positive")
+        if self.burst is not None and self.burst < 1:
+            raise ValueError("burst must be >= 1")
+
+    @property
+    def capacity(self) -> int:
+        return self.burst if self.burst is not None else self.requests
 
     @property
     def rate(self) -> float:
@@ -75,6 +84,9 @@ class ProviderCapabilities:
     notes: str = ""
     # How to describe an expected-but-absent point from this provider (explicit missing rows).
     gap_note: str = "expected point not delivered by provider"
+    # Longest provider-requested wait (Retry-After) the client honours and then retries. None: the
+    # retry policy's maximum delay. Longer requests fail the call and hold the circuit open.
+    max_retry_wait_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

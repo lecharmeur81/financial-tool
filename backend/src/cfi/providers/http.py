@@ -240,8 +240,9 @@ class ProviderHttpClient:
         self.capabilities = capabilities
         self.retry = retry or RetryPolicy()
         self.limiter = limiter or TokenBucket(
-            capabilities.rate_limit.rate, capabilities.rate_limit.requests, clock=clock, sleep=sleep
+            capabilities.rate_limit.rate, capabilities.rate_limit.capacity, clock=clock, sleep=sleep
         )
+        self.max_retry_wait = capabilities.max_retry_wait_seconds or self.retry.max_delay
         self.breaker = breaker or CircuitBreaker(clock=clock)
         self.recorder = recorder or ListRecorder()
         self._environ = environ if environ is not None else os.environ
@@ -398,7 +399,7 @@ class ProviderHttpClient:
                 )
 
             self.breaker.record_failure()
-            if retry_after is not None and retry_after > self.retry.max_delay:
+            if retry_after is not None and retry_after > self.max_retry_wait:
                 # The provider asked us to wait longer than we retry for: stop now, keep the
                 # circuit open for that long, and never retry early (that extends bans).
                 self.breaker.hold_open(retry_after)
@@ -411,6 +412,9 @@ class ProviderHttpClient:
                 )
             if attempt < self.retry.max_attempts:
                 delay = self.retry.delay(attempt, retry_after, self._rng)
+                if retry_after is not None:
+                    # honour the provider's wait in full (it is within max_retry_wait here)
+                    delay = max(delay, retry_after)
                 log.warning(
                     "provider_retry",
                     provider=provider_id,

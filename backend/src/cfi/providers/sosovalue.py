@@ -6,7 +6,8 @@ Verified 2026-09-24 against the official documentation
 - base URL ``https://openapi.sosovalue.com/openapi/v1``; key in header ``x-soso-api-key``
   (free key: register at https://sosovalue.com/developer/dashboard, then wait for approval);
 - limits per key: 20 requests per minute and 100,000 per month; HTTP 429 with code 42901 and a
-  ``retry_after`` value when exceeded;
+  ``retry_after`` value when exceeded. Observed on the first real run (2026-09-24): HTTP 429 with a
+  58-second wait after 10 requests sent within seconds — the client now paces requests evenly;
 - every response is wrapped: ``{"code": 0, "message": "success", "data": …}``; ``code`` ≠ 0 is an
   error (400001 invalid parameter, 400003 invalid value, 400101 invalid key, 402901 rate limit);
 - ``GET /etfs/summary-history?symbol=&country_code=US&limit=`` → daily totals across all ETFs of
@@ -106,8 +107,11 @@ CAPABILITIES = ProviderCapabilities(
         }
     ),
     auth=AuthSpec(AuthType.API_KEY_HEADER, "x-soso-api-key", API_KEY_ENV),
-    # Documented: 20 per minute per key. 18 leaves headroom for clock skew between limiters.
-    rate_limit=RateLimitSpec(18, 60.0),
+    # Documented: 20 per minute per key. The first real run (2026-09-24) was refused with HTTP 429
+    # ("wait 58 s") after 10 back-to-back requests, so the key's effective limit is lower or
+    # counted differently: one request every 7.5 s, no bursts, and waits of up to 90 s honoured.
+    rate_limit=RateLimitSpec(8, 60.0, burst=1),
+    max_retry_wait_seconds=90.0,
     timeout_seconds=20.0,
     max_pages=600,
     original_source="sosovalue",

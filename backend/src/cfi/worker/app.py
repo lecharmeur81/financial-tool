@@ -83,7 +83,7 @@ def _kick_institutional(**_: Any) -> None:
         )
 
 
-@app.task(name="institutional.ingest", time_limit=1800, soft_time_limit=1700)
+@app.task(name="institutional.ingest", time_limit=3600, soft_time_limit=3500)
 def institutional_ingest_task(provider_id: str, dataset_id: str) -> dict[str, Any]:
     """One institutional dataset from one provider, every configured subject. Skipped (not
     failed) when the provider is disabled or its API key is not configured."""

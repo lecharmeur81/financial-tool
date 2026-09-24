@@ -956,3 +956,9 @@ single source for ETF flows (no cross-provider conflict check yet); treasury pur
 
 **Future implications.** v2 of the score can replace fixed reference scales with percentiles over native history; the
 divergence engine (institutional vs retail) consumes the score's components with their evidence classes.
+
+**Amendment (2026-09-24, after the first real run).** The real SoSoValue key returned HTTP 429 ("wait 58 s") after
+10 requests sent back to back, below the documented 20 per minute. SoSoValue requests are now paced evenly at one
+every 7.5 s with no bursts (`RateLimitSpec.burst = 1`), and provider-requested waits of up to 90 s are honoured
+before retrying (`ProviderCapabilities.max_retry_wait_seconds`). Other providers are unchanged.
+

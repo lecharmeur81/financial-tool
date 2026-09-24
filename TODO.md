@@ -113,9 +113,9 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 
 - [x] `obs.institutional_flow`, SoSoValue + CoinGecko treasury adapters, jobs, aggregation, score, API, Flows page.
 - [x] US spot ETF flows for BTC, ETH, **SOL and XRP** (added at the user's request, 2026-09-24).
-- [ ] **User:** register a free SoSoValue API key (https://sosovalue.com/developer/dashboard; approval required) and
-      put it in `.env` as `CFI_PROVIDER_SOSOVALUE_API_KEY`. Without it the ETF and purchase jobs are skipped.
-- [ ] **User:** run the tests and `docker compose up --build` on Windows; check the Flows page with real data.
+- [x] **User:** register a free SoSoValue API key and set `CFI_PROVIDER_SOSOVALUE_API_KEY` in `.env` (done 2026-09-24).
+- [x] **User:** run the tests and `docker compose up --build` on Windows (228 passed, commit `ef852b6`).
+- [ ] **User:** after the pacing fix, confirm per-fund flows and treasury purchases load (SoSoValue 429 on first run).
 - [ ] After the first real run: copy one real SoSoValue payload from the raw archive into the test fixtures (with its
       capture date) and confirm the documented shapes (date format of `start_date`/`end_date`, number formats).
 

@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
-from cfi.core.calendars import date_label
+from cfi.core.calendars import NEW_YORK, date_label
 from cfi.core.errors import NotFoundError
 from cfi.core.time import ensure_utc
 from cfi.domain.datasets import DatasetSpec
@@ -251,10 +251,19 @@ class InstitutionalService:
 
     @staticmethod
     def _range(
-        interval: str, start: date | None, end: date | None, as_of: datetime
+        interval: str,
+        start: date | None,
+        end: date | None,
+        as_of: datetime,
+        *,
+        us_trading_dates: bool = False,
     ) -> tuple[date, date]:
-        """[start, end) in dates; defaults end at ``as_of``'s date (inclusive)."""
-        last = ensure_utc(as_of).date() + timedelta(days=1)
+        """[start, end) in dates; defaults end at ``as_of``'s date (inclusive). For US trading
+        dates, "today" is the New York date — a trading day that has not started is not listed."""
+        today = ensure_utc(as_of)
+        last = (today.astimezone(NEW_YORK) if us_trading_dates else today).date() + timedelta(
+            days=1
+        )
         end = last if end is None else min(end, last)
         if start is None:
             start = end - DEFAULT_RANGE[interval]
@@ -347,7 +356,7 @@ class InstitutionalService:
     ) -> dict[str, Any]:
         asset = self._asset(asset, ETF_ASSETS, "US spot ETF")
         iv = self._interval(interval)
-        range_start, range_end = self._range(iv, start, end, as_of)
+        range_start, range_end = self._range(iv, start, end, as_of, us_trading_dates=True)
         # widen to whole buckets so weekly/monthly totals are never cut in the middle
         range_start = bucket_start(range_start, iv)
         rows = await self._etf_points(
@@ -551,7 +560,7 @@ class InstitutionalService:
         knowledge_time: datetime,
     ) -> dict[str, Any]:
         asset = self._asset(asset, ETF_ASSETS, "US spot ETF")
-        range_start, range_end = self._range("1d", start, end, as_of)
+        range_start, range_end = self._range("1d", start, end, as_of, us_trading_dates=True)
         rows = await self._etf_points(
             ETF_FUND_FLOW_US_SPOT, asset, range_start, range_end, as_of, knowledge_time
         )

@@ -2,7 +2,7 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 6 — Institutional capital → ✅ built; awaiting the user's Windows check and commit
+**Current phase:** 6 — Institutional capital → ✅ complete (`ef852b6`)
 **Next phase:** 7 — to be defined by the user (do not start automatically)
 
 ---
@@ -17,7 +17,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 3 | Foundation (infrastructure) | ✅ Complete — verified on Windows |
 | 4 | Data ingestion engine | ✅ Complete — verified on Windows (`69b5442`) |
 | 5 | Market data | ✅ Complete — verified on Windows with real data (`6ad4eaf`) |
-| 6 | Institutional capital | ✅ Built — Windows check and commit pending |
+| 6 | Institutional capital | ✅ Complete — verified on Windows (`ef852b6`); real data pending a SoSoValue API key |
 | — | Whale data | ⏳ Not started |
 | — | Derivatives | ⏳ Not started |
 | — | Liquidity | ⏳ Not started |
@@ -366,5 +366,32 @@ downgrade refuses to delete institutional data.
 - SoSoValue is the only ETF source (no cross-provider check); its API terms are not published.
 - Score parameters are judgments awaiting the user's review; availability times are estimates.
 
-**Git commit:** pending — `[P6] institutional capital`.
+**Windows check (user, 2026-09-24):** `docker compose up -d --build` → all services started, api healthy;
+`docker compose exec api pytest` → 228 passed. Real institutional data not yet checked (SoSoValue key not yet set).
 
+**Git commit:** `ef852b6` — `[P6] institutional capital` (76 files).
+
+---
+
+### 2026-09-24 — Phase 6 follow-up: first real SoSoValue run
+
+**What the user's run showed:** the key works. US spot ETF totals for BTC, ETH, SOL and XRP were ingested and the Flows
+page showed real flows, scores and freshness. After 10 requests sent within seconds, SoSoValue answered **HTTP 429
+"wait 58 s"**. The client did not retry (its longest wait was 30 s), the circuit breaker held SoSoValue closed for
+that time, and the per-fund job (5 BTC funds loaded) and the treasury purchase sweep failed with visible errors.
+Nothing was invented. Because only 5 funds were loaded, the "sum of funds" cross-check showed differences.
+
+**Fix**
+- Rate limits can declare a burst size (`RateLimitSpec.burst`). SoSoValue now sends one request every 7.5 s
+  (8 per minute, no bursts). The documentation says 20 per minute, but the real key refused a burst of 10.
+- Providers can declare the longest `Retry-After` wait to honour (`max_retry_wait_seconds`; SoSoValue: 90 s). A
+  58-second wait is now waited out and retried; longer waits still fail and hold the circuit open.
+- The institutional task time limit is raised to 60 min: the purchase sweep takes about 1 request per company at
+  7.5 s each.
+- ETF date ranges end on the **New York** date, so a trading day that has not started is not listed as "not reported
+  yet".
+
+**Tests:** 233 passed (5 new: pacing, 58 s wait honoured, >90 s wait fails and holds the circuit, burst default for
+other providers, New York date range). Lint and types clean.
+
+**Git commit:** pending — `[P6] SoSoValue pacing fix`.

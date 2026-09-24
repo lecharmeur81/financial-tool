@@ -319,3 +319,21 @@ async def test_no_data_yet_is_explained(
     _, body = get(test_settings, "/api/v1/institutional/etf-flows", asset="BTC", **PIT)
     assert body["freshness"]["status"] == "no_data"
     assert any("CFI_PROVIDER_SOSOVALUE_API_KEY" in w for w in body["warnings"])
+
+
+async def test_daily_range_ends_on_the_new_york_date(
+    inst: InstitutionalHarness, test_settings: Settings
+) -> None:
+    await inst.run_all()
+    # 02:00 UTC on 10 September is still 9 September (22:00) in New York
+    late = "2026-09-10T02:00:00+00:00"
+    _, body = get(
+        test_settings,
+        "/api/v1/institutional/etf-flows",
+        asset="BTC",
+        interval="1d",
+        as_of=late,
+        knowledge_time=late,
+    )
+    assert body["range"]["end"] == "2026-09-10"
+    assert body["buckets"][-1]["start"] == "2026-09-09"
