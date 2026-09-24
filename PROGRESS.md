@@ -2,7 +2,7 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 7 — Whale intelligence → built, awaiting the user's Windows run and commit
+**Current phase:** 7 — Whale intelligence → ✅ complete (`0529017`)
 **Next phase:** 8 — to be defined by the user (do not start automatically)
 
 ---
@@ -18,7 +18,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 4 | Data ingestion engine | ✅ Complete — verified on Windows (`69b5442`) |
 | 5 | Market data | ✅ Complete — verified on Windows with real data (`6ad4eaf`) |
 | 6 | Institutional capital | ✅ Complete — verified on Windows (`ef852b6`); real data pending a SoSoValue API key |
-| 7 | Whale intelligence | 🟡 Built and tested in Claude's workspace; Windows run and commit pending |
+| 7 | Whale intelligence | ✅ Complete — verified on Windows (`0529017`); first real whale runs to be checked |
 | — | Derivatives | ⏳ Not started |
 | — | Liquidity | ⏳ Not started |
 | — | Retail | ⏳ Not started |
@@ -486,5 +486,8 @@ snapshots and labels published after `as_of`, and rows stored after `knowledge_t
 - Bitcoin "transfers" are outputs (may be change or consolidation); Ethereum transfers exclude internal calls.
 - Score parameters and thresholds are judgments awaiting the user's review (TODO.md, Phase 7).
 
-**Git commit:** pending — the user commits on Windows.
+**Windows check (user, 2026-09-24):** `docker compose up -d --build` → all services started, api healthy;
+`docker compose exec api pytest` → 364 passed. First real Coin Metrics / Blockchair runs not yet checked.
+
+**Git commit:** `0529017` — `[P7] whale intelligence` (63 files).
 
