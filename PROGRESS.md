@@ -2,8 +2,9 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 9 — Liquidity → ✅ complete (backend only, as requested); commit pending on Windows
-**Next phase:** 10 — to be defined by the user (do not start automatically)
+**Current phase:** 10 — Retail → ✅ complete (backend only, as requested); tests written, full backend suite run
+and verified clean in the scratch environment (see below); not yet delivered to / committed on Windows
+**Next phase:** 11 — to be defined by the user (do not start automatically)
 
 ---
 
@@ -20,8 +21,8 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 6 | Institutional capital | ✅ Complete — verified on Windows (`ef852b6`); real data pending a SoSoValue API key |
 | 7 | Whale intelligence | ✅ Complete — verified on Windows (`0529017`); first real whale runs to be checked |
 | 8 | Derivatives | ✅ Complete — verified on Windows (`ea124b5`); first real derivatives runs to be checked |
-| 9 | Liquidity | ✅ Complete (backend only, as requested) — commit pending on Windows; first real DefiLlama run to be checked |
-| — | Retail | ⏳ Not started |
+| 9 | Liquidity | ✅ Complete (backend only, as requested) — fully verified on Windows (`f1b8f6a`); first real DefiLlama run to be checked |
+| 10 | Retail | ✅ Complete (backend only, as requested) — verified in the scratch environment; Windows delivery/commit pending |
 | — | Macro | ⏳ Not started |
 | — | Market structure | ⏳ Not started |
 | — | Divergence engine | ⏳ Not started |
@@ -677,6 +678,125 @@ all components. Show observed data separately from interpretation. Build tests. 
 - `TOTAL` is every stablecoin DefiLlama tracks, not the sum of USDT + USDC — stated in the docstring and the data
   dictionary, but worth restating here since it is easy to misread.
 
-**Delivered to the user's machine** via the device bridge (checksum-verified); commit is the user's own step on
-Windows (Git runs there — C5).
+**Delivered to the user's machine** via the device bridge (checksum-verified, all 30 files byte-for-byte match);
+commit is the user's own step on Windows (Git runs there — C5).
+
+**Committed on Windows:** `f1b8f6a` — `[P9] add liquidity/stablecoin intelligence layer (DefiLlama), Liquidity Score`
+(30 files changed, 2843 insertions, 10 deletions). Confirmed from the user's own terminal transcript.
+
+**Verified on Windows (2026-09-26):** `uv` was missing from PATH the first time (see prior note in an earlier
+draft of this section — resolved by installing `uv` via the official PowerShell installer, `irm
+https://astral.sh/uv/install.ps1 | iex`, then reopening the terminal). Once installed, the user ran the full
+suite from `E:\FINANCIAL TOOL\backend` in PowerShell:
+- `uv sync` — 60 packages installed cleanly.
+- `uv run pytest -q` — **386 passed, 119 skipped, 0 failed** in 6.58s. All skips are integration tests
+  (`CFI_DATABASE_URL` / `CFI_REDIS_URL` not set — no local Postgres/Redis running on the dev machine), the
+  same expected pattern as Phases 7–8's first Windows verification; not a failure.
+- `uv run ruff check .` — all checks passed.
+- `uv run ruff format --check .` — 175 files already formatted.
+- `uv run mypy` — success, no issues found in 170 source files.
+
+Phase 9 is therefore fully verified end-to-end on the development machine, not just in the scratch environment
+here. No outstanding verification gap remains.
+
+### 2026-09-26 — Phase 10: Retail Activity Intelligence, Retail Activity Score, Retail Speculation Score
+
+**What changed** (ADR-0053; user's exact spec: "Build the Retail Activity Intelligence layer. Potential inputs:
+Google Trends; Reddit activity where legally/licensed and technically available; social activity; retail
+derivatives activity; small transaction activity; meme-coin activity; retail trading proxies. Every metric must
+clearly identify whether it is: DIRECT RETAIL DATA or RETAIL PROXY. Do not present proxies as direct measurements
+of retail behavior. Create: retail activity score; retail speculation score; retail sentiment metrics; historical
+percentile calculations. Build tests. Document limitations. Commit. Stop.")
+
+- **Research first** (WebSearch/WebFetch, not assumption — R3): confirmed no free source segments any data by
+  account type (retail vs. institutional). Google Trends has no official public API (the supported route needs a
+  paid Google Cloud BigQuery account); Reddit's API has been metered/paid beyond a small non-commercial allowance
+  since 2023; X (Twitter)'s free tier does not support search or aggregate content retrieval. All three recorded
+  as `NOT_TRACKED` business/licensing decisions, not silently skipped or worked around with an unauthorised
+  scrape — restated in TODO.md for the user's review. Confirmed CoinGecko's `/search/trending` schema live and
+  against its published docs before writing any adapter code.
+- **New `backend/src/cfi/retail/` package:** `universe.py` (two new dataset specs + `NOT_TRACKED`), `metrics.py`
+  (historical `percentile_rank`, `derivatives_proxy`, `meme_coin_activity`, `small_transaction_activity` — every
+  metric dataclass carries `measurement_class = "proxy"` as a structurally-enforced field, `init=False`, so
+  nothing can be silently constructed as "direct"), `score_parameters.py` + `score.py` (two versioned scores —
+  Retail Activity Score, unsigned 0-100; Retail Speculation Score, signed −100…+100, with its meme-trending
+  component explicitly marked non-directional via `ComponentDef.directional = False`), `queries.py` (point-in-time
+  reads, including a deliberate cross-module read of two derivatives-owned datasets, documented in both the
+  module docstring and the API catalog response), `service.py`, `sources.py`, `jobs.py`.
+- **Two provider extensions, no new adapters:** `cfi/providers/coingecko.py` gained the free, keyless
+  `/search/trending` endpoint (meme-coin / retail search-attention proxy); `cfi/providers/blockchair.py` gained a
+  new daily aggregation (count of Bitcoin outputs under $1,000 — small on-chain transaction proxy). Both are
+  strictly additive changes to already-tested provider files (new branches inserted as early-return checks, one
+  new dict entry, one new frozenset member) — no existing branch's logic was altered.
+- **Cross-module read, not re-ingestion:** retail derivatives-positioning proxy reads Phase 8's already-ingested
+  `deriv.funding_rate` and `deriv.long_short_account_ratio.1h` directly from the shared `obs.observation` table,
+  filtered to `venue = "binance"` only (Binance and OKX publish the ratio for different account populations that
+  must never be blended). No new ingestion job, no data duplication.
+- **API:** new router `backend/src/cfi/api/routes/retail.py` — `/api/v1/retail/{catalog,overview,history}`,
+  registered in `api/app.py`. New setting `CFI_RETAIL_PROVIDERS` (default `coingecko,blockchair`). Worker wiring
+  (`worker/app.py`, `worker/schedule.py`): a `retail.ingest` Celery task — CoinGecko trending polled every 3 h (a
+  live snapshot feed with no history to backfill), Blockchair small-output-count every 12 h (120-day history in
+  30-day chunks, matching the whale module's own Blockchair scheduling).
+- **Frontend: not built.** Not requested for this phase (matching Phase 9's own scope decision). The backend API
+  is complete and ready for a frontend page whenever the user asks for one.
+- **Docs:** ADR-0053, DATA_DICTIONARY.md §5f, CLAUDE.md phase table (10 = Retail).
+
+**Tests run (scratch environment: PostgreSQL 16 + TimescaleDB, Redis, Python 3.12)**
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_retail_adapters.py`, `test_retail_metrics.py`, `test_retail_score.py` | 56 new tests, all passed |
+| New integration tests: `test_retail_ingestion.py` (real CoinGecko/Blockchair adapters against synthetic fakes), `test_retail_api.py` (real PostgreSQL, independent hand-computation cross-check) | 16 new tests, all passed |
+| Backend `uv run pytest` (unit + integration + API, scratch PostgreSQL 16 + TimescaleDB + Redis) | 577 passed (505 + 56 + 16 new) |
+| `ruff format --check` / `ruff check` / `mypy` (strict), whole backend | clean |
+
+**Bugs found and fixed during this phase's own test run** (first time any of this code executed — R7: never
+claim something works without testing it):
+- The CoinGecko trending fake test double matched the request path against `/search/trending`, but the real
+  adapter's base URL already includes `/api/v3`, so the full request path is `/api/v3/search/trending` — every
+  simulated poll returned 404 and silently ingested nothing. Fixed in `tests/retail_fakes.py` to match the full
+  path, matching the convention every other provider fake in this project already follows.
+- The `retail` integration-test fixture (`tests/integration/retail_support.py`) directly inserts synthetic
+  funding-rate / account-ratio rows as context data (mirroring `derivative_support.py`'s own established
+  pattern), but never registered those two datasets with the ingestion engine first — every insert failed with a
+  foreign-key violation (`series_dataset_id_fkey`). Fixed by registering `FUNDING_RATE` and `LONG_SHORT_RATIO`
+  with the engine before use, exactly as `derivative_support.py` registers its own context datasets.
+- Several `E501` (line too long) and one unsorted-import violation across `metrics.py`, `score.py`, `service.py`
+  and the new test files; one `mypy` `dict` invariance error on `derivatives_proxy`'s parameter types (fixed by
+  widening them to `Mapping`, since the function only reads from them); one missing test-helper type annotation;
+  one `max()` type-var error from an overly-loose `dict[object, ...]` annotation in a test. All fixed; no
+  production behavior changed by any of these fixes except the `Mapping` widening (a pure type-signature
+  loosening — `Mapping` is a superset of what `dict` already accepted).
+
+Covered by tests: every metric's `measurement_class == "proxy"`; percentile rank (insufficient-history floor,
+ties, top-of-range); derivatives proxy (partial-asset availability, all three funding/ratio conditions,
+unavailable); meme-coin activity (curated-symbol filtering, no-snapshot case); small-transaction activity
+(week-average and percent-change math, no-trailing-history case); both scores' parameter loading, weighted
+combination, renormalisation on a missing component, the insufficient-data floor, band boundaries, clipping, and
+the meme-trending component's always-nonnegative behavior; real ingestion of both new datasets against
+synthetic histories including no-duplication-on-rerun; the full overview/catalog/history API responses against
+independently hand-computed expected values (derivatives proxy, small-transaction activity) and against expected
+*shape* for percentile/score fields (status, sample size, measurement class, evidence labelling — their exact
+numeric formulas are already covered at the unit level).
+
+**Known limitations**
+- `NOT_TRACKED` (Google Trends, Reddit, X/Twitter) are business/licensing decisions for the user to make, not
+  technical dead ends — see DATA_DICTIONARY.md §5f and TODO.md.
+- Small-output-count is **not** filtered for change outputs, exchange-internal batching, or dust — stated
+  plainly in the dataset description and every API response, never smoothed over.
+- No source publishes retail-labelled data, so every metric in this phase is a RETAIL PROXY; none is ever
+  presented as DIRECT RETAIL DATA (structurally enforced, not just documented — see ADR-0053).
+- Score weights, scales and band boundaries are v1 methodology / initial parameters, chosen by design and not
+  fitted to data — awaiting the user's review, same posture as every other score in this platform.
+- No live CoinGecko or Blockchair response for the new endpoints has been captured from a network that can
+  actually reach them from this workspace; the user's first real ingestion run on Windows is the real
+  verification, same pattern as Phases 7–9.
+- Terms of use for the new CoinGecko/Blockchair endpoints not yet separately reviewed (`terms_verified` unchanged
+  from the existing adapter capabilities).
+- No frontend page — out of scope for this phase as instructed.
+
+**Not yet delivered to the user's machine.** This phase's files exist only in Claude's workspace; delivery via
+the device bridge (with checksum verification) and the user's own Windows `uv run pytest` / `ruff` / `mypy` /
+`git commit` are the next, still-outstanding step before this phase can be marked fully verified end-to-end,
+matching the standard this project has held every prior phase to.
 

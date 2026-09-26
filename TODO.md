@@ -224,6 +224,50 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
       address attribution (Nansen, Arkham, CryptoQuant). `exchange_liquidity_change()` always reports
       `"unavailable"`, shown as a named gap in the UI/API rather than omitted.
 
+## Phase 10 — Retail Activity Intelligence (built 2026-09-26; see PROGRESS.md)
+
+- [x] CoinGecko `/search/trending` and Blockchair small-output-count provider extensions (no new adapters), retail
+      derivatives-positioning cross-module read (Phase 8's funding rate / account ratio, Binance venue only, not
+      re-ingested), retail calculations (`percentile_rank`, `derivatives_proxy`, `meme_coin_activity`,
+      `small_transaction_activity`), two versioned scores (`retail_activity_score_v1`,
+      `retail_speculation_score_v1`), retail sentiment (a deterministic rule, not AI interpretation), API
+      (`/api/v1/retail/{catalog,overview,history}`).
+- [ ] **User:** tests and `docker compose up --build` on Windows — see PROGRESS.md for the exact commands and the
+      expected test count (577 passed in Claude's scratch environment).
+- [ ] **User:** check `/api/v1/ingestion/runs` for `coingecko` (trending) and `blockchair` (small-output-count) —
+      no live response for either new endpoint has been captured from a network that can actually reach them from
+      Claude's workspace, so the user's first real run is the real verification, same pattern as Phases 7–9.
+- [ ] After the first real run: capture one real CoinGecko `/search/trending` response and one real Blockchair
+      small-output-count response into the test fixtures and confirm the documented shapes.
+
+### Decisions needed from the user (Phase 10)
+
+- [ ] **Business/licensing decisions — three sources deliberately not integrated, not technical dead ends:**
+      - **Google Trends:** no official public API (the supported route needs a paid Google Cloud BigQuery
+        account); the commonly used unofficial scrape of `trends.google.com` is not authorised by Google's terms
+        of service for sustained automated use. If the user wants Google Trends data, the choice is between
+        paying for BigQuery access or accepting an unauthorised scrape (not built here either way without an
+        explicit decision).
+      - **Reddit activity** (post/comment volume, sentiment): Reddit's API has been metered/paid beyond a small
+        non-commercial free allowance since 2023. Integrating it commercially at meaningful volume needs a paid
+        licensing decision from the user.
+      - **Social activity (Twitter/X and similar):** no free tier supports search or aggregate content retrieval
+        on X; meaningful read access needs a paid API tier. Same posture as Reddit.
+- [ ] **Judgment parameters (v1 methodology / initial parameters) — not yet reviewed by the user.**
+      - Retail Activity Score weights 0.35 / 0.30 / 0.35 (small-tx percentile / meme-trending percentile /
+        derivatives-turnover percentile), `min_available_weight` 0.5, bands ±80/±60/±40/±20.
+      - Retail Speculation Score weights 0.40 / 0.40 / 0.20 (funding-rate bias / account-ratio skew /
+        meme-trending), reference scales 0.0005 / 0.5 / 2, `min_available_weight` 0.4, bands ±50/±15.
+      - See DATA_DICTIONARY.md §5f, ADR-0053. Chosen by design, not fitted to data — same review invitation as
+        every prior phase's score: if the user wants a different breakdown, send it and a new version id
+        (`retail_activity_score_v2` / `retail_speculation_score_v2`) is published rather than editing v1.
+- [ ] **Frontend page** — not built this phase (not requested; see PROGRESS.md). A natural next step once the
+      user asks for it.
+- [ ] **Coverage/methodology gap, permanent (not a "to do"):** small-output-count is not filtered for change
+      outputs from large transactions, exchange-internal batching, or dust — a noisy proxy, stated plainly
+      wherever the metric is shown, never smoothed over. If the user wants a cleaner signal, that needs either a
+      paid provider with UTXO-level classification or an accepted false-positive rate.
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.

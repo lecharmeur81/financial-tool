@@ -562,6 +562,95 @@ status:           implemented
 
 ---
 
+## 5f. Retail activity datasets (implemented in Phase 10)
+
+**Every metric in this section carries `measurement_class = "proxy"` — never `"direct"`.** No source found
+publishes data identified by its provider as retail-only (no exchange or vendor segments its public data by
+account type), so nothing here is DIRECT RETAIL DATA (`cfi/retail/universe.py`, `cfi/retail/metrics.py`).
+
+| Dataset ID | Subject | Values (unit) | Provider | `available_at` |
+|---|---|---|---|---|
+| `retail.trending_coin_rank` | dynamic — every coin CoinGecko returns each poll (asset = its ticker symbol) | position in the top ~15 trending-by-search list, 0 = most trending that poll (`rank`) | CoinGecko `/search/trending` (free, keyless) | receipt time (the endpoint carries no timestamp of its own) |
+| `retail.small_output_count.btc.1d` | `BTC` | count of Bitcoin transaction outputs valued under $1,000 (Blockchair's `value_usd`), per UTC day (`count`) | Blockchair `/bitcoin/outputs` aggregation (already used for whale intelligence, Phase 7) | day end + 2 h |
+
+Two further datasets are **read, not re-ingested** — owned and already ingested by the Derivatives module
+(Phase 8), read here as a deliberate cross-module read (R2's layer rule restricts which *layers* a module reads,
+not which module's job wrote a given L1 row): `deriv.funding_rate` and `deriv.long_short_account_ratio.1h`,
+filtered to `venue = "binance"` only (Binance and OKX publish the ratio for different account populations that
+are never blended — see `cfi.derivatives.universe.LONG_SHORT_RATIO`'s docstring, and `cfi/retail/queries.py`).
+
+**Not tracked** (`NOT_TRACKED`, `cfi/retail/universe.py`) — each a business/licensing decision, not a technical
+dead end, restated in `TODO.md` for the user's review:
+
+- **Google Trends** — no official public API; the supported route (Google Cloud BigQuery public dataset) needs a
+  paid billing account, and the commonly used unofficial scrape of `trends.google.com` is not authorised by
+  Google's terms of service for sustained automated use.
+- **Reddit activity** (post/comment volume, sentiment) — Reddit's API is metered/paid beyond a small
+  non-commercial free allowance (since 2023, confirmed still in effect 2026).
+- **Social activity (Twitter/X and similar)** — no free tier supports search or aggregate content retrieval;
+  meaningful read access needs a paid API tier.
+
+### Retail calculated metrics / statistical signals (read time, point-in-time — `cfi/retail/metrics.py`)
+
+```
+percentile_rank:              nearest-rank percentile (0-100) of a current value against its own trailing
+                               history; "insufficient_history" below a 20-point sample (L3 Statistical Signal)
+derivatives_proxy:             average, across every tracked perp with a fresh (≤ 6 h) reading, of Binance's
+                               funding rate and "global" long/short account ratio — RETAIL PROXY
+meme_coin_activity:            presence and rank of a curated, non-exhaustive meme-coin list (DOGE, SHIB, PEPE,
+                               WIF, BONK, FLOKI) within the latest trending-coin snapshot (≤ 8 h old) — RETAIL PROXY
+small_transaction_activity:    latest small-output-count day (≤ 3 days old), its trailing 7-day average, and the
+                               percent change between them — RETAIL PROXY, not filtered for change outputs,
+                               exchange-internal batching, or dust
+```
+
+### Retail Activity Score (`retail_activity_score`, calculated metric — ADR-0053)
+
+```
+version:          retail_activity_score_v1 (versioned, immutable parameter set — cfi/retail/score_parameters.py)
+range:            0 … 100, unsigned: "how elevated is retail-proxy activity right now, relative to its own
+                  recent history" — a level/intensity reading, not a direction
+components:       each component is already a 0-100 historical percentile; weighted average, no reference scale
+  small_tx_percentile              weight 0.35   small-output-count historical percentile
+  meme_trending_percentile         weight 0.30   meme-coin trending-count historical percentile
+  derivatives_turnover_percentile  weight 0.35   |account ratio − 1| historical percentile
+score:            100 × Σ(weight × percentile/100) ÷ Σ(weights of available components), 1 decimal
+missing_policy:   component excluded when its percentile is "insufficient_history" (never filled);
+                  "Insufficient data" below available weight 0.5 (min_available_weight, versioned parameter)
+bands:            ≥ 80 elevated · ≥ 60 above-normal · ≥ 40 typical · ≥ 20 below-normal · below: quiet
+                  retail-proxy activity (versioned parameter)
+owner_phase:      10 (2026-09-26)
+status:           implemented
+```
+
+### Retail Speculation Score (`retail_speculation_score`, calculated metric — ADR-0053)
+
+```
+version:          retail_speculation_score_v1 (versioned, immutable parameter set)
+range:            −100 … +100, signed: does the tracked proxy data lean toward crowded, long-biased leveraged
+                  positioning, short-biased, or balanced
+components:       sub-score = clip(value ÷ scale, −1, +1); the meme-trending component is UNSIGNED (always ≥ 0
+                  — a count can only push the score up, never down; documented via `ComponentDef.directional`)
+  funding_rate_bias      weight 0.40   avg funding rate ÷ 0.0005
+  account_ratio_skew     weight 0.40   (avg account ratio − 1) ÷ 0.5
+  meme_trending          weight 0.20   meme coins currently trending ÷ 2 (unsigned)
+score:            100 × Σ(weight × sub-score) ÷ Σ(weights of available components), 1 decimal
+missing_policy:   component excluded when its underlying proxy is "unavailable"; "Insufficient data" below
+                  available weight 0.4 (min_available_weight, versioned parameter)
+bands:            ≥ 50 strong long-biased · ≥ 15 long-biased · ≥ −15 balanced · ≥ −50 short-biased ·
+                  below: strong short-biased speculative skew (versioned parameter)
+reproducibility:  every result (both scores) records `parameter_version` and `calculated_at` alongside every
+                  component's value, sub-score, effective weight, contribution and calculation string
+semantic_note:    fixed API text for both scores states plainly that every input is a proxy, never data
+                  identified by its source as retail-only, and neither score is a probability or prediction
+parameters_note:  v1 methodology / initial parameters, chosen by design and not fitted to data or empirically
+                  validated — never described as "validated"
+owner_phase:      10 (2026-09-26)
+status:           implemented
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.

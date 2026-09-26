@@ -19,6 +19,7 @@ from cfi.api.routes import (
     liquidity,
     market,
     meta,
+    retail,
     whales,
 )
 from cfi.cache.redis import check_redis, create_redis
@@ -96,4 +97,5 @@ def create_app(
     app.include_router(whales.router)
     app.include_router(derivatives.router)
     app.include_router(liquidity.router)
+    app.include_router(retail.router)
     return app

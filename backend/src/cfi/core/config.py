@@ -85,6 +85,14 @@ class Settings(BaseSettings):
     def liquidity_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.liquidity_providers.split(",") if p.strip()]
 
+    # Retail activity intelligence (Phase 10). Both extend providers already used by earlier
+    # phases (CoinGecko, Blockchair) with one new endpoint each; no new provider or key needed.
+    retail_providers: str = "coingecko,blockchair"
+
+    @property
+    def retail_provider_ids(self) -> list[str]:
+        return [p.strip() for p in self.retail_providers.split(",") if p.strip()]
+
     @property
     def market_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.market_providers.split(",") if p.strip()]

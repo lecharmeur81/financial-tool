@@ -1246,3 +1246,115 @@ not built (see PROGRESS.md); the backend API (`/api/v1/liquidity/{catalog,overvi
 tested end-to-end (unit tests for the adapter, metrics and score; integration tests for ingestion and the API
 against a synthetic DefiLlama history, verified against an independently-computed expected result). Publishing a
 v2 Liquidity Score parameter set follows the same append-only pattern as ADR-0051.
+
+## ADR-0053 — Phase 10: retail activity intelligence layer, DIRECT/PROXY classification, Retail Activity Score
+and Retail Speculation Score
+
+**Status:** Accepted (implemented 2026-09-26)
+
+**Context.** The user asked to build the Retail Activity Intelligence layer from a specific list of potential
+inputs — Google Trends, Reddit activity where legally/technically available, social activity, retail derivatives
+activity, small transaction activity, meme-coin activity, retail trading proxies — with one hard requirement:
+**every metric must clearly identify whether it is DIRECT RETAIL DATA or a RETAIL PROXY**, and proxies must never
+be presented as direct measurements. Also required: a retail activity score, a retail speculation score, retail
+sentiment metrics, and historical percentile calculations.
+
+**Decision — nothing tracked is DIRECT RETAIL DATA, and this is enforced structurally, not just in prose.**
+Research (WebSearch/WebFetch, not assumption — R3) confirmed no free, licensable source segments its data by
+account type (retail vs. institutional): Google Trends has no official public API (the supported route needs a
+paid Google Cloud BigQuery account; the common unofficial scrape of `trends.google.com` is not authorised by
+Google's terms of service for sustained automated use); Reddit's API has been metered/paid beyond a small
+non-commercial allowance since 2023, still in effect; X (Twitter)'s free tier does not support search or
+aggregate content retrieval. All three are recorded as `NOT_TRACKED` business/licensing decisions for the user's
+review (`cfi/retail/universe.py`, restated in `TODO.md`), not silently dropped or worked around with an
+unauthorised scrape. Because nothing DIRECT exists to track, every metric this phase computes carries
+`measurement_class: MeasurementClass = field(default="proxy", init=False)` on its dataclass
+(`cfi/retail/metrics.py`) — a structural guarantee, not a comment: no code path can construct a "direct" instance
+without deliberately changing the dataclass definition itself, so the requirement survives future edits by
+default rather than by discipline.
+
+**Decision — three tracked proxies, two of them via a genuine cross-module read, not re-ingestion.**
+- **Retail derivatives positioning** reuses two datasets Phase 8 already ingests from Binance USDⓈ-M Futures:
+  `deriv.funding_rate` and `deriv.long_short_account_ratio.1h`. A new `RetailQueries.derivatives_observations()`
+  reads them directly from the shared `obs.observation` table, filtered to `venue = "binance"` only (Binance and
+  OKX publish the ratio for different account populations that must never be blended — see
+  `cfi.derivatives.universe.LONG_SHORT_RATIO`'s own docstring). This is a deliberate architectural precedent: R2's
+  layer rule restricts which *layers* a module reads (never write past its own layer), not which module's
+  ingestion job produced a given L1 row — every module already reads from the same shared table. No new provider,
+  no new ingestion job, no data duplication; documented explicitly in both the query module's docstring and the
+  API catalog response (`"reused_derivatives_datasets"`) so it is visible, not hidden plumbing.
+- **Meme-coin / retail search-attention proxy** extends the already-integrated CoinGecko adapter (Phase 5/6) with
+  its free, keyless `GET /search/trending` endpoint (confirmed live and against CoinGecko's published docs,
+  2026-09-26). One call returns a live snapshot of the top ~15 coins by recent search interest, not a queryable
+  history, so there is nothing to backfill: the scheduled source uses `history=0`/`max_catch_up=0` (all defaults).
+  The set of assets returned is dynamic and not known in advance — unlike every other provider integration in this
+  project, which requests a fixed, pre-registered coin-id list — solved with a sentinel `ScheduledSource.subject`
+  (`TRENDING_SUBJECT = "GLOBAL"`) used purely for scheduling identity, while each stored observation's real `asset`
+  comes from the response item's own `symbol` field. Every trending coin is stored regardless of a curated,
+  explicitly non-exhaustive meme-coin list (`MEME_COIN_SYMBOLS`); the meme-coin-specific reading is computed from
+  that same stored data, never a separately fetched or filtered feed.
+- **Small on-chain transaction activity** extends the already-integrated Blockchair adapter (Phase 7, whale
+  intelligence) with one new daily aggregation: count of Bitcoin outputs valued under $1,000. Deliberately kept out
+  of the whale module's `DAILY_METRICS` iteration to avoid coupling that module to a retail dataset; scheduled
+  exactly like Blockchair's other daily aggregations (12 h interval, day-closed-plus-2h availability, 120-day
+  history in 30-day chunks). Explicitly **not** filtered for change outputs from large transactions,
+  exchange-internal batching, or dust — stated plainly in the dataset description and every API response, never
+  smoothed over (R3).
+
+**Decision — historical percentile as the Statistical Signal (L3), computed by re-invoking the same pure
+function at each historical point, not by storing pre-aggregated percentile-ready series.** `percentile_rank`
+(`cfi/retail/metrics.py`) is a standard nearest-rank percentile (0-100) with an explicit `insufficient_history`
+status below a 20-point minimum sample — never silently computed on too little data, and never hidden. For
+inputs that are naturally single time series (small-output-count) this is direct. For inputs that are themselves
+a computed reading over multiple raw series (the derivatives-turnover magnitude, and the meme-coin-trending
+count derived from a dynamic multi-asset snapshot), `RetailService._turnover_history()` and `_meme_history()`
+re-call the exact same pure metric functions (`derivatives_proxy()`, `meme_coin_activity()`) at every historical
+timestamp seen in the raw data, rather than maintaining a second, parallel pre-computed series that could drift
+out of sync with the "now" calculation. This trades a small amount of read-time recomputation for a correctness
+guarantee: "now" and "history" are always computed identically, by construction.
+
+**Decision — two scores, not one, because "how much" and "which direction" are different questions.** The
+**Retail Activity Score** (0-100, unsigned) answers "how elevated is retail-proxy activity right now, relative to
+its own recent history" — a pure intensity reading; every component is already a 0-100 historical percentile, so
+the score is their weighted average with no reference scale needed (small-transaction percentile 0.35, meme-
+trending percentile 0.30, derivatives-turnover-magnitude percentile 0.35; `min_available_weight` 0.5). The
+**Retail Speculation Score** (−100…+100, signed) answers "does the tracked data lean toward crowded, long-biased
+leveraged positioning, or short-biased, or balanced" — funding-rate bias (weight 0.40, scale 0.0005) and
+account-ratio skew (weight 0.40, scale 0.5) are genuinely directional; the meme-coin-trending component (weight
+0.20, scale 2) is explicitly **not** — a count of currently-trending meme coins is never negative, so it can only
+push the score up toward "more speculative fervour," never down, and this is encoded as a `directional: bool =
+False` field on its `ComponentDef` rather than left to prose, so it can never be mistaken for a balanced
+two-sided signal by a future reader of the code or the API response. Both scores follow the versioned-parameters
+pattern established in ADR-0051 and reused unchanged in ADR-0052 (frozen `ParameterSet`-style dataclasses,
+append-only registries, `CURRENT_VERSION` constants, hard `KeyError` on an unknown version) and record the same
+reproducibility fields (`parameter_version`, `calculated_at`, per-component value/sub-score/effective
+weight/contribution/calculation string). Parameters are labelled "v1 methodology / initial parameters, chosen by
+design" — never "validated" — matching Phase 8/9's own posture.
+
+**Decision — retail sentiment is a deterministic rule over two already-computed readings, not a new metric.**
+`RetailService._sentiment()` compares the derivatives proxy's funding-rate condition and account-ratio condition
+(both already computed, already labelled) and reports whether they agree (`aligned_long_bias` /
+`aligned_short_bias`), disagree (`divergent`), are both inside their neutral bands (`neutral`), or one/both are
+unavailable (`unknown`). This is explicitly commented as a Calculated Metric (L2), not an AI Interpretation (L5)
+— a fixed, published rule, never Claude-generated text, matching R2's evidence-hierarchy separation.
+
+**Alternatives considered.** Scraping Google Trends or Reddit anyway via an unofficial route (rejected outright —
+not authorised by either platform's terms of service for sustained automated use; a licensing decision left
+explicitly to the user, restated in `TODO.md`, not made silently by this build). A single combined retail score
+instead of two (rejected: "how much retail-proxy activity" and "which direction it leans" are different questions
+or with different natural ranges — one unsigned intensity reading and one signed directional reading — and
+collapsing them would either discard the sign or force an artificial direction onto a magnitude-only reading).
+Re-ingesting Binance funding rate/account ratio under a new retail-owned dataset id (rejected: the data is
+identical to what Phase 8 already stores: re-ingesting would duplicate storage and risk the two copies drifting
+apart; a documented cross-module read is simpler and keeps a single source of truth).
+
+**Consequences.** No new database migration (both new datasets are `kind="scalar"`, stored via the existing
+scheduled-source runner; the two derivatives datasets are read, not written, by this module). Frontend work was
+not part of the Phase 10 request as given and was not built (see PROGRESS.md). The backend API
+(`/api/v1/retail/{catalog,overview,history}`) is complete and tested end-to-end: unit tests for both provider
+extensions (CoinGecko trending, Blockchair small-output-count), the metrics module and both scores; integration
+tests for ingestion (against synthetic CoinGecko/Blockchair histories, including no-duplication-on-rerun checks)
+and for the API (derivatives proxy and small-transaction activity verified against an independently-computed
+expected result using the same production metric functions; percentiles and both scores verified for shape —
+status, sample size, measurement class — with their numeric formulas already covered at the unit level).
+Publishing a v2 parameter set for either score follows the same append-only pattern as ADR-0051/ADR-0052.

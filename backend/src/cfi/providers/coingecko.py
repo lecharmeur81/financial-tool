@@ -18,6 +18,18 @@ Verified 2026-09-23 against the official documentation (docs.coingecko.com, v3.0
   observations; the full company list stays in the raw archive. The response carries no
   timestamp: ``event_time`` is the time the snapshot was received.
 
+- ``GET /search/trending`` (Phase 10; verified 2026-09-26 against
+  docs.coingecko.com/reference/trending-search — Demo/keyless available, cached ~10 minutes by
+  CoinGecko) → ``{"coins": [{"item": {"id", "coin_id", "name", "symbol", "market_cap_rank",
+  "score", "data": {...}}}], "nfts": [...], "categories": [...]}``. Only ``coins`` is used; each
+  item's own ``symbol`` (not a pre-registered id map, unlike every other CoinGecko call this
+  adapter makes — the trending set is dynamic) becomes the stored ``asset``, and ``item.id``
+  (CoinGecko's coin slug) the ``subject_ref``. ``score`` is the 0-based trending rank (0 = most
+  trending of that poll's top ~15); a coin absent from one poll's list has no observation that
+  poll, never a zero. The response carries no timestamp: ``event_time`` is the time the snapshot
+  was received. This is a RETAIL PROXY for search/attention interest (``cfi.retail.universe``),
+  never trade or holder data.
+
 Terms (https://www.coingecko.com/en/api_terms, brand attribution guide): attribution such as
 "Data provided by CoinGecko" with a link must be shown next to the data; the terms discourage
 storing data and ask that stored data be refreshed at least every 24 hours. The storage question is
@@ -30,6 +42,7 @@ import math
 import re
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from cfi.core.errors import DataValidationError, NotYetFinalError, ProviderNotConfiguredError
@@ -54,6 +67,7 @@ from cfi.providers.base import (
     RequestSpec,
 )
 from cfi.providers.payload import load_json, schema_error, to_decimal
+from cfi.retail.universe import TRENDING, coin_ref
 
 PROVIDER_ID = "coingecko"
 API_KEY_ENV = "CFI_PROVIDER_COINGECKO_API_KEY"
@@ -61,6 +75,7 @@ COIN_IDS: dict[str, str] = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana"
 SIMPLE_PRICE_PATH = "/simple/price"
 _CHART_PATH = re.compile(r"^/coins/(?P<coin>[a-z0-9-]+)/market_chart$")
 _TREASURY_PATH = re.compile(r"^/companies/public_treasury/(?P<coin>[a-z0-9-]+)$")
+TRENDING_PATH = "/search/trending"
 DAILY_ALIGNMENT_TOLERANCE = timedelta(minutes=5)
 MAX_DAYS = 365
 ATTRIBUTION = {"text": "Data provided by CoinGecko", "url": "https://www.coingecko.com"}
@@ -74,6 +89,7 @@ CAPABILITIES = ProviderCapabilities(
             MARKET_CAP_USD.dataset_id,
             MARKET_CAP_USD_1D.dataset_id,
             TREASURY_HOLDINGS_COMPANIES.dataset_id,
+            TRENDING.dataset_id,
         }
     ),
     auth=AuthSpec(AuthType.API_KEY_HEADER, "x-cg-demo-api-key", API_KEY_ENV, optional=True),
@@ -84,8 +100,9 @@ CAPABILITIES = ProviderCapabilities(
     terms_verified=False,
     notes=(
         "Market capitalisation computed and published by CoinGecko; listed-company treasury "
-        "totals compiled by CoinGecko from company disclosures. Attribution required next to "
-        "the data. Terms discourage storing data (refresh stored data at least every 24 h); "
+        "totals compiled by CoinGecko from company disclosures; trending list (Phase 10, RETAIL "
+        "PROXY) is CoinGecko's own search-interest ranking. Attribution required next to the "
+        "data. Terms discourage storing data (refresh stored data at least every 24 h); "
         "retention decision pending with the user. Demo history limited to 365 days."
     ),
 )
@@ -104,6 +121,8 @@ class CoinGecko(ProviderAdapter):
         return CAPABILITIES
 
     def first_request(self, dataset_id: str, window: FetchWindow) -> RequestSpec:
+        if dataset_id == TRENDING.dataset_id:
+            return RequestSpec(TRENDING_PATH)
         if window.subject is not None and window.subject not in COIN_IDS:
             raise ProviderNotConfiguredError(
                 f"CoinGecko: unsupported subject {window.subject!r}.", provider_id=PROVIDER_ID
@@ -145,6 +164,29 @@ class CoinGecko(ProviderAdapter):
 
     def parse(self, raw: RawResponse) -> Sequence[ProviderRecord]:
         data = load_json(raw)
+        if raw.endpoint == TRENDING_PATH:
+            if not isinstance(data, dict) or not isinstance(data.get("coins"), list):
+                raise schema_error(raw, "expected an object with a 'coins' list")
+            records = []
+            for entry in data["coins"]:
+                if not isinstance(entry, dict) or not isinstance(entry.get("item"), dict):
+                    raise schema_error(raw, "each 'coins' entry must have an 'item' object")
+                item = entry["item"]
+                missing = [k for k in ("id", "symbol", "score") if k not in item]
+                if missing:
+                    raise schema_error(raw, f"trending item lacks {', '.join(missing)}")
+                records.append(
+                    ProviderRecord(
+                        PROVIDER_ID,
+                        TRENDING.dataset_id,
+                        {
+                            "coin_id": item["id"],
+                            "symbol": item["symbol"],
+                            "score": item["score"],
+                        },
+                    )
+                )
+            return records
         if raw.endpoint == SIMPLE_PRICE_PATH:
             if not isinstance(data, dict):
                 raise schema_error(raw, "expected an object keyed by coin id")
@@ -205,6 +247,8 @@ class CoinGecko(ProviderAdapter):
     ) -> CanonicalObservation | CanonicalFlow:
         p = record.payload
         dataset = ctx.dataset
+        if dataset.dataset_id == TRENDING.dataset_id:
+            return _trending_rank(p, ctx)
         asset = _asset_for(str(p["coin_id"]))
         if dataset.dataset_id == TREASURY_HOLDINGS_COMPANIES.dataset_id:
             return _treasury_totals(p, ctx, asset)
@@ -272,6 +316,42 @@ def _align_to_midnight(reported: datetime) -> datetime:
             "not a 00:00 UTC daily snapshot"
         )
     return nearest
+
+
+def _trending_rank(p: Any, ctx: NormaliseContext) -> CanonicalObservation:
+    """One trending coin from one poll (Phase 10, RETAIL PROXY). Unlike every other CoinGecko
+    call this adapter makes, the set of assets is dynamic (not a pre-registered id map): the
+    item's own ``symbol`` becomes the stored asset, and its CoinGecko slug the subject_ref."""
+    dataset = ctx.dataset
+    asset = str(p["symbol"]).upper()
+    score = p["score"]
+    if not isinstance(score, int):
+        raise DataValidationError(f"trending score is not an integer: {score!r}")
+    if score < 0:
+        raise DataValidationError(f"trending score is negative: {score!r}")
+    event_time = ctx.ingested_at
+    available_at, estimated = dataset.available_at(event_time, None, ctx.ingested_at)
+    return CanonicalObservation(
+        dataset_id=dataset.dataset_id,
+        metric=dataset.metric,
+        asset=asset,
+        subject_ref=coin_ref(str(p["coin_id"])),
+        venue=None,
+        period=dataset.period,
+        unit=dataset.unit,
+        event_time=event_time,
+        available_at=available_at,
+        available_at_estimated=estimated,
+        ingested_at=ctx.ingested_at,
+        value=Decimal(score),
+        source_provider=PROVIDER_ID,
+        original_source=CAPABILITIES.original_source,
+        raw_ref=ctx.raw_ref,
+        quality_status=QualityStatus.OK,
+        quality_note=None,
+        pit_reliability=PitReliability.NATIVE,
+        transformations=("event_time: snapshot receipt time (trending endpoint has no timestamp)",),
+    )
 
 
 def _treasury_totals(p: Any, ctx: NormaliseContext, asset: str) -> CanonicalFlow:

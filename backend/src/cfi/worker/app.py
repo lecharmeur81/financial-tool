@@ -25,6 +25,9 @@ from cfi.liquidity.sources import sources_for as liquidity_sources_for
 from cfi.market.jobs import backfill_days, backfill_step, ingest_latest
 from cfi.market.sources import ADAPTERS, datasets_for
 from cfi.market.universe import ASSET_SYMBOLS, dataset_by_id
+from cfi.retail.jobs import ingest_source as ingest_retail_source
+from cfi.retail.sources import source as retail_source
+from cfi.retail.sources import sources_for as retail_sources_for
 from cfi.whales.jobs import ingest_source as ingest_whale_source
 from cfi.whales.sources import source as whale_source
 from cfi.whales.sources import sources_for as whale_sources_for
@@ -52,6 +55,7 @@ app.conf.update(
         settings.whale_provider_ids,
         settings.derivative_provider_ids,
         settings.liquidity_provider_ids,
+        settings.retail_provider_ids,
     ),
 )
 
@@ -117,6 +121,13 @@ def _kick_institutional(**_: Any) -> None:
             args=(liq.provider_id, liq.dataset.dataset_id, liq.subject),
             queue=liq.queue,
             expires=liq.interval_seconds,
+        )
+    for ret in retail_sources_for(settings.retail_provider_ids):
+        app.send_task(
+            "retail.ingest",
+            args=(ret.provider_id, ret.dataset.dataset_id, ret.subject),
+            queue=ret.queue,
+            expires=ret.interval_seconds,
         )
 
 
@@ -186,6 +197,24 @@ def liquidity_ingest_task(provider_id: str, dataset_id: str, subject: str) -> di
         ctx = await rt.context()
         item = liquidity_source(provider_id, dataset_id, subject)
         results = await ingest_liquidity_source(ctx, item)
+        return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
+
+    return rt.run(go())
+
+
+@app.task(name="retail.ingest", time_limit=1800, soft_time_limit=1700)
+def retail_ingest_task(provider_id: str, dataset_id: str, subject: str) -> dict[str, Any]:
+    """One retail dataset from one provider for one subject: the recent window, then one history
+    chunk while history is incomplete (trending has none — see retail/sources.py). Skipped (not
+    failed) when the provider is disabled."""
+    if provider_id not in settings.retail_provider_ids:
+        return {"skipped": f"provider {provider_id} is disabled"}
+    rt = runtime()
+
+    async def go() -> dict[str, Any]:
+        ctx = await rt.context()
+        item = retail_source(provider_id, dataset_id, subject)
+        results = await ingest_retail_source(ctx, item)
         return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
 
     return rt.run(go())

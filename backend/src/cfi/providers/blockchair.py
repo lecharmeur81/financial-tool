@@ -20,6 +20,11 @@ real run will be checked against it (a changed shape fails the run with a schema
   (satoshi), ``value_usd``, ``recipient``, ``is_from_coinbase``, ``spending_time``, ``lifespan``
   (seconds from creation to spending), groupable by ``spending_date``;
 - ``/bitcoin/blocks``: ``cdd_total`` (coin days destroyed per block), groupable by ``date``;
+- ``/bitcoin/outputs`` also supports counting: ``?a=date,count()`` with a ``value_usd(0..N)``
+  filter counts outputs under N USD created that day — used for Phase 10's small on-chain
+  transaction count (RETAIL PROXY, ``cfi.retail.universe``). **Not filtered** for change outputs
+  from large transactions or exchange-internal batching — a noisy proxy, stated as such wherever
+  shown, never smoothed over;
 - ``/ethereum/transactions``: ``hash``, ``block_id``, ``time``, ``sender``, ``recipient``,
   ``value`` (wei, numeric string; the value filter is approximate), ``value_usd``, ``failed``;
 - ``/{chain}/addresses``: ``address``, ``balance`` (satoshi integer / wei numeric string),
@@ -54,6 +59,7 @@ from cfi.providers.base import (
     RequestSpec,
 )
 from cfi.providers.payload import load_json, schema_error, to_decimal
+from cfi.retail.universe import SMALL_OUTPUT_COUNT, SMALL_OUTPUT_MAX_USD
 from cfi.whales.universe import (
     CHAIN_OF,
     LARGE_TRANSFER_MIN,
@@ -101,7 +107,18 @@ _AGGREGATES: dict[str, tuple[str, str, str, str]] = {
         "sum(value)",
         "is_from_coinbase(true)",
     ),
+    # Phase 10, RETAIL PROXY: count of Bitcoin outputs under SMALL_OUTPUT_MAX_USD created that
+    # day. Deliberately kept out of DAILY_METRICS (not a whale/large-holder dataset — it is not
+    # registered in whales/universe.py's per-asset registry, so its dataset_id is resolved by an
+    # explicit branch in first_request/parse_page below, not the dataset()/key_of() registry).
+    "small_output_count": (
+        "/bitcoin/outputs",
+        "date",
+        "count()",
+        f"value_usd(0..{int(SMALL_OUTPUT_MAX_USD)})",
+    ),
 }
+SMALL_OUTPUT_METRIC = "small_output_count"
 
 CAPABILITIES = ProviderCapabilities(
     provider_id=PROVIDER_ID,
@@ -114,6 +131,7 @@ CAPABILITIES = ProviderCapabilities(
             for m in ("address_balance", "large_transfer")
             for a in WHALE_ASSETS
         ]
+        + [SMALL_OUTPUT_COUNT.dataset_id]
     ),
     auth=AuthSpec(AuthType.API_KEY_QUERY, "key", API_KEY_ENV, optional=True),
     # Documented hard limit 30 per minute without a key: one request every 3 s, no bursts.
@@ -175,6 +193,20 @@ class Blockchair(ProviderAdapter):
     # ------------------------------------------------------------------ requests
 
     def first_request(self, dataset_id: str, window: FetchWindow) -> RequestSpec:
+        if dataset_id == SMALL_OUTPUT_COUNT.dataset_id:
+            if window.subject != "BTC":
+                raise ProviderNotConfiguredError(
+                    f"Blockchair: {dataset_id!r} is not configured for {window.subject!r}.",
+                    provider_id=PROVIDER_ID,
+                )
+            last = window.end - timedelta(seconds=1)
+            _, group, key, extra = _AGGREGATES[SMALL_OUTPUT_METRIC]
+            q = f"time({window.start.date().isoformat()}..{last.date().isoformat()}),{extra}"
+            return RequestSpec(
+                "/bitcoin/outputs",
+                params={"a": f"{group},{key}", "q": q},
+                state={"metric": SMALL_OUTPUT_METRIC, "asset": "BTC", "chain": "bitcoin"},
+            )
         try:
             metric, asset = key_of(dataset_id)
         except KeyError:
@@ -269,7 +301,11 @@ class Blockchair(ProviderAdapter):
         if not isinstance(data, list) or not all(isinstance(r, dict) for r in data):
             raise schema_error(raw, "'data' is not a list of objects")
         metric, asset = spec.state["metric"], spec.state["asset"]
-        dataset_id = dataset(metric, asset).dataset_id
+        dataset_id = (
+            SMALL_OUTPUT_COUNT.dataset_id
+            if metric == SMALL_OUTPUT_METRIC
+            else dataset(metric, asset).dataset_id
+        )
         required = {
             "address_balance": ("address", "balance"),
             "large_transfer": (
