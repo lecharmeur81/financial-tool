@@ -23,6 +23,8 @@ x-backend-env: &backend-env
   # Whale intelligence (Phase 7): Coin Metrics Community and Blockchair, both work without a key.
   CFI_WHALE_PROVIDERS: ${CFI_WHALE_PROVIDERS:-coinmetrics,blockchair}
   CFI_PROVIDER_BLOCKCHAIR_API_KEY: ${CFI_PROVIDER_BLOCKCHAIR_API_KEY:-}
+  # Derivatives (Phase 8): Binance USDⓈ-M, OKX and Deribit public data, no key.
+  CFI_DERIVATIVE_PROVIDERS: ${CFI_DERIVATIVE_PROVIDERS:-binance_futures,okx_derivatives,deribit}
 
 x-backend-build: &backend-build
   context: ./backend

@@ -160,6 +160,28 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 - [ ] **Not available free (recorded in the UI):** dormant / long-term-holder supply stock, miner → exchange flows,
       SOL and XRP whale data, labelled Ethereum addresses, balance bands, real-time transfer alerts (Whale Alert: paid).
 
+## Phase 8 — Derivatives (built 2026-09-26; see PROGRESS.md)
+
+- [x] `obs.derivative_quote`, Binance USDⓈ-M / OKX / Deribit adapters, shared scheduled-source runner, derivatives
+      calculations, Derivatives Health Score, API, Derivatives page.
+- [ ] **User:** run the tests and `docker compose up --build` on Windows; check `/api/v1/ingestion/runs` for
+      `binance_futures`, `okx_derivatives` and `deribit` (Binance was not reachable from Claude's workspace — HTTP 451 —
+      so no live Binance response has been seen).
+- [ ] After the first real run: copy one real Binance payload per endpoint from the raw archive into the test fixtures
+      and confirm the documented shapes (timestamps on the hour for 1 h statistics).
+- [ ] Watch the option-chain job duration (hundreds of instruments every 4 h on the `backfill` queue).
+
+### Decisions needed from the user (Phase 8)
+
+- [ ] **Terms of use** of Binance, OKX and Deribit public market data (not reviewed; `terms_verified = false`).
+- [ ] **Judgment parameters (v1).** OI expansion ±5 % / 24 h, ±15 % / 7 d; leverage change ±10 % / 7 d; funding
+      extreme |30 %| a year; basis extreme ≥ +20 % / ≤ −5 % (headline ≈ 90 days, ≥ 14 d); liquidation event 5 × median
+      and ≥ 0.05 % of OI; skew at 0.9 / 1.1 × forward (± 3 %), expiry ≈ 30 d; score weights 0.25 / 0.15 / 0.20 / 0.20 /
+      0.20, scales 30 % / 15 % outside 0–10 % / 20 % / 1 % / DVOL BTC 30→80 %, ETH 40→100 %; bands 75 / 50 / 25. Approve
+      or name changes (creates v2).
+- [ ] **Coverage gaps** (recorded in the UI): Binance liquidations (websocket only — would need the real-time phase),
+      SOL / XRP options and basis, top-trader positioning, venues beyond Binance / OKX / Deribit (paid aggregators).
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.

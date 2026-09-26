@@ -136,6 +136,10 @@ covered), `ops.job_run.skipped` (records not final yet — skipped, fetched late
 (records failing a consistency check), `ops.job_run.job_type` ∈ {`ingest`, `backfill`}.
 **Implemented in Phase 7 (migration `0005`):** `ref.entity`, `ref.entity_label` (below), `obs.large_transfer`,
 `ops.dataset.kind` also `transfer`.
+**Implemented in Phase 8 (migration `0006`):** `obs.derivative_quote` (below; replaces the planned `option_quote` for
+venue snapshots of futures, perpetuals and options), `ops.dataset.kind` also `quote`. Open interest, funding,
+account ratios and hourly liquidation totals are scalar series in `obs.observation` (the planned `open_interest` and
+`liquidation_event` tables were not needed).
 Still planned: the other typed market tables, `ref.*`, `calc`/`sig`/`regime`/`ai`/`usr` tables, `ops.coverage_daily`.
 **Implemented in Phase 3 (migration `0001`):** the nine
 schemas exist and are empty; no tables have been created yet. **HT** = TimescaleDB hypertable (time column in brackets).
@@ -176,7 +180,7 @@ schemas exist and are empty; no tables have been created yet. **HT** = Timescale
 | `open_interest` (HT) | Open interest | `oi_contracts`, `oi_base`, `oi_usd` |
 | `liquidation_event` (HT) | Liquidations (event or aggregated) | `side` (long/short), `quantity_base`, `notional_usd`, `price`, `is_aggregated` |
 | `orderbook_depth` (HT) | Depth bands around mid | `mid_price`, `band_bps`, `bid_notional_usd`, `ask_notional_usd` |
-| `option_quote` (HT) | Option chain snapshots | `instrument_id`, `mark_iv`, `bid_iv`, `ask_iv`, `delta`, `gamma`, `vega`, `open_interest`, `volume`, `underlying_price` |
+| `derivative_quote` (HT [`event_time`], 7-day chunks, **implemented** Phase 8; planned as `option_quote`) | One futures / perpetual / option instrument per venue snapshot, one series per instrument (`subject_ref` = `DERIBIT:<instrument>`); `event_time` = the venue's response time | `instrument`, `instrument_kind` (`future` / `perpetual` / `option`), `expiry` (NULL only for perpetuals; Deribit 08:00 UTC), `strike`, `option_type` (`call` / `put`; both set exactly for options), `mark_price`, `bid_price`, `ask_price` (series unit: `usd` for inverse futures, the coin for options), `mark_iv` (ratio), `underlying_price` (forward, USD), `index_price` (USD), `open_interest_native` (coins), `open_interest_usd` (USD, inverse futures), `volume_native` (24 h, coins), `volume_usd`. Missing ⇔ `mark_price` NULL. Checks: non-negative values, strike > 0, bid ≤ ask, expiry after the snapshot — violations are kept and flagged `suspect` |
 | `large_transfer` (HT [`event_time`], **implemented** Phase 7; planned as `onchain_transfer`) | Individual large transfers, one series per transfer (`subject_ref` = `chain:tx_hash[:output_index]`) | `chain`, `tx_hash`, `output_index` (Bitcoin output; NULL for Ethereum), `block_height`, `sender` (NULL for Bitcoin outputs), `recipient`, `value_native` (asset units), `value_usd` (provider value at block time; NULL if not reported). `event_time` = block time. An address failing validation is kept as reported and the row is `suspect` |
 | `selected_observation` (view) | Preferred-provider value per point in time with provider used and conflict flag | derived |
 
@@ -409,6 +413,70 @@ holders; Whale Flow Score vs Institutional Flow Score (Phase 6); labelled top-10
 Metrics exchange supply (the days before the two snapshots). Direction thresholds: sub-score ±0.25, score ±15 points,
 balance change ±0.5 %. Status: `contradiction` (opposite directions), `consistent`, `no_clear_direction`,
 `insufficient_data`.
+
+## 5d. Derivatives datasets (implemented in Phase 8)
+
+`<a>` ∈ {btc, eth, sol, xrp} for perpetual data; {btc, eth} for Deribit. Perpetuals are the USDT-margined ones
+(`<A>USDT`, `<A>-USDT-SWAP`). Each venue is its own series (`obs.series.venue` ∈ {`binance`, `okx`, `deribit`}).
+
+| Dataset ID | Subject | Values (unit) | Providers | `available_at` |
+|---|---|---|---|---|
+| `deriv.open_interest.<a>.1h` | `PERP:<A>-USDT` | open interest in coins (`<a>`), hourly snapshot on the hour | Binance `openInterestHist` (`sumOpenInterest`), OKX `open-interest-history` (`oiCcy`) | snapshot + 5 min (receipt time if earlier) |
+| `deriv.funding_rate` | `PERP:<A>-USDT` | funding rate per settlement interval (`ratio`; positive = longs pay shorts) | Binance `fundingRate`, OKX `funding-rate-history` (`fundingRate`) | settlement + 1 min (receipt time if earlier) |
+| `deriv.long_short_account_ratio.1h` | Binance `PERP:<A>-USDT`; OKX `CONTRACTS:<A>` | accounts net long ÷ accounts net short (`ratio`) — different populations per venue, never combined | Binance `globalLongShortAccountRatio`, OKX `long-short-account-ratio` | snapshot + 5 min (receipt time if earlier) |
+| `deriv.liquidations.<a>.1h` | `PERP:<A>-USDT:long` / `:short` | coins liquidated in the hour (Σ contracts × `ctVal`); 0 = no orders in a fully read hour | OKX `liquidation-orders` (+ `instruments` for `ctVal`) | hour end + 2 min |
+| `deriv.volatility_index.1h` | `DVOL:<A>` | Deribit DVOL close of the hour (`ratio`; percent ÷ 100); `event_time` = hour start | Deribit `get_volatility_index_data` | hour end + 2 min |
+| `deriv.futures_curve.<a>` | `DERIBIT:<instrument>` | `obs.derivative_quote` rows for dated futures and the perpetual (unit `usd`) | Deribit `get_book_summary_by_currency?kind=future` | Deribit response time (`usOut`; receipt time if Deribit's clock is ahead) |
+| `deriv.option_chain.<a>` | `DERIBIT:<instrument>` | `obs.derivative_quote` rows for every option (mark in coins; `mark_iv` ratio) | Deribit `…?kind=option` | as above |
+
+History loaded once, one chunk per run: open interest and account ratios ~1 month (Binance 29 d, OKX 28 d), funding
+365 d (Binance) / 90 d (OKX), DVOL 365 d. Deribit snapshots (futures hourly, options every 4 h) and OKX liquidations
+(~1 day retained) accumulate from the first run. USD amounts are calculated at read time: coins × the Coinbase USD
+close of the hour ending at the snapshot (`market.ohlcv.usd.1h`).
+
+### Derivatives calculated metrics (read time, point-in-time — ADR-0050)
+
+```
+oi_change_24h / oi_change_7d:  Σ OI (coins) of the venues with a value now AND 24 h / 7 d earlier (± 1 h)
+                               ÷ the same venues' earlier sum − 1; "now" = newest snapshot ≤ 3 h old
+oi_expansion / contraction:    change_24h ≥ +5 % or change_7d ≥ +15 % / ≤ −5 % or ≤ −15 % (both: "mixed")
+leverage_ratio:                Σ OI coins × Coinbase USD close ÷ market cap (CoinGecko daily, ≤ 2 days old)
+leverage_change_7d:            ratio now ÷ ratio 7 d earlier − 1 (same venues); expansion ≥ +10 %, reduction ≤ −10 %
+funding_annualised_7d:         Σ rates settled in (as_of − 7 d, as_of] × 365 ÷ 7, per venue; only when no gap
+                               between settlements (or window edges) exceeds 9 h; venues OI-weighted
+funding_extreme:               |funding_annualised_7d| ≥ 30 %
+basis_annualised:              (future mark ÷ index − 1) × 365 ÷ days to expiry (≥ 1 day)
+basis_headline:                dated future closest to 90 days to expiry, at least 14 days; extreme ≥ +20 % or ≤ −5 %
+perpetual_premium:             perpetual mark ÷ index − 1 (context)
+liquidations_24h:              Σ long + short over the last 24 complete hours (all 24 present); ÷ OKX OI (coins)
+liquidation_event:             hour total ≥ 5 × median of the earlier hours in the 7-day window (≥ 24 of them) and
+                               ≥ 0.05 % of OKX OI
+put_call_oi / put_call_volume: Σ put ÷ Σ call open interest / 24 h volume (contracts = coins), whole chain
+atm_iv:                        mean mark IV of call and put at the strike nearest the forward (median underlying of
+                               the expiry closest to 30 days, ≥ 7 d)
+skew_10pct:                    IV(put nearest 0.9 F) − IV(call nearest 1.1 F), strikes within ± 3 % of the targets
+price_oi_context:              Coinbase price 24 h change vs OI 24 h change (± 1 %): a plain sentence, no direction call
+```
+
+### Derivatives Health Score v1 (`derivatives_health_score.v1`, calculated metric — ADR-0050)
+
+```
+range:            0 … 100, 100 = no sign of stress; derivatives_stress = 100 − health
+components:       direction-neutral stress = clip(metric ÷ scale, 0, 1)
+  funding_annualised_7d_abs.v1            weight 0.25   |funding_annualised_7d| ÷ 30 %
+  futures_basis_annualised_outside_band.v1 weight 0.15  distance of the headline basis outside 0 … 10 % ÷ 15 %
+  leverage_ratio_change_7d_abs.v1         weight 0.20   |leverage_change_7d| ÷ 20 %
+  liquidations_24h_pct_oi.v1              weight 0.20   liquidations_24h ÷ OKX OI ÷ 1 %
+  dvol_level.v1                           weight 0.20   (DVOL − calm) ÷ (stressed − calm); BTC 30 → 80 %, ETH 40 → 100 %
+health:           100 × (1 − Σ weight × stress ÷ Σ available weights), 1 decimal
+missing_policy:   component excluded without complete inputs (never filled); basis and DVOL "not applicable" for
+                  SOL and XRP; "Insufficient data" below weight 0.5
+bands:            ≥ 75 low stress · ≥ 50 moderate stress · ≥ 25 elevated stress · below: high stress
+context:          direction shown per component (who pays funding, contango/backwardation, long vs short
+                  liquidations, leverage building/unwinding) — never scored, never bullish/bearish
+owner_phase:      8
+status:           implemented
+```
 
 ---
 

@@ -5,7 +5,8 @@ The ingestion engine is the same for every family; only these few operations dif
 - ``ObservationStore`` → ``obs.observation`` (one scalar ``value``);
 - ``BarStore``         → ``obs.market_bar`` (OHLCV);
 - ``FlowStore``        → ``obs.institutional_flow`` (flows and holdings of identified entities);
-- ``TransferStore``    → ``obs.large_transfer`` (large on-chain transfers).
+- ``TransferStore``    → ``obs.large_transfer`` (large on-chain transfers);
+- ``QuoteStore``       → ``obs.derivative_quote`` (futures / option instruments in a snapshot).
 
 All tables share the provenance columns and the natural key
 (``series_id``, ``event_time``, ``source_provider``, ``revision``). Stores only ever *insert*
@@ -27,9 +28,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from cfi.db import tables as t
 from cfi.domain.enums import PitReliability, QualityStatus
 from cfi.domain.observation import (
+    QUOTE_VALUE_FIELDS,
     CanonicalBar,
     CanonicalFlow,
     CanonicalObservation,
+    CanonicalQuote,
     CanonicalTransfer,
     ObservedRecord,
 )
@@ -344,4 +347,38 @@ class TransferStore(_TableStore):
             chain=template.chain,
             tx_hash=template.tx_hash,
             output_index=template.output_index,
+        )
+
+
+class QuoteStore(_TableStore):
+    table = t.derivative_quote
+    value_columns = QUOTE_VALUE_FIELDS
+    conflict_column = "mark_price"
+
+    async def insert(self, rows: Sequence[tuple[int, CanonicalQuote]]) -> int:
+        return await self._insert(
+            [
+                {
+                    **_provenance(sid, q),
+                    "instrument": q.instrument,
+                    "instrument_kind": q.instrument_kind,
+                    "expiry": q.expiry,
+                    "strike": q.strike,
+                    "option_type": q.option_type,
+                    **{c: getattr(q, c) for c in QUOTE_VALUE_FIELDS},
+                }
+                for sid, q in rows
+            ]
+        )
+
+    def missing(
+        self, template: CanonicalQuote, event_time: datetime, gap: GapContext
+    ) -> CanonicalQuote:
+        return CanonicalQuote(
+            **_missing_provenance(template, event_time, gap),
+            instrument=template.instrument,
+            instrument_kind=template.instrument_kind,
+            expiry=template.expiry,
+            strike=template.strike,
+            option_type=template.option_type,
         )

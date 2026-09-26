@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     def whale_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.whale_providers.split(",") if p.strip()]
 
+    # Derivatives (Phase 8). Comma-separated provider IDs the workers ingest from. All three
+    # use public endpoints without a key.
+    derivative_providers: str = "binance_futures,okx_derivatives,deribit"
+
+    @property
+    def derivative_provider_ids(self) -> list[str]:
+        return [p.strip() for p in self.derivative_providers.split(",") if p.strip()]
+
     @property
     def market_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.market_providers.split(",") if p.strip()]

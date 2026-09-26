@@ -6,6 +6,12 @@
 
 ## Status
 
+**Phase 8 — Derivatives.** Open interest per venue with 24 h / 7 d change, leverage (open interest ÷ market cap),
+funding (7-day annualised, per venue), Deribit futures basis and options (put/call ratios, ATM implied volatility,
+skew, DVOL), OKX liquidations with event detection, long/short account ratios as context, and a transparent
+**Derivatives Health Score** whose direction-neutral components are all shown — on the **Derivatives** page (BTC, ETH,
+SOL, XRP; options and basis BTC, ETH). Leverage and funding are never labelled bullish or bearish.
+
 **Phase 7 — Whale intelligence.** Exchange inflows and outflows (BTC, ETH), the 100 largest addresses with
 evidence-based labels (known exchange, institution, fund, market maker, protocol, miner, government — or *unknown large
 holder* from size only, never "institution"), large transfers, Bitcoin coin-age and miner activity, a transparent
@@ -129,6 +135,11 @@ run); 7-day balance changes of the largest addresses appear after a week of dail
 imported from `backend/src/cfi/whales/seed_labels/*.csv` when the worker starts; more can be added with
 `docker compose exec worker python -m cfi.whales.label_store import <file.csv>` (every row needs evidence, source and
 confidence; bad rows reject the whole file).
+Derivatives data (Phase 8) needs no key: Binance USDⓈ-M futures, OKX and Deribit public market data. Binance and OKX
+may be unreachable from some networks (Philippine ISP blocking); failed runs are listed at
+`/api/v1/ingestion/runs` and in the page's data-quality table — remove a provider from `CFI_DERIVATIVE_PROVIDERS` if
+needed. Open-interest and account-ratio history reaches about a month back; Deribit snapshots and OKX liquidations
+(kept about a day by OKX) accumulate from the first run, so liquidation events appear after the first day.
 Third-party attributions: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## Disclaimer

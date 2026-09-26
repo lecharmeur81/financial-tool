@@ -13,6 +13,7 @@ from typing import Any
 
 from cfi.core.config import Settings
 from cfi.db.engine import create_engine
+from cfi.derivatives import sources as derivatives
 from cfi.ingestion.archive import FileSystemArchive
 from cfi.ingestion.engine import IngestionEngine
 from cfi.ingestion.repository import IngestionRepository, RepositoryRecorder
@@ -63,6 +64,10 @@ class WorkerRuntime:
                 adapter = whales.ADAPTERS[w.provider_id]
                 client_for(adapter)
                 await engine.register(w.dataset, adapter, whales.PRIORITY[w.provider_id])
+            for d in derivatives.sources_for(self.settings.derivative_provider_ids):
+                adapter = derivatives.ADAPTERS[d.provider_id]
+                client_for(adapter)
+                await engine.register(d.dataset, adapter, derivatives.PRIORITY[d.provider_id])
             # Address labels shipped with the code (idempotent; stored labels are never changed).
             await import_seed_files(db, engine.clock())
             self._context = JobContext(engine=engine, db=db, clients=clients)

@@ -2,8 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 7 — Whale intelligence → ✅ complete (`0529017`)
-**Next phase:** 8 — to be defined by the user (do not start automatically)
+**Current phase:** 8 — Derivatives → ✅ built (commit pending on the user's machine)
+**Next phase:** 9 — to be defined by the user (do not start automatically)
 
 ---
 
@@ -19,7 +19,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 5 | Market data | ✅ Complete — verified on Windows with real data (`6ad4eaf`) |
 | 6 | Institutional capital | ✅ Complete — verified on Windows (`ef852b6`); real data pending a SoSoValue API key |
 | 7 | Whale intelligence | ✅ Complete — verified on Windows (`0529017`); first real whale runs to be checked |
-| — | Derivatives | ⏳ Not started |
+| 8 | Derivatives | ✅ Built — tests pass in Claude's workspace; Windows check and commit pending |
 | — | Liquidity | ⏳ Not started |
 | — | Retail | ⏳ Not started |
 | — | Macro | ⏳ Not started |
@@ -41,7 +41,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | — | Production | ⏳ Not started |
 | — | Real-time intelligence | ⏳ Not started |
 
-Phases 0–7 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
+Phases 0–8 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
 
 ---
 
@@ -490,4 +490,74 @@ snapshots and labels published after `as_of`, and rows stored after `knowledge_t
 `docker compose exec api pytest` → 364 passed. First real Coin Metrics / Blockchair runs not yet checked.
 
 **Git commit:** `0529017` — `[P7] whale intelligence` (63 files).
+
+### 2026-09-26 — Phase 8: Derivatives
+
+**What changed**
+- **Sources** (verified 2026-09-26, $0, no keys): **OKX** — hourly open interest (coins), funding history, hourly
+  long/short account ratio, liquidation orders + contract value (checked against real responses); **Deribit** — futures
+  curve and option chain snapshots, hourly DVOL for BTC and ETH (real responses); **Binance USDⓈ-M** — hourly open
+  interest, funding history, all-account long/short ratio (documented shapes: Binance answers HTTP 451 to Claude's
+  workspace). Not available free (shown in the UI): Binance liquidation history, SOL/XRP options and basis, top-trader
+  positioning, market-wide totals.
+- **Storage / engine:** migration `0006` — `obs.derivative_quote` hypertable (fifth record family `CanonicalQuote`:
+  futures, perpetuals and options per snapshot; expiry / strike / option-type checks; an instrument listed after its
+  expiry is flagged `suspect`); `ops.dataset.kind` also `quote`. Scalar series for open interest, funding, account
+  ratios, hourly liquidation totals (aggregated across pages in the adapter; incompletely read hours become missing
+  points) and DVOL. USD values are calculated at read time (coins × Coinbase close), never stored from venues.
+  Percent values stored as ratios with the conversion recorded.
+- **Jobs:** the Phase 7 runner became the shared `cfi/ingestion/scheduled.py` (whales moved onto it unchanged);
+  Celery task `derivatives.ingest` per provider / dataset / asset (hourly OI, ratios, liquidations, DVOL, futures;
+  4-hourly funding and option chain — the chain on the `backfill` queue); history ~1 month (OI, ratios), 365 / 90 days
+  (funding), 365 days (DVOL); `CFI_DERIVATIVE_PROVIDERS`.
+- **Calculations:** OI change 24 h / 7 d per venue and aggregate (same venue set only), OI expansion / contraction,
+  leverage ratio (OI ÷ market cap) and leverage expansion / reduction, annualised 7-day funding (per venue,
+  OI-weighted) and funding extremes, annualised basis curve with a 90-day headline and basis extremes, liquidations
+  (24 h, long share, share of OI) and liquidation-event hours, options put/call (OI, volume), ATM IV, 10 %-OTM skew,
+  DVOL, long/short account ratios (context only), price / OI context sentence. No reading labelled bullish or bearish.
+- **Derivatives Health Score v1** (0–100, 100 = no stress; stress = 100 − health): funding 0.25, basis 0.15, leverage
+  0.20, liquidations 0.20, DVOL 0.20 — each a direction-neutral stress 0 … 1 with its value, scale, weight,
+  contribution, calculation, inputs and direction context; "Insufficient data" below weight 0.5.
+- **API:** `/api/v1/derivatives/catalog`, `/overview`, `/asset`, `/history` (all with `as_of` / `knowledge_time`).
+- **Derivatives page** (placeholder replaced): score card with every component, conditions, OI per venue, leverage,
+  funding per venue, account ratios, price context, OI / price chart, Deribit curve and options, liquidations and
+  events, per-source data quality, method and limits.
+- **Historical fixtures:** `backend/tests/fixtures/derivatives/README.md` — real OKX / Deribit responses (basis 4.96 %
+  a year, skew +1.75 points computed by hand) and a synthetic history with hand-derived results (BTC health 59.4,
+  stress 40.6; SOL Insufficient data; point-in-time OI 125,000).
+- **Docs:** ADR-0050, DATA_DICTIONARY §4/§5d, ARCHITECTURE §5.1/§5.3/§5.5, CLAUDE.md §C3 (8 = Derivatives), README,
+  TODO, THIRD_PARTY_NOTICES.md, `.env.example`, `compose.yaml`.
+
+**Tests run (Claude's workspace: PostgreSQL 17 + TimescaleDB 2.30.1, Redis 8.8, Python 3.12, Node 22)**
+
+| Check | Result |
+|---|---|
+| Backend `uv run pytest` (unit + integration + API) | 418 passed (54 new) |
+| Backend without database/Redis | 311 passed, 107 skipped |
+| `ruff format --check` / `ruff check` / `mypy` (strict) | clean |
+| Frontend `pnpm test` / `lint` / `format:check` / `typecheck` / `build` | 70 passed / clean / clean / clean / built |
+| Running stack (API + built frontend + Playwright) | Derivatives page renders for BTC and SOL with the synthetic history shifted to the present, in a scratch database; score, conditions, chart, curve, options, liquidations and data quality as expected, no console errors |
+
+Covered by tests: real OKX / Deribit rows read exactly (open interest in coins, funding, account ratio, contract value,
+futures curve with exponent notation, options with IV → ratio, DVOL); documented Binance requests and shapes;
+pagination (OKX `end` / `after` / `begin`–`end`, Binance `startTime`, Deribit `continuation`); liquidation aggregation
+across pages with orders sharing the page-boundary millisecond counted once, inconsistent sides flagged, hours beyond
+retention not emitted; unfinished DVOL hour skipped; clock-ahead Deribit snapshots dated by receipt; provider error
+envelopes; every calculation and the score by hand (OI venue-set rule, stale values, leverage, funding with a missing
+settlement, basis and options on real data, liquidation events, bands, re-weighting, Insufficient data); ingestion
+provenance, idempotent re-runs, gaps stored as missing, failures recorded; API values, conditions and wording (no
+bullish / bearish); point-in-time leakage (snapshots and liquidation events after `as_of`, rows stored after
+`knowledge_time`, never used).
+
+**Known limitations**
+- No live Binance response seen (HTTP 451 from the workspace): shapes are the documented ones; a change fails the run
+  with a schema error, visible in ingestion runs.
+- Coverage: open interest and funding on Binance + OKX only, basis / options / DVOL Deribit only (BTC, ETH),
+  liquidations OKX only; free history reaches about a month for OI and account ratios; Deribit snapshots and
+  liquidations build up from the first run (events need more than 24 stored hours).
+- Put/call and skew use Deribit mark IVs without greeks (moneyness skew, not 25-delta).
+- Score weights, scales and thresholds are judgments awaiting the user's review (TODO.md, Phase 8).
+- Terms of use of Binance, OKX and Deribit public data not yet reviewed (`terms_verified = false`).
+
+**Git commit:** pending — `[P8] derivatives intelligence` (to be run on the user's machine).
 

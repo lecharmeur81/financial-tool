@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import make_url
 
 from cfi.core.config import Settings
+from cfi.derivatives.universe import all_datasets as derivative_datasets
 from cfi.institutional.universe import all_datasets as institutional_datasets
 from cfi.market.universe import all_datasets
 from cfi.whales.label_store import SEED_FILES, seed_text
@@ -45,6 +46,7 @@ def test_runtime_registers_every_enabled_dataset(test_settings: Settings) -> Non
             "market_providers": "coinbase,kraken,binance,okx,bybit,coingecko",
             "institutional_providers": "sosovalue,coingecko",
             "whale_providers": "coinmetrics,blockchair",
+            "derivative_providers": "binance_futures,okx_derivatives,deribit",
         }
     )
     runtime = WorkerRuntime(settings)
@@ -60,6 +62,9 @@ def test_runtime_registers_every_enabled_dataset(test_settings: Settings) -> Non
             "sosovalue",
             "coinmetrics",
             "blockchair",
+            "binance_futures",
+            "okx_derivatives",
+            "deribit",
         }
         assert runtime.run(runtime.context()) is ctx  # one context per process
     finally:
@@ -74,6 +79,7 @@ def test_runtime_registers_every_enabled_dataset(test_settings: Settings) -> Non
         {d.dataset_id for d in all_datasets()}
         | {d.dataset_id for d in institutional_datasets()}
         | {d.dataset_id for d in whale_datasets()}
+        | {d.dataset_id for d in derivative_datasets()}
     )
     # the address labels shipped with the code are imported once at start
     assert labels is not None
@@ -133,3 +139,29 @@ def test_whale_jobs_are_scheduled_per_asset_and_skip_disabled_providers(
     )
     result = worker.whale_ingest_task.run("blockchair", "whale.large_transfer.bitcoin", "BTC")
     assert result == {"skipped": "provider blockchair is disabled"}
+
+
+def test_derivative_jobs_are_scheduled_per_asset_and_skip_disabled_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cfi.worker import app as worker
+    from cfi.worker.schedule import derivative_entries
+
+    assert "derivatives.ingest" in worker.app.tasks
+    entries = derivative_entries(["binance_futures", "okx_derivatives", "deribit"])
+    assert "derivatives:binance_futures:deriv.open_interest.btc.1h:BTC" in entries
+    assert "derivatives:okx_derivatives:deriv.liquidations.xrp.1h:XRP" in entries
+    assert "derivatives:deribit:deriv.option_chain.eth:ETH" in entries
+    assert not any(":deribit:" in k and k.endswith((":SOL", ":XRP")) for k in entries)
+    assert all(v["options"]["expires"] == v["schedule"] for v in entries.values())
+    # the option chain (hundreds of instruments) stays off the minute-bar worker
+    assert entries["derivatives:deribit:deriv.option_chain.btc:BTC"]["options"]["queue"] == (
+        "backfill"
+    )
+    monkeypatch.setattr(
+        worker, "settings", worker.settings.model_copy(update={"derivative_providers": "deribit"})
+    )
+    result = worker.derivative_ingest_task.run(
+        "okx_derivatives", "deriv.open_interest.btc.1h", "BTC"
+    )
+    assert result == {"skipped": "provider okx_derivatives is disabled"}

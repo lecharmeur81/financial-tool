@@ -11,31 +11,15 @@ history load. Coin Metrics allows 10 requests per 6 s; this schedule uses about 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import timedelta
 
-from cfi.domain.datasets import DatasetSpec
+from cfi.ingestion.scheduled import ScheduledSource
 from cfi.providers import blockchair, coinmetrics
 from cfi.providers.base import ProviderAdapter
 from cfi.whales.universe import DORMANCY_ASSETS, WHALE_ASSETS, dataset
 
-
-@dataclass(frozen=True, slots=True)
-class WhaleSource:
-    provider_id: str
-    dataset: DatasetSpec
-    subject: str
-    interval_seconds: int
-    queue: str
-    # Each run re-reads this recent window (new values, revisions, late blocks).
-    recent: timedelta
-    # Daily datasets: only complete UTC days are requested.
-    complete_days_only: bool
-    # History loaded once, one chunk per run, back to this depth (0: none).
-    history_days: int = 0
-    chunk_days: int = 30
-    # After downtime, a run reaches back to the newest stored value, at most this far.
-    max_catch_up: timedelta = timedelta(0)
+WhaleSource = ScheduledSource
+DAY = timedelta(days=1)
 
 
 def _sources() -> tuple[WhaleSource, ...]:
@@ -50,9 +34,9 @@ def _sources() -> tuple[WhaleSource, ...]:
                     6 * 3600,
                     "ingest",
                     recent=timedelta(days=35),
-                    complete_days_only=True,
-                    history_days=730,
-                    chunk_days=365,
+                    align=DAY,
+                    history=timedelta(days=730),
+                    chunk=timedelta(days=365),
                 )
             )
         out.append(
@@ -63,7 +47,6 @@ def _sources() -> tuple[WhaleSource, ...]:
                 24 * 3600,
                 "backfill",
                 recent=timedelta(hours=1),
-                complete_days_only=False,
             )
         )
         out.append(
@@ -74,9 +57,8 @@ def _sources() -> tuple[WhaleSource, ...]:
                 3 * 3600,
                 "backfill",
                 recent=timedelta(hours=6),
-                complete_days_only=False,
-                history_days=7,
-                chunk_days=1,
+                history=timedelta(days=7),
+                chunk=timedelta(days=1),
                 max_catch_up=timedelta(days=2),
             )
         )
@@ -90,9 +72,9 @@ def _sources() -> tuple[WhaleSource, ...]:
                     12 * 3600,
                     "backfill",
                     recent=timedelta(days=10),
-                    complete_days_only=True,
-                    history_days=120,
-                    chunk_days=30,
+                    align=DAY,
+                    history=timedelta(days=120),
+                    chunk=timedelta(days=30),
                 )
             )
     return tuple(out)

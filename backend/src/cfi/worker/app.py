@@ -14,6 +14,9 @@ from celery import Celery, signals
 
 from cfi.core.config import get_settings
 from cfi.core.logging import configure_logging, get_logger
+from cfi.derivatives.jobs import ingest_source as ingest_derivative_source
+from cfi.derivatives.sources import source as derivative_source
+from cfi.derivatives.sources import sources_for as derivative_sources_for
 from cfi.institutional.jobs import ingest_source
 from cfi.institutional.sources import credential_configured, source, sources_for
 from cfi.market.jobs import backfill_days, backfill_step, ingest_latest
@@ -44,6 +47,7 @@ app.conf.update(
         settings.market_provider_ids,
         settings.institutional_provider_ids,
         settings.whale_provider_ids,
+        settings.derivative_provider_ids,
     ),
 )
 
@@ -80,7 +84,8 @@ def ingest_latest_task(provider_id: str, dataset_id: str) -> dict[str, Any]:
 @signals.beat_init.connect
 def _kick_institutional(**_: Any) -> None:
     """Beat's first run of an interval entry comes one interval after start (hours for
-    institutional and whale data), so each of those jobs is also queued once when beat starts."""
+    institutional, whale and derivatives data), so each of those jobs is also queued once when
+    beat starts."""
     for item in sources_for(settings.institutional_provider_ids):
         app.send_task(
             "institutional.ingest",
@@ -94,6 +99,13 @@ def _kick_institutional(**_: Any) -> None:
             args=(w.provider_id, w.dataset.dataset_id, w.subject),
             queue=w.queue,
             expires=w.interval_seconds,
+        )
+    for d in derivative_sources_for(settings.derivative_provider_ids):
+        app.send_task(
+            "derivatives.ingest",
+            args=(d.provider_id, d.dataset.dataset_id, d.subject),
+            queue=d.queue,
+            expires=d.interval_seconds,
         )
 
 
@@ -127,6 +139,24 @@ def whale_ingest_task(provider_id: str, dataset_id: str, subject: str) -> dict[s
     async def go() -> dict[str, Any]:
         ctx = await rt.context()
         results = await ingest_whale_source(ctx, whale_source(provider_id, dataset_id, subject))
+        return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
+
+    return rt.run(go())
+
+
+@app.task(name="derivatives.ingest", time_limit=1800, soft_time_limit=1700)
+def derivative_ingest_task(provider_id: str, dataset_id: str, subject: str) -> dict[str, Any]:
+    """One derivatives dataset from one provider for one asset: the recent window (or a venue
+    snapshot), then one history chunk while history is incomplete. Skipped (not failed) when the
+    provider is disabled."""
+    if provider_id not in settings.derivative_provider_ids:
+        return {"skipped": f"provider {provider_id} is disabled"}
+    rt = runtime()
+
+    async def go() -> dict[str, Any]:
+        ctx = await rt.context()
+        item = derivative_source(provider_id, dataset_id, subject)
+        results = await ingest_derivative_source(ctx, item)
         return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
 
     return rt.run(go())

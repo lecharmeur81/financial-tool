@@ -20,7 +20,9 @@ Two record families share this provenance (ADR-0017):
 - :class:`CanonicalBar` — an OHLCV bar (stored in ``obs.market_bar``);
 - :class:`CanonicalFlow` — capital flow / holdings of an identified institutional vehicle or
   entity (stored in ``obs.institutional_flow``);
-- :class:`CanonicalTransfer` — one large on-chain transfer (stored in ``obs.large_transfer``).
+- :class:`CanonicalTransfer` — one large on-chain transfer (stored in ``obs.large_transfer``);
+- :class:`CanonicalQuote` — one futures / perpetual / option instrument in a venue snapshot
+  (stored in ``obs.derivative_quote``).
 
 Invariants enforced here:
 - all timestamps are timezone-aware and converted to UTC;
@@ -429,3 +431,111 @@ class CanonicalTransfer(ObservedRecord):
             if address is not None and not is_valid_address(self.chain, address):
                 problems.append(f"{role} {address!r} is not a valid {self.chain} address")
         return problems
+
+
+INSTRUMENT_KINDS = frozenset({"future", "perpetual", "option"})
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CanonicalQuote(ObservedRecord):
+    """One derivatives instrument in a venue snapshot. ``event_time`` is the snapshot time.
+
+    ``unit`` is the unit of ``mark_price`` / ``bid_price`` / ``ask_price`` (e.g. ``usd`` for
+    futures, ``btc`` for coin-margined options priced in BTC). ``underlying_price`` and
+    ``index_price`` are in USD; ``mark_iv`` is annualised implied volatility as a ratio
+    (0.45 = 45 %; venues quoting percent are converted and the conversion recorded);
+    ``open_interest_native`` / ``volume_native`` are in coins of ``asset`` and ``*_usd`` in USD —
+    whichever the venue reports, never converted here. Any field not reported is ``None``.
+    """
+
+    instrument: str
+    instrument_kind: str
+    expiry: datetime | None = None
+    strike: Decimal | None = None
+    option_type: str | None = None
+    mark_price: Decimal | None = None
+    bid_price: Decimal | None = None
+    ask_price: Decimal | None = None
+    mark_iv: Decimal | None = None
+    underlying_price: Decimal | None = None
+    index_price: Decimal | None = None
+    open_interest_native: Decimal | None = None
+    open_interest_usd: Decimal | None = None
+    volume_native: Decimal | None = None
+    volume_usd: Decimal | None = None
+
+    def __post_init__(self) -> None:
+        if self.instrument_kind not in INSTRUMENT_KINDS:
+            raise ValueError(f"unknown instrument kind {self.instrument_kind!r}")
+        if not self.instrument:
+            raise ValueError("instrument must not be empty")
+        is_option = self.instrument_kind == "option"
+        if is_option != (self.strike is not None and self.option_type is not None):
+            raise ValueError("options (and only options) carry a strike and an option type")
+        if self.option_type not in (None, "call", "put"):
+            raise ValueError(f"unknown option type {self.option_type!r}")
+        if (self.instrument_kind == "perpetual") != (self.expiry is None):
+            raise ValueError("dated instruments carry an expiry; perpetuals do not")
+        if self.expiry is not None:
+            object.__setattr__(self, "expiry", ensure_utc(self.expiry, field="expiry"))
+        ObservedRecord.__post_init__(self)
+
+    @property
+    def is_missing(self) -> bool:
+        return self.mark_price is None
+
+    def comparable(self) -> object:
+        return tuple(getattr(self, c) for c in QUOTE_VALUE_FIELDS)
+
+    @property
+    def conflict_value(self) -> Decimal | None:
+        return self.mark_price
+
+    def describe(self) -> str:
+        if self.is_missing:
+            return "missing"
+        return f"{self.instrument} mark={self.mark_price} iv={self.mark_iv}"
+
+    def consistency_problems(self) -> list[str]:
+        """Sanity checks. Violations mark the record ``suspect`` (kept, flagged), never fixed."""
+        if self.is_missing:
+            return []
+        problems = []
+        for name in (
+            "mark_price",
+            "underlying_price",
+            "index_price",
+            "open_interest_native",
+            "open_interest_usd",
+            "volume_native",
+            "volume_usd",
+            "mark_iv",
+        ):
+            value = getattr(self, name)
+            if value is not None and value < 0:
+                problems.append(f"negative {name}")
+        if self.strike is not None and self.strike <= 0:
+            problems.append("non-positive strike")
+        if (
+            self.bid_price is not None
+            and self.ask_price is not None
+            and self.bid_price > self.ask_price
+        ):
+            problems.append("bid above ask")
+        if self.expiry is not None and self.expiry <= self.event_time:
+            problems.append("instrument listed after its expiry")
+        return problems
+
+
+QUOTE_VALUE_FIELDS = (
+    "mark_price",
+    "bid_price",
+    "ask_price",
+    "mark_iv",
+    "underlying_price",
+    "index_price",
+    "open_interest_native",
+    "open_interest_usd",
+    "volume_native",
+    "volume_usd",
+)

@@ -41,14 +41,15 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     href: "/derivatives",
     label: "Derivatives",
-    description: "Open interest, funding, liquidations, basis, and options positioning.",
-    plannedPhase: "not yet scheduled",
+    description:
+      "Derivatives: open interest and leverage, funding, futures basis, liquidations, options positioning and the transparent Derivatives Health Score (BTC, ETH, SOL, XRP; options BTC, ETH).",
+    plannedPhase: "8 (derivatives)",
   },
   {
     href: "/liquidity",
     label: "Liquidity",
     description: "Stablecoin supply and exchange balances, order-book depth, and macro liquidity.",
-    plannedPhase: "8 and 10",
+    plannedPhase: "not yet scheduled",
   },
   {
     href: "/analytics",

@@ -57,6 +57,7 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 | 0047 | Phase 5 market-data layer: providers, storage, workers, API, dashboard | Accepted | 2026-09-23 |
 | 0048 | Phase 6 institutional capital: sources, storage, aggregation, transparent score | Accepted (amended twice: pacing; `avg_btc_cost`, Farside, HYPE) | 2026-09-24 |
 | 0049 | Phase 7 whale intelligence: sources, entity classification, transfers, transparent score | Accepted | 2026-09-24 |
+| 0050 | Phase 8 derivatives: sources, quote storage, calculations, Derivatives Health Score | Accepted | 2026-09-26 |
 
 ---
 
@@ -1037,3 +1038,67 @@ time, so a changed threshold never rewrites history).
 coverage is thinner than paid analytics: exchange attribution is Coin Metrics', labels are few (27 BTC addresses, no
 ETH labels), and holder changes need a week of snapshots. Parameters are judgments, published and versioned. Licences
 restrict commercial use (Coin Metrics CC BY-NC, Blockchair free tier).
+
+## ADR-0050 — Phase 8 derivatives: sources, quote storage, calculations, Derivatives Health Score
+
+**Status:** Accepted (implemented in Phase 8; within approved ADR-0006, 0017, 0018, 0021, 0022, 0023, 0032)
+
+**Decision.**
+- **Sources (free, no key; verified 2026-09-26).**
+  - **OKX public data** (checked against real responses): hourly open interest of the USDT perpetuals in coins
+    (`rubik/stat/contracts/open-interest-history`, `end` exclusive, ~1 month), funding-rate history (`after`
+    exclusive, ~3 months), hourly long/short **account** ratio of all OKX contracts on the coin (`begin`/`end`
+    inclusive), contract value (`public/instruments`) and liquidation orders (`public/liquidation-orders`, ~1 day
+    retained).
+  - **Deribit public API** (checked against real responses): futures curve and option chain snapshots
+    (`get_book_summary_by_currency`, `usOut` = snapshot time) and hourly DVOL (`get_volatility_index_data`,
+    `continuation` pagination). BTC and ETH only.
+  - **Binance USDⓈ-M public data** (documented shapes only — Binance answered HTTP 451 to the development
+    environment): hourly open interest and all-account long/short ratio (latest month), funding-rate history.
+    Binance liquidations exist only as a live stream (not used); top-trader ratios skipped (definition unclear).
+  - Perpetual assets BTC, ETH, SOL, XRP (USDT-margined perpetuals only; inverse / USDC contracts not mixed in).
+- **Storage.** Open interest (coins), funding, account ratios, hourly liquidation totals and DVOL are scalar
+  observations (`obs.observation`), one series per venue and subject. Futures and options snapshots are a fifth record
+  family `CanonicalQuote` → **`obs.derivative_quote`** (hypertable, 7-day chunks; one series per instrument; expiry,
+  strike and option type validated by CHECK constraints; an instrument listed after its expiry is kept and flagged
+  `suspect`). **USD values are not stored** for open interest or liquidations — venues quote them in USDT or in
+  different conventions — they are calculated at read time from coins × the Coinbase USD hourly close. Venue
+  percentages (mark IV, DVOL) are stored as ratios with the conversion recorded in `transformations`.
+- **Liquidations** are aggregated in the adapter into hourly long / short totals in coins (Σ `sz` × `ctVal`): every page
+  back to the window start is read; orders sharing the millisecond at a page boundary are re-read and counted once;
+  an hour is emitted only when all its orders were read and it lies within OKX's retention (18 h reach); older hours
+  become explicit `missing` points. Zero is stored only for fully read hours. Inconsistent position / order sides are
+  counted on neither side and flag the hour `suspect`.
+- **Jobs.** The Phase 7 runner was generalised (`cfi.ingestion.scheduled`: recent window aligned to complete periods,
+  catch-up after downtime, one history chunk per run) and serves both whales and derivatives. One Celery task
+  `derivatives.ingest(provider, dataset, asset)`; the option chain (hundreds of instruments) runs on the `backfill`
+  queue so it never delays minute bars.
+- **Calculations (L2, read time, point-in-time).** OI change 24 h / 7 d over the venues present at both times (never a
+  mixed venue set); OI expansion ≥ +5 % / 24 h or ≥ +15 % / 7 d (contraction: the negatives); leverage ratio =
+  OI (coins × USD price) ÷ market cap, expansion / reduction at ± 10 % relative over 7 d; annualised funding =
+  Σ settled rates over 7 d × 365 ÷ 7 (interval-independent, only with no settlement missing; OI-weighted across venues),
+  extreme at |≥ 30 %|; annualised basis = (mark ÷ index − 1) × 365 ÷ days, headline = the future closest to 90 days
+  (≥ 14 d), extreme ≥ +20 % or ≤ −5 %; liquidation event = an hour ≥ 5 × the median of earlier hours in 7 d (≥ 24
+  of them) and ≥ 0.05 % of OI; options put/call OI and volume ratios, ATM IV and 10 %-OTM skew (put near 0.9 F minus
+  call near 1.1 F, ± 3 %, expiry closest to 30 d, ≥ 7 d); long/short account ratios and price/OI context shown only as
+  context. No reading is labelled bullish or bearish.
+- **Derivatives Health Score v1** (calculated metric; 0–100, 100 = no stress; stress = 100 − health). Direction-neutral
+  stress components 0 … 1: funding |annualised 7 d| ÷ 30 % (0.25), basis outside 0 … 10 % a year ÷ 15 % (0.15),
+  leverage |7-day change| ÷ 20 % (0.20), liquidations 24 h ÷ OKX OI ÷ 1 % (0.20), DVOL on per-asset calm / stressed
+  levels (BTC 30 → 80 %, ETH 40 → 100 %) (0.20). Components without complete inputs are excluded, weights renormalised,
+  "Insufficient data" below weight 0.5; bands 75 / 50 / 25. Each component returns value, scale, stress, weight,
+  contribution, calculation, inputs and direction context.
+- **API / UI.** `/api/v1/derivatives/{catalog, overview, asset, history}` with `as_of` / `knowledge_time`; the
+  **Derivatives** page shows the score and components, conditions, OI per venue, leverage, funding per venue, account
+  ratios, price context, an OI / price chart, the Deribit curve, options, liquidations and per-source data quality.
+
+**Alternatives considered.** Coinglass / Laevitas / Amberdata aggregates (paid or keyed; B2 budget $0); storing venue
+USD / USDT values (mixes currencies and conventions); Binance liquidation websocket (needs a permanent connection —
+Phase 27 real-time); 25-delta skew (needs greeks, not in the free summary); bullish / bearish scoring of leverage or
+funding (rejected: the user asked for context, not direction).
+
+**Consequences.** Open interest and funding cover two major venues, options and basis Deribit only, liquidations OKX only
+(market-wide totals are larger). Account-ratio and OI history reach only about a month back on the free endpoints;
+Deribit snapshots and liquidations accumulate from the first run, so the 7-day liquidation event rule and history
+charts fill in over the first week. Weights and scales are judgments, published and versioned, to be reviewed against
+stored history.

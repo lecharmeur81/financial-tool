@@ -9,8 +9,8 @@ afterEach(cleanup);
 
 describe("PagePlaceholder", () => {
   it("shows the section and states that no data is connected", () => {
-    render(<PagePlaceholder item={navItem("/derivatives")} />);
-    expect(screen.getByRole("heading", { level: 1, name: "Derivatives" })).toBeDefined();
+    render(<PagePlaceholder item={navItem("/liquidity")} />);
+    expect(screen.getByRole("heading", { level: 1, name: "Liquidity" })).toBeDefined();
     expect(screen.getByText("No data sources connected")).toBeDefined();
     expect(screen.getByText("Planned phase: not yet scheduled")).toBeDefined();
   });

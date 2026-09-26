@@ -7,3 +7,7 @@
 All other market data used in tests is **synthetic**, generated in `tests/market_fakes.py` in each
 provider's documented format. Synthetic values are test fixtures only — they are never loaded into a
 running application (R3).
+
+Per-phase fixture sets have their own README: `institutional/` (Phase 6), `whales/` (Phase 7) and `derivatives/`
+(Phase 8 — real OKX and Deribit responses captured on 2026-09-25/26, some trimmed to excerpts as listed there, plus a
+synthetic history with hand-computed results).

@@ -182,8 +182,9 @@ Each subsection states the design. Rationale, alternatives, trade-offs, and futu
 - **Implemented:** `obs.series`, `obs.observation` (Phase 4), `obs.market_bar` (Phase 5, 30-day chunks, no compression
   yet), `obs.institutional_flow` (Phase 6, 180-day chunks; ETF flows and treasury flows/holdings with entity type and
   evidence class — `inferred` rejected by a database check), `obs.large_transfer` (Phase 7, 30-day chunks; one series
-  per transfer), `ref.entity` and `ref.entity_label` (Phase 7, address labels with R5 rules as database checks). The
-  other typed tables and the `selected_observation` view are still planned.
+  per transfer), `ref.entity` and `ref.entity_label` (Phase 7, address labels with R5 rules as database checks),
+  `obs.derivative_quote` (Phase 8, 7-day chunks; one series per futures / perpetual / option instrument, venue
+  snapshots). The other typed tables and the `selected_observation` view are still planned.
 
 ### 5.2 Time-series strategy — ADR-0020
 
@@ -254,6 +255,12 @@ checksum validation (`cfi/core/addresses.py`), Coin Metrics Community and Blockc
 `backfill` queue so one process owns its daily request budget), address labels imported from versioned CSV files
 (`cfi/whales/seed_labels`, idempotent, never overwritten).
 
+**Implemented in Phase 8** (ADR-0050): fifth record family (`CanonicalQuote` → `obs.derivative_quote`), Binance
+USDⓈ-M, OKX derivatives and Deribit adapters, the shared scheduled-source runner `cfi/ingestion/scheduled.py` (used by
+whales and derivatives: recent window aligned to complete periods, catch-up after downtime, one history chunk per run),
+Celery task `derivatives.ingest` (the option chain on the `backfill` queue). OKX liquidation orders are aggregated into
+hourly totals inside the adapter across pages (`RequestSpec.state`); incompletely read hours become missing points.
+
 | Situation | What happens |
 |---|---|
 | Current, unfinished bar (or CoinGecko's running value) | Skipped and counted (`job_run.skipped`); fetched again once final (period end + 60 s) |
@@ -313,6 +320,10 @@ in-process until workers share them via Redis. Mock providers for tests only: `c
   `/addresses/{chain}/{address}`, `/entities`, `/score` (with contradiction indicators) — same `as_of` /
   `knowledge_time` cut-offs; labels count only from their `available_at` and within `valid_from`/`valid_to`. Every
   address carries its classification with evidence, source and confidence. Types in `frontend/src/lib/whales.ts`.
+- **Implemented in Phase 8:** `GET /api/v1/derivatives/catalog`, `/overview`, `/asset` (score with components,
+  conditions, open interest, leverage, funding, basis, liquidations, options, positioning, price context, data
+  quality), `/history` (hourly series for charts) — same `as_of` / `knowledge_time` cut-offs. Types in
+  `frontend/src/lib/derivatives.ts`.
 
 ### 5.6 Background jobs — ADR-0023
 

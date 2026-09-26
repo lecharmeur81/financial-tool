@@ -29,3 +29,6 @@ in `ops.provider`).
 | Binance public market-data API | USDT candles | — |
 | OKX public API | USDT candles | — |
 | Bybit public API | USDT candles | — |
+| Binance USDⓈ-M Futures public market data | Open interest, funding rates, all-account long/short ratio (USDT perpetuals) | Public endpoints, no key. Terms of use **not yet reviewed** by the user (`terms_verified = false`). The dashboard names Binance as the venue of each value. |
+| OKX public market data | Open interest, funding rates, long/short account ratio, liquidation orders (USDT perpetuals) | Public endpoints, no key. Terms of use **not yet reviewed** by the user (`terms_verified = false`). |
+| Deribit public API | Futures curve and option chain snapshots, DVOL (BTC, ETH) | Public endpoints, no key. Terms of use **not yet reviewed** by the user (`terms_verified = false`). "DVOL" is Deribit's volatility index; the dashboard names Deribit as its source. |
