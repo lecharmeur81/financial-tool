@@ -1102,3 +1102,70 @@ funding (rejected: the user asked for context, not direction).
 Deribit snapshots and liquidations accumulate from the first run, so the 7-day liquidation event rule and history
 charts fill in over the first week. Weights and scales are judgments, published and versioned, to be reviewed against
 stored history.
+
+## ADR-0051 — Phase 8 addendum: versioned Derivatives Health Score parameters
+
+**Status:** Accepted (implemented 2026-09-26, within approved ADR-0050)
+
+**Context.** The user approved the Phase 8 Derivatives Health Score's v1 weights and reference scales, but
+explicitly declined to call them "validated" (they are judgment parameters, not fitted to data — R2, R13) and asked
+that they be moved out of hard-coded constants in `score.py` into a versioned, swappable representation, so that
+Phases 15-16 (backtesting, quant red-team) can evaluate alternative parameter sets, or a future revision, without
+rewriting the scoring engine — and so every score the system has ever produced stays reproducible against the exact
+parameters that produced it, even after a later version changes them.
+
+**Decision.**
+- **New module `cfi/derivatives/score_parameters.py`**: a `ParameterSet` frozen dataclass (weights, reference scales,
+  `basis_band`, `dvol_scales`, `min_available_weight`, `bands`) and an append-only `PARAMETER_SETS` registry keyed by
+  version id. `parameters(version=None)` is the one function the scoring engine depends on; an unknown version id is
+  a hard `KeyError`, never a silent fallback (R3). The current (and, for now, only) entry is `derivatives_health_v1`,
+  holding exactly the numbers the user approved: weights 0.25/0.15/0.20/0.20/0.20, funding 30 %, basis 15 % outside
+  0–10 %, leverage 20 %, liquidations 1 % of OI, DVOL BTC 30→80 %/ETH 40→100 %, `min_available_weight` 0.5, bands
+  75/50/25.
+- **A plain versioned Python module, not a database table.** There is exactly one active version at a time and
+  nothing here is edited at runtime (R13 — avoid an unrequested config subsystem); `parameters()` is the seam a
+  future database-backed registry would slot behind without any caller change, if multiple versions ever need to be
+  compared live (Phase 16).
+- **`score.py`** no longer hard-codes weights/scales: `COMPONENTS`' descriptive metadata (label, human-readable
+  `scale` text, `definition`) is generated from a `ParameterSet` so the text can never drift from the numbers; every
+  component function and `compute()` takes an optional `params` argument, defaulting to the current version, so
+  every existing call site is unchanged. `ScoreResult` gained `parameter_version` (the version actually used — not
+  inferred from the module default) and `calculated_at` (wall-clock time, distinct from `as_of`, the point-in-time
+  market snapshot).
+- **Version identifier renamed** from the generic `"v1"` to `derivatives_health_v1` (this score's own namespace,
+  since the platform has several scores — institutional, whale, derivatives — each already versioned independently).
+- **Reproducibility.** Every score result already exposes, per component and in total: value, stress (0–1, always
+  clipped), effective weight after renormalisation, contribution, calculation string and inputs, plus the overall
+  status, available weight, health, stress, band, `parameter_version` and `calculated_at`. No new table was added to
+  snapshot every computed score over time — the platform does not currently persist any of its other calculated
+  scores that way either (institutional, whale), and every derivatives calculation is already a pure, deterministic
+  function of stored point-in-time observations (R2/R3) plus a named, immutable parameter set — so recomputing a
+  past `as_of` against a named version reproduces the same result by construction, without a separate log table.
+  **Flagged as a scope decision, not a certainty**: if the user wants computed scores snapshotted into a table on a
+  schedule (e.g. for a dashboard of "the score as it stood each day" independent of recomputation), that is a
+  reasonably-sized follow-up, deferred rather than built speculatively.
+- **Semantic disclaimer.** The API now returns a fixed `semantic_note` on every score result and in the catalog
+  definition: "Higher Derivatives Health Score means lower measured derivatives stress across the available
+  components. It is not a probability of price increase and does not indicate market direction." Shown in the
+  Derivatives page under the score.
+- **Out of scope, deliberately**: the *condition* thresholds in `metrics.py` (OI expansion ±5 %/±15 %, leverage
+  change ±10 %, funding extreme 30 %, basis extreme +20 %/−5 %, liquidation event 5×median/0.05 % OI) are a separate
+  concept from the score's reference scales (they drive the `conditions` panel's active/inactive flags, not the
+  score) and were left as hard-coded constants. Funding happens to reuse the same 30 % value in both places today;
+  after this change the score's `funding_scale` and `metrics.FUNDING_EXTREME` are independent parameters that start
+  equal but can diverge, so a future score-parameter change cannot silently change the condition flag or vice versa.
+  Externalising the condition thresholds the same way was not requested and is not done here.
+
+**Alternatives considered.** A database `score_parameters` table (rejected for now: no runtime editing is needed,
+and a table adds a migration, an admin surface and a caching question for one row that changes rarely — the module
+registry is a straightforward promotion path if that changes); a YAML/JSON config file (rejected: no type safety,
+and nothing else in this codebase loads runtime config that way — Pydantic `Settings` covers environment config,
+this is versioned judgment data, closer to a migration than a setting); persisting every computed score to a new
+hypertable (deferred, see Decision above — not requested, and no existing score in the platform is persisted that
+way).
+
+**Consequences.** Publishing a v2 parameter set is: add a new `ParameterSet` entry to `PARAMETER_SETS`, keep
+`derivatives_health_v1` untouched, point `CURRENT_VERSION` (or `score.SCORE_VERSION`) at the new id. Nothing in
+`service.py`, the API routes or the frontend needs to change for that. Historical reproducibility depends on nobody
+ever editing an existing `ParameterSet` entry's values in place — this is a code-review discipline, not something
+the type system enforces.

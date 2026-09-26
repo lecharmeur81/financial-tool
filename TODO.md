@@ -164,9 +164,9 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 
 - [x] `obs.derivative_quote`, Binance USDⓈ-M / OKX / Deribit adapters, shared scheduled-source runner, derivatives
       calculations, Derivatives Health Score, API, Derivatives page.
-- [ ] **User:** run the tests and `docker compose up --build` on Windows; check `/api/v1/ingestion/runs` for
-      `binance_futures`, `okx_derivatives` and `deribit` (Binance was not reachable from Claude's workspace — HTTP 451 —
-      so no live Binance response has been seen).
+- [x] **User:** tests and `docker compose up --build` on Windows — 418 passed, commit `ea124b5` (2026-09-26).
+- [ ] **User:** check `/api/v1/ingestion/runs` for `binance_futures`, `okx_derivatives` and `deribit` (Binance was
+      not reachable from Claude's workspace — HTTP 451 — so no live Binance response has been seen).
 - [ ] After the first real run: copy one real Binance payload per endpoint from the raw archive into the test fixtures
       and confirm the documented shapes (timestamps on the hour for 1 h statistics).
 - [ ] Watch the option-chain job duration (hundreds of instruments every 4 h on the `backfill` queue).
@@ -174,13 +174,27 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 ### Decisions needed from the user (Phase 8)
 
 - [ ] **Terms of use** of Binance, OKX and Deribit public market data (not reviewed; `terms_verified = false`).
-- [ ] **Judgment parameters (v1).** OI expansion ±5 % / 24 h, ±15 % / 7 d; leverage change ±10 % / 7 d; funding
-      extreme |30 %| a year; basis extreme ≥ +20 % / ≤ −5 % (headline ≈ 90 days, ≥ 14 d); liquidation event 5 × median
-      and ≥ 0.05 % of OI; skew at 0.9 / 1.1 × forward (± 3 %), expiry ≈ 30 d; score weights 0.25 / 0.15 / 0.20 / 0.20 /
-      0.20, scales 30 % / 15 % outside 0–10 % / 20 % / 1 % / DVOL BTC 30→80 %, ETH 40→100 %; bands 75 / 50 / 25. Approve
-      or name changes (creates v2).
+- [x] **Judgment parameters (v1 methodology / initial parameters) — approved by the user (2026-09-26)** after
+      reviewing the exact component/threshold/band breakdown. OI expansion ±5 % / 24 h, ±15 % / 7 d; leverage change
+      ±10 % / 7 d; funding extreme |30 %| a year; basis extreme ≥ +20 % / ≤ −5 % (headline ≈ 90 days, ≥ 14 d);
+      liquidation event 5 × median and ≥ 0.05 % of OI; skew at 0.9 / 1.1 × forward (± 3 %), expiry ≈ 30 d; score
+      weights 0.25 / 0.15 / 0.20 / 0.20 / 0.20 (funding / basis / leverage / liquidations / volatility), each a
+      fixed-threshold ratio (metric ÷ reference scale, clipped 0–1) — explicitly not percentile- or z-score-
+      normalised; bands 75 / 50 / 25 (health, not stress). Never to be described as empirically validated. Any
+      future change publishes a new version id (`derivatives_health_v2`, …) rather than editing `derivatives_health_v1`
+      — see the addendum below.
+- [x] **Score parameter storage — externalised (2026-09-26 addendum, ADR-0051).** Weights/scales/bands moved from
+      hard-coded constants in `score.py` into a versioned registry, `backend/src/cfi/derivatives/score_parameters.py`
+      (`PARAMETER_SETS`, current version `derivatives_health_v1`). A future change adds a new entry rather than
+      editing this one, so past scores stay reproducible. Deliberately a plain Python module, not a database table
+      (no runtime editing is needed yet) — promoting it to a table later would not require touching any caller.
+      Condition thresholds in `metrics.py` (separate from the score) were left as-is; not requested.
 - [ ] **Coverage gaps** (recorded in the UI): Binance liquidations (websocket only — would need the real-time phase),
       SOL / XRP options and basis, top-trader positioning, venues beyond Binance / OKX / Deribit (paid aggregators).
+- [ ] **Open scope question (ADR-0051):** should computed Derivatives Health Scores be snapshotted into a database
+      table over time (e.g. for "the score as it stood each day", independent of recomputation), rather than relying
+      on recomputation from stored point-in-time observations + a named parameter version? Not built — flagged as a
+      deliberate scope call, not assumed either way.
 
 ## Deferred (to the phase that needs them)
 

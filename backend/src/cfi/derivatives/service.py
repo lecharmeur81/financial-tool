@@ -308,13 +308,15 @@ class DerivativesService:
     def _score(s: sc.ScoreResult) -> dict[str, Any]:
         return {
             "score_id": sc.SCORE_ID,
-            "version": sc.SCORE_VERSION,
+            "version": s.parameter_version,
+            "calculated_at": s.calculated_at.isoformat(),
             "evidence_category": "Calculated Metric",
             "status": s.status,
             "health": num(s.health),
             "stress": num(s.stress),
             "band": s.band,
             "band_note": sc.BAND_NOTE,
+            "semantic_note": sc.SEMANTIC_NOTE,
             "available_weight": num(s.available_weight),
             "reason": s.reason,
             "components": [

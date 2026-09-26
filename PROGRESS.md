@@ -2,7 +2,7 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 8 — Derivatives → ✅ built (commit pending on the user's machine)
+**Current phase:** 8 — Derivatives → ✅ complete (`ea124b5`)
 **Next phase:** 9 — to be defined by the user (do not start automatically)
 
 ---
@@ -19,7 +19,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 5 | Market data | ✅ Complete — verified on Windows with real data (`6ad4eaf`) |
 | 6 | Institutional capital | ✅ Complete — verified on Windows (`ef852b6`); real data pending a SoSoValue API key |
 | 7 | Whale intelligence | ✅ Complete — verified on Windows (`0529017`); first real whale runs to be checked |
-| 8 | Derivatives | ✅ Built — tests pass in Claude's workspace; Windows check and commit pending |
+| 8 | Derivatives | ✅ Complete — verified on Windows (`ea124b5`); first real derivatives runs to be checked |
 | — | Liquidity | ⏳ Not started |
 | — | Retail | ⏳ Not started |
 | — | Macro | ⏳ Not started |
@@ -556,8 +556,65 @@ bullish / bearish); point-in-time leakage (snapshots and liquidation events afte
   liquidations OKX only; free history reaches about a month for OI and account ratios; Deribit snapshots and
   liquidations build up from the first run (events need more than 24 stored hours).
 - Put/call and skew use Deribit mark IVs without greeks (moneyness skew, not 25-delta).
-- Score weights, scales and thresholds are judgments awaiting the user's review (TODO.md, Phase 8).
+- Score weights, scales and thresholds are **v1 methodology / initial parameters, approved by the user (2026-09-26)
+  after reviewing the full component/threshold/band breakdown** — see the addendum below. Not described as
+  validated: chosen by design, not fitted to data.
 - Terms of use of Binance, OKX and Deribit public data not yet reviewed (`terms_verified = false`).
 
-**Git commit:** pending — `[P8] derivatives intelligence` (to be run on the user's machine).
+**Windows check (user, 2026-09-26):** `docker compose up -d --build` → all services started, api healthy;
+`docker compose exec api pytest` → 418 passed. First real Binance / OKX / Deribit runs not yet checked.
+
+**Git commit:** `ea124b5` — `[P8] derivatives intelligence` (69 files).
+
+### 2026-09-26 — Phase 8 addendum: versioned Derivatives Health Score parameters
+
+**What changed** (ADR-0051; user approved the v1 weights/scales/bands after reviewing the exact breakdown, and asked
+for them to be externalised and versioned before locking, plus a reproducibility/semantic-note requirement)
+- **New module `backend/src/cfi/derivatives/score_parameters.py`:** a frozen `ParameterSet` dataclass and an
+  append-only `PARAMETER_SETS` registry keyed by version id, holding the approved v1 numbers unchanged (weights
+  0.25/0.15/0.20/0.20/0.20, funding 30 %, basis 15 % outside 0–10 %, leverage 20 %, liquidations 1 % of OI, DVOL BTC
+  30→80 %/ETH 40→100 %, `min_available_weight` 0.5, bands 75/50/25). `parameters(version)` is the one loader
+  function; an unknown version id is a hard error, never a silent fallback.
+- **`score.py`** no longer hard-codes these numbers: component metadata (label, human-readable scale text,
+  definition) is generated from a `ParameterSet` so text can't drift from the numbers; every component function and
+  `compute()` take an optional `params` argument (default: current version) — no existing call site changed.
+  `ScoreResult` gained `parameter_version` (the version actually used) and `calculated_at` (wall-clock time, distinct
+  from `as_of`). Version id renamed from generic `"v1"` to `derivatives_health_v1`.
+- **API:** every score result and the catalog's score definition now also return `calculated_at` and a fixed
+  `semantic_note`: "Higher Derivatives Health Score means lower measured derivatives stress across the available
+  components. It is not a probability of price increase and does not indicate market direction." No per-component
+  qualitative labels added (not requested).
+- **Frontend:** `HealthScoreCard` shows the semantic note and "Calculated <time> from parameters version <id>".
+- **Scope decision, recorded rather than assumed:** the *condition* thresholds in `metrics.py` (OI expansion,
+  leverage change, funding extreme, basis extreme, liquidation event) are a separate concept from the score's
+  reference scales and were left as hard-coded constants — externalising those was not requested. No new database
+  table was added to snapshot every computed score over time (no other score in the platform is persisted that way
+  either, and every result is already a pure function of stored point-in-time data plus a named immutable parameter
+  set) — flagged in ADR-0051 as a scope call the user can override if a scheduled snapshot table is actually wanted.
+- **Docs:** ADR-0051, DATA_DICTIONARY.md §5d.
+
+**Tests run**
+
+| Check | Result |
+|---|---|
+| New `backend/tests/unit/test_derivative_score_parameters.py` (the 8 required proofs) | 27 new tests, all passed |
+| Backend `uv run pytest` (unit + integration + API, scratch PostgreSQL 16 + TimescaleDB 2.30.1 + Redis) | 445 passed (418 + 27 new) |
+| `ruff format --check` / `ruff check` / `mypy` (strict), whole backend | clean |
+| Frontend `pnpm test` / `lint` / `format:check` / `typecheck` | 70 passed / clean / clean / clean |
+| Live check: scratch API server, `/api/v1/derivatives/catalog` and `/asset?asset=BTC` | `version` = `derivatives_health_v1`, weights/scales match approved values exactly, `semantic_note` and `calculated_at` present, `Insufficient data` returned cleanly with no ingested data |
+
+**Final parameter representation:** `backend/src/cfi/derivatives/score_parameters.py`, version id
+`derivatives_health_v1`, one immutable `ParameterSet` entry in `PARAMETER_SETS`.
+
+**Known limitations**
+- Reproducibility is achieved via immutable versioned parameters + complete field exposure on every computed result,
+  not via a database snapshot table — see the scope decision above. If per-run history of the score itself (not
+  just its inputs) is wanted later, that is a follow-up, not built here.
+- The condition thresholds in `metrics.py` remain hard-coded (out of scope; see above). Funding's condition
+  threshold and the score's funding scale both start at 30 % but are now independent parameters that can diverge.
+- Still open from the original Phase 8 build: no live Binance response seen (HTTP 451 from Claude's workspace);
+  terms of use for Binance/OKX/Deribit not yet reviewed.
+
+**Delivered to the user's machine** via the device bridge (checksum-verified); commit is the user's own step on
+Windows (Git runs there — C5).
 

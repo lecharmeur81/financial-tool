@@ -32,13 +32,18 @@ const component = (overrides: Partial<HealthScore["components"][number]> = {}) =
 
 const score: HealthScore = {
   score_id: "derivatives_health_score",
-  version: "v1",
+  version: "derivatives_health_v1",
+  calculated_at: "2026-09-26T12:00:00+00:00",
   evidence_category: "Calculated Metric",
   status: "ok",
   health: "59.4",
   stress: "40.6",
   band: "moderate stress",
   band_note: "Bands … not price direction.",
+  semantic_note:
+    "Higher Derivatives Health Score means lower measured derivatives stress across the " +
+    "available components. It is not a probability of price increase and does not indicate " +
+    "market direction.",
   available_weight: "1.00",
   reason: null,
   components: [

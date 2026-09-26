@@ -1,4 +1,4 @@
-"""Derivatives Health Score v1 (0 … 100; 100 = no sign of stress).
+"""Derivatives Health Score (0 … 100; 100 = no sign of stress).
 
 Pure functions (no I/O). Evidence category: **Calculated Metric** (R2) — a deterministic
 combination of calculated metrics with fixed, published parameters. Not a signal, not a forecast,
@@ -15,6 +15,15 @@ point to a price direction.
 3. A component without complete inputs is excluded (never filled). If the available components
    carry less than half of the total weight: "Insufficient data".
 4. Derivatives stress = 100 − Health.
+
+Weights, reference scales, band boundaries and the minimum-available-weight cutoff are not
+hard-coded here: they are loaded from a versioned, immutable parameter set (``score_parameters``
+— see that module's docstring for why, and how a future v2 would be published). Every function
+below defaults to the current version so existing call sites are unaffected; pass ``params``
+explicitly to score against a different (e.g. historical) version.
+
+**Higher Health Score means lower measured derivatives stress across the available components.
+It is not a probability of price increase and does not indicate market direction.**
 """
 
 from __future__ import annotations
@@ -24,29 +33,14 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
+from cfi.core.time import utc_now
 from cfi.derivatives import metrics as m
+from cfi.derivatives import score_parameters as sp
 
 SCORE_ID = "derivatives_health_score"
-SCORE_VERSION = "v1"
-MIN_AVAILABLE_WEIGHT = Decimal("0.5")
-BASIS_BAND = (Decimal(0), Decimal("0.10"))  # annualised basis considered ordinary
-# DVOL (ratio) mapped to stress 0 … 1 between these values, per asset.
-DVOL_SCALES: dict[str, tuple[Decimal, Decimal]] = {
-    "BTC": (Decimal("0.30"), Decimal("0.80")),
-    "ETH": (Decimal("0.40"), Decimal("1.00")),
-}
-
-BANDS: tuple[tuple[Decimal | None, str], ...] = (
-    (Decimal(75), "low stress"),
-    (Decimal(50), "moderate stress"),
-    (Decimal(25), "elevated stress"),
-    (None, "high stress"),
-)
-BAND_NOTE = (
-    "Bands (each includes its lower bound): 75 … 100 low stress; 50 … 75 moderate stress; "
-    "25 … 50 elevated stress; 0 … 25 high stress. They describe positioning stress only, not "
-    "price direction."
-)
+#: Kept in sync with the parameter set the score is currently computed against (R3: a version
+#: identifies exactly one set of parameters, forever — see score_parameters.py).
+SCORE_VERSION = sp.CURRENT_VERSION
 
 Status = Literal["ok", "unavailable", "not_applicable"]
 
@@ -61,56 +55,81 @@ class ComponentDef:
     definition: str
 
 
-COMPONENTS: tuple[ComponentDef, ...] = (
-    ComponentDef(
-        "funding",
-        "funding_annualised_7d_abs.v1",
-        "Funding pressure (7 days, annualised)",
-        Decimal("0.25"),
-        "|funding| = 30 % a year → stress 1",
-        "Σ funding rates settled over the last 7 days × 365 ÷ 7, per venue, open-interest "
-        "weighted across Binance and OKX. Stress = |value| ÷ 30 %. Positive or negative funding "
-        "count alike: either side paying heavily means crowded positioning.",
-    ),
-    ComponentDef(
-        "basis",
-        "futures_basis_annualised_outside_band.v1",
-        "Futures basis outside its ordinary range",
-        Decimal("0.15"),
-        "15 % a year outside 0 … 10 % → stress 1",
-        "Annualised premium of the Deribit future closest to 90 days (≥ 14 days) over the index. "
-        "Stress = distance outside 0 … 10 % a year ÷ 15 %. BTC and ETH only.",
-    ),
-    ComponentDef(
-        "leverage",
-        "leverage_ratio_change_7d_abs.v1",
-        "Leverage change (7 days)",
-        Decimal("0.20"),
-        "|change| = 20 % → stress 1",
-        "Open interest (coins × Coinbase USD price) ÷ market capitalisation, now vs 7 days "
-        "earlier, venues with both values. Stress = |relative change| ÷ 20 %. Building and "
-        "unwinding leverage count alike.",
-    ),
-    ComponentDef(
-        "liquidations",
-        "liquidations_24h_pct_oi.v1",
-        "Liquidations, last 24 hours",
-        Decimal("0.20"),
-        "1 % of open interest → stress 1",
-        "Long + short positions liquidated on the OKX perpetual over the last 24 complete hours "
-        "÷ OKX open interest (both in coins). Stress = share ÷ 1 %. One venue only.",
-    ),
-    ComponentDef(
-        "volatility",
-        "dvol_level.v1",
-        "Implied volatility (DVOL)",
-        Decimal("0.20"),
-        "BTC 30 % → 0, 80 % → 1; ETH 40 % → 0, 100 % → 1",
-        "Deribit DVOL (30-day implied volatility) mapped linearly between the asset's calm and "
-        "stressed levels. BTC and ETH only.",
-    ),
-)
+def _components(params: sp.ParameterSet) -> tuple[ComponentDef, ...]:
+    """Build the component catalog's descriptive metadata from a parameter set, so the human-
+    readable ``scale``/``definition`` text never drifts from the numbers actually used."""
+    low, high = params.basis_band
+    btc_calm, btc_stressed = params.dvol_scales["BTC"]
+    eth_calm, eth_stressed = params.dvol_scales["ETH"]
+    return (
+        ComponentDef(
+            "funding",
+            "funding_annualised_7d_abs.v1",
+            "Funding pressure (7 days, annualised)",
+            params.weight_funding,
+            f"|funding| = {params.funding_scale * 100:.0f} % a year → stress 1",
+            "Σ funding rates settled over the last 7 days × 365 ÷ 7, per venue, open-interest "
+            "weighted across Binance and OKX. Stress = |value| ÷ "
+            f"{params.funding_scale * 100:.0f} %. Positive or negative funding count alike: "
+            "either side paying heavily means crowded positioning.",
+        ),
+        ComponentDef(
+            "basis",
+            "futures_basis_annualised_outside_band.v1",
+            "Futures basis outside its ordinary range",
+            params.weight_basis,
+            f"{params.basis_scale * 100:.0f} % a year outside {low * 100:.0f} … {high * 100:.0f} "
+            "% → stress 1",
+            "Annualised premium of the Deribit future closest to 90 days (≥ 14 days) over the "
+            f"index. Stress = distance outside {low * 100:.0f} … {high * 100:.0f} % a year ÷ "
+            f"{params.basis_scale * 100:.0f} %. BTC and ETH only.",
+        ),
+        ComponentDef(
+            "leverage",
+            "leverage_ratio_change_7d_abs.v1",
+            "Leverage change (7 days)",
+            params.weight_leverage,
+            f"|change| = {params.leverage_scale * 100:.0f} % → stress 1",
+            "Open interest (coins × Coinbase USD price) ÷ market capitalisation, now vs 7 days "
+            f"earlier, venues with both values. Stress = |relative change| ÷ "
+            f"{params.leverage_scale * 100:.0f} %. Building and unwinding leverage count alike.",
+        ),
+        ComponentDef(
+            "liquidations",
+            "liquidations_24h_pct_oi.v1",
+            "Liquidations, last 24 hours",
+            params.weight_liquidations,
+            f"{params.liquidation_scale * 100:.0f} % of open interest → stress 1",
+            "Long + short positions liquidated on the OKX perpetual over the last 24 complete "
+            "hours ÷ OKX open interest (both in coins). Stress = share ÷ "
+            f"{params.liquidation_scale * 100:.0f} %. One venue only.",
+        ),
+        ComponentDef(
+            "volatility",
+            "dvol_level.v1",
+            "Implied volatility (DVOL)",
+            params.weight_volatility,
+            f"BTC {btc_calm * 100:.0f} % → 0, {btc_stressed * 100:.0f} % → 1; "
+            f"ETH {eth_calm * 100:.0f} % → 0, {eth_stressed * 100:.0f} % → 1",
+            "Deribit DVOL (30-day implied volatility) mapped linearly between the asset's calm "
+            "and stressed levels. BTC and ETH only.",
+        ),
+    )
+
+
+COMPONENTS: tuple[ComponentDef, ...] = _components(sp.parameters())
 DEFS: dict[str, ComponentDef] = {c.component_id: c for c in COMPONENTS}
+
+BAND_NOTE = (
+    "Bands (each includes its lower bound): 75 … 100 low stress; 50 … 75 moderate stress; "
+    "25 … 50 elevated stress; 0 … 25 high stress. They describe positioning stress only, not "
+    "price direction."
+)
+SEMANTIC_NOTE = (
+    "Higher Derivatives Health Score means lower measured derivatives stress across the "
+    "available components. It is not a probability of price increase and does not indicate "
+    "market direction."
+)
 
 
 @dataclass(slots=True)
@@ -139,6 +158,12 @@ class ScoreResult:
     available_weight: Decimal
     components: list[ComponentResult]
     reason: str | None = None
+    #: The parameter version this result was actually scored against (R3 — reproducibility:
+    #: never inferred from the module's current default, always the one used).
+    parameter_version: str = SCORE_VERSION
+    #: Wall-clock time this result was computed (distinct from ``as_of``, the point-in-time
+    #: market snapshot the inputs describe).
+    calculated_at: datetime = field(default_factory=utc_now)
 
 
 def _clip01(x: Decimal) -> Decimal:
@@ -153,14 +178,16 @@ def _pct(x: Decimal) -> str:
     return f"{x * 100:+.2f} %"
 
 
-def band_for(health: Decimal) -> str:
-    for lower, label in BANDS:
+def band_for(health: Decimal, params: sp.ParameterSet | None = None) -> str:
+    bands = (params or sp.parameters()).bands
+    for lower, label in bands:
         if lower is None or health >= lower:
             return label
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def funding_component(f: m.Funding) -> ComponentResult:
+def funding_component(f: m.Funding, params: sp.ParameterSet | None = None) -> ComponentResult:
+    params = params or sp.parameters()
     r = ComponentResult(DEFS["funding"], "unavailable", value_unit="% a year")
     r.inputs = {
         f"{v.venue}_annualised_7d": (
@@ -174,16 +201,17 @@ def funding_component(f: m.Funding) -> ComponentResult:
         return r
     value = f.annualised_7d
     r.status, r.value = "ok", _q(value * 100, "0.01")
-    r.stress = _q(_clip01(abs(value) / m.FUNDING_EXTREME))
+    r.stress = _q(_clip01(abs(value) / params.funding_scale))
     r.context = f.direction
     r.calculation = (
-        f"{f.weighting}: {_pct(value)} a year; stress = clip(|{value * 100:.2f} %| ÷ 30 %, 0, 1) "
-        f"= {r.stress}"
+        f"{f.weighting}: {_pct(value)} a year; stress = clip(|{value * 100:.2f} %| ÷ "
+        f"{params.funding_scale * 100:.0f} %, 0, 1) = {r.stress}"
     )
     return r
 
 
-def basis_component(b: m.Basis | None) -> ComponentResult:
+def basis_component(b: m.Basis | None, params: sp.ParameterSet | None = None) -> ComponentResult:
+    params = params or sp.parameters()
     r = ComponentResult(DEFS["basis"], "unavailable", value_unit="% a year")
     if b is None:
         r.status, r.reason = "not_applicable", "no Deribit futures for this asset"
@@ -192,10 +220,10 @@ def basis_component(b: m.Basis | None) -> ComponentResult:
         r.reason = b.reason or "no headline future"
         return r
     value = b.headline.annualised
-    low, high = BASIS_BAND
+    low, high = params.basis_band
     outside = max(Decimal(0), low - value, value - high)
     r.status, r.value = "ok", _q(value * 100, "0.01")
-    r.stress = _q(_clip01(outside / Decimal("0.15")))
+    r.stress = _q(_clip01(outside / params.basis_scale))
     r.context = (
         f"{b.shape}: {b.headline.instrument} trades "
         + ("above" if value > 0 else "below" if value < 0 else "at")
@@ -210,14 +238,15 @@ def basis_component(b: m.Basis | None) -> ComponentResult:
     }
     r.calculation = (
         f"({b.headline.mark} ÷ {b.headline.index} − 1) × 365 ÷ "
-        f"{_q(b.headline.days or Decimal(0), '0.01')} days = {_pct(value)} a year; outside 0 … "
-        f"10 % by {outside * 100:.2f} points; stress = clip({outside * 100:.2f} ÷ 15, 0, 1) = "
-        f"{r.stress}"
+        f"{_q(b.headline.days or Decimal(0), '0.01')} days = {_pct(value)} a year; outside "
+        f"{low * 100:.0f} … {high * 100:.0f} % by {outside * 100:.2f} points; stress = clip("
+        f"{outside * 100:.2f} ÷ {params.basis_scale * 100:.0f}, 0, 1) = {r.stress}"
     )
     return r
 
 
-def leverage_component(lev: m.Leverage) -> ComponentResult:
+def leverage_component(lev: m.Leverage, params: sp.ParameterSet | None = None) -> ComponentResult:
+    params = params or sp.parameters()
     r = ComponentResult(DEFS["leverage"], "unavailable", value_unit="% (7 d)")
     r.inputs = dict(lev.inputs)
     if lev.change_7d is None:
@@ -225,7 +254,7 @@ def leverage_component(lev: m.Leverage) -> ComponentResult:
         return r
     value = lev.change_7d
     r.status, r.value = "ok", _q(value * 100, "0.01")
-    r.stress = _q(_clip01(abs(value) / Decimal("0.20")))
+    r.stress = _q(_clip01(abs(value) / params.leverage_scale))
     r.context = {
         "expansion": "leverage building (open interest growing faster than market value)",
         "reduction": "leverage unwinding (open interest shrinking relative to market value)",
@@ -236,12 +265,15 @@ def leverage_component(lev: m.Leverage) -> ComponentResult:
     r.calculation = (
         f"OI ÷ market cap {lev.ratio_now * 100:.4f} % now vs {lev.ratio_week_ago * 100:.4f} % "
         f"7 days earlier ({', '.join(lev.venues)}) → {_pct(value)}; stress = clip(|"
-        f"{value * 100:.2f} %| ÷ 20 %, 0, 1) = {r.stress}"
+        f"{value * 100:.2f} %| ÷ {params.leverage_scale * 100:.0f} %, 0, 1) = {r.stress}"
     )
     return r
 
 
-def liquidation_component(liq: m.Liquidations) -> ComponentResult:
+def liquidation_component(
+    liq: m.Liquidations, params: sp.ParameterSet | None = None
+) -> ComponentResult:
+    params = params or sp.parameters()
     r = ComponentResult(DEFS["liquidations"], "unavailable", value_unit="% of OI (24 h)")
     r.inputs = {
         "long_24h": None if liq.long_24h is None else format(liq.long_24h, "f"),
@@ -254,7 +286,7 @@ def liquidation_component(liq: m.Liquidations) -> ComponentResult:
         return r
     value = liq.share_of_oi
     r.status, r.value = "ok", _q(value * 100, "0.0001")
-    r.stress = _q(_clip01(value / Decimal("0.01")))
+    r.stress = _q(_clip01(value / params.liquidation_scale))
     if liq.long_share is not None:
         r.context = (
             f"{liq.long_share * 100:.0f} % of liquidated size was long positions, "
@@ -262,20 +294,24 @@ def liquidation_component(liq: m.Liquidations) -> ComponentResult:
         )
     r.calculation = (
         f"{liq.total_24h} liquidated ÷ {liq.open_interest} open interest = "
-        f"{value * 100:.4f} %; stress = clip({value * 100:.4f} ÷ 1, 0, 1) = {r.stress}"
+        f"{value * 100:.4f} %; stress = clip({value * 100:.4f} ÷ "
+        f"{params.liquidation_scale * 100:.0f}, 0, 1) = {r.stress}"
     )
     return r
 
 
-def volatility_component(asset: str, dvol: m.Point | None, applicable: bool) -> ComponentResult:
+def volatility_component(
+    asset: str, dvol: m.Point | None, applicable: bool, params: sp.ParameterSet | None = None
+) -> ComponentResult:
+    params = params or sp.parameters()
     r = ComponentResult(DEFS["volatility"], "unavailable", value_unit="% (annualised)")
-    if not applicable or asset not in DVOL_SCALES:
+    if not applicable or asset not in params.dvol_scales:
         r.status, r.reason = "not_applicable", "no DVOL index for this asset"
         return r
     if dvol is None or dvol.value is None:
         r.reason = "no recent DVOL value"
         return r
-    calm, stressed = DVOL_SCALES[asset]
+    calm, stressed = params.dvol_scales[asset]
     r.status, r.value = "ok", _q(dvol.value * 100, "0.01")
     r.stress = _q(_clip01((dvol.value - calm) / (stressed - calm)))
     r.inputs = {"dvol": format(dvol.value, "f"), "hour": dvol.time.isoformat()}
@@ -286,12 +322,18 @@ def volatility_component(asset: str, dvol: m.Point | None, applicable: bool) -> 
     return r
 
 
-def compute(asset: str, as_of: datetime, components: list[ComponentResult]) -> ScoreResult:
+def compute(
+    asset: str,
+    as_of: datetime,
+    components: list[ComponentResult],
+    params: sp.ParameterSet | None = None,
+) -> ScoreResult:
+    params = params or sp.parameters()
     ok = [c for c in components if c.status == "ok" and c.stress is not None]
     applicable = [c for c in components if c.status != "not_applicable"]
     total = sum((c.definition.weight for c in applicable), Decimal(0))
     weight = sum((c.definition.weight for c in ok), Decimal(0))
-    if not ok or weight < MIN_AVAILABLE_WEIGHT:
+    if not ok or weight < params.min_available_weight:
         missing = ", ".join(c.definition.label for c in applicable if c not in ok)
         return ScoreResult(
             asset,
@@ -303,7 +345,8 @@ def compute(asset: str, as_of: datetime, components: list[ComponentResult]) -> S
             weight,
             components,
             f"Insufficient data: available components carry weight {weight} (minimum "
-            f"{MIN_AVAILABLE_WEIGHT}); missing: {missing or 'all'}",
+            f"{params.min_available_weight}); missing: {missing or 'all'}",
+            parameter_version=params.version,
         )
     weighted = Decimal(0)
     for c in ok:
@@ -316,14 +359,27 @@ def compute(asset: str, as_of: datetime, components: list[ComponentResult]) -> S
     note = None
     if weight < total:
         note = f"Computed from components carrying weight {weight} of {total}"
-    band = band_for(health)
-    return ScoreResult(asset, as_of, "ok", health, stress, band, weight, components, note)
+    band = band_for(health, params)
+    return ScoreResult(
+        asset,
+        as_of,
+        "ok",
+        health,
+        stress,
+        band,
+        weight,
+        components,
+        note,
+        parameter_version=params.version,
+    )
 
 
-def definition() -> dict[str, object]:
+def definition(params: sp.ParameterSet | None = None) -> dict[str, object]:
+    params = params or sp.parameters()
+    components = _components(params) if params.version != SCORE_VERSION else COMPONENTS
     return {
         "score_id": SCORE_ID,
-        "version": SCORE_VERSION,
+        "version": params.version,
         "evidence_category": "Calculated Metric",
         "range": "0 … 100 (100 = no sign of stress); derivatives stress = 100 − health",
         "method": [
@@ -344,10 +400,14 @@ def definition() -> dict[str, object]:
                 "scale": c.scale,
                 "definition": c.definition,
             }
-            for c in COMPONENTS
+            for c in components
         ],
         "bands": BAND_NOTE,
-        "min_available_weight": str(MIN_AVAILABLE_WEIGHT),
-        "parameters_note": "Reference scales and weights are judgment parameters chosen by "
-        "design, not fitted to data; to be reviewed against history once enough is stored.",
+        "min_available_weight": str(params.min_available_weight),
+        "semantic_note": SEMANTIC_NOTE,
+        "parameters_note": "Reference scales and weights are v1 methodology / initial "
+        "parameters chosen by design, not fitted to data or empirically validated; to be "
+        "reviewed against history once enough is stored (Phases 15-16). A future change "
+        "publishes a new version id rather than editing this one, so past scores stay "
+        "reproducible (see score_parameters.py).",
     }

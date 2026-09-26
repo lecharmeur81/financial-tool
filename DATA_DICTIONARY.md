@@ -458,9 +458,13 @@ skew_10pct:                    IV(put nearest 0.9 F) − IV(call nearest 1.1 F),
 price_oi_context:              Coinbase price 24 h change vs OI 24 h change (± 1 %): a plain sentence, no direction call
 ```
 
-### Derivatives Health Score v1 (`derivatives_health_score.v1`, calculated metric — ADR-0050)
+### Derivatives Health Score (`derivatives_health_score`, calculated metric — ADR-0050, ADR-0051)
 
 ```
+version:          derivatives_health_v1 (versioned, immutable parameter set — see
+                  cfi/derivatives/score_parameters.py; a future revision publishes a new version id rather
+                  than editing this one, so a past score stays reproducible against the parameters that
+                  produced it)
 range:            0 … 100, 100 = no sign of stress; derivatives_stress = 100 − health
 components:       direction-neutral stress = clip(metric ÷ scale, 0, 1)
   funding_annualised_7d_abs.v1            weight 0.25   |funding_annualised_7d| ÷ 30 %
@@ -470,11 +474,23 @@ components:       direction-neutral stress = clip(metric ÷ scale, 0, 1)
   dvol_level.v1                           weight 0.20   (DVOL − calm) ÷ (stressed − calm); BTC 30 → 80 %, ETH 40 → 100 %
 health:           100 × (1 − Σ weight × stress ÷ Σ available weights), 1 decimal
 missing_policy:   component excluded without complete inputs (never filled); basis and DVOL "not applicable" for
-                  SOL and XRP; "Insufficient data" below weight 0.5
-bands:            ≥ 75 low stress · ≥ 50 moderate stress · ≥ 25 elevated stress · below: high stress
+                  SOL and XRP; "Insufficient data" below weight 0.5 (min_available_weight, itself a versioned
+                  parameter)
+bands:            ≥ 75 low stress · ≥ 50 moderate stress · ≥ 25 elevated stress · below: high stress (band
+                  boundaries are also a versioned parameter)
 context:          direction shown per component (who pays funding, contango/backwardation, long vs short
                   liquidations, leverage building/unwinding) — never scored, never bullish/bearish
-owner_phase:      8
+reproducibility:  every result records `parameter_version` (the version actually used) and `calculated_at`
+                  (wall-clock computation time, distinct from `as_of`, the point-in-time market snapshot the
+                  inputs describe) alongside every component's value, stress, effective weight, contribution,
+                  calculation string and inputs — sufficient to audit or recompute the result later
+semantic_note:    fixed API/UI text: "Higher Derivatives Health Score means lower measured derivatives stress
+                  across the available components. It is not a probability of price increase and does not
+                  indicate market direction."
+parameters_note:  v1 methodology / initial parameters, chosen by design and not fitted to data or empirically
+                  validated — never described as "validated"; to be reviewed against stored history once
+                  enough accumulates (Phases 15-16)
+owner_phase:      8 (addendum: 2026-09-26, parameter externalisation and reproducibility fields)
 status:           implemented
 ```
 

@@ -33,12 +33,14 @@ export type ScoreComponent = {
 export type HealthScore = {
   score_id: string;
   version: string;
+  calculated_at: string;
   evidence_category: string;
   status: "ok" | "insufficient_data";
   health: string | null;
   stress: string | null;
   band: string | null;
   band_note: string;
+  semantic_note: string;
   available_weight: string;
   reason: string | null;
   components: ScoreComponent[];

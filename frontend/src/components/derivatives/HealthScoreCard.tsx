@@ -33,6 +33,11 @@ export function HealthScoreCard({ score, asset }: { score: HealthScore; asset: s
         100 = no sign of stress; stress = 100 − health. Available weight {score.available_weight} of
         1.00. {score.band_note}
       </p>
+      <p className="muted">{score.semantic_note}</p>
+      <p className="muted">
+        Calculated {new Date(score.calculated_at).toLocaleString()} from parameters version{" "}
+        {score.version}.
+      </p>
       <table className="status-table">
         <thead>
           <tr>
