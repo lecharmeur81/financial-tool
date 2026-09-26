@@ -77,6 +77,14 @@ class Settings(BaseSettings):
     def derivative_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.derivative_providers.split(",") if p.strip()]
 
+    # Liquidity / stablecoins (Phase 9). Comma-separated provider IDs the workers ingest from.
+    # DefiLlama uses a public endpoint without a key.
+    liquidity_providers: str = "defillama"
+
+    @property
+    def liquidity_provider_ids(self) -> list[str]:
+        return [p.strip() for p in self.liquidity_providers.split(",") if p.strip()]
+
     @property
     def market_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.market_providers.split(",") if p.strip()]

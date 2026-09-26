@@ -196,6 +196,34 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
       on recomputation from stored point-in-time observations + a named parameter version? Not built — flagged as a
       deliberate scope call, not assumed either way.
 
+## Phase 9 — Liquidity / stablecoins (built 2026-09-26; see PROGRESS.md)
+
+- [x] DefiLlama stablecoins adapter, generalised scheduled-source runner (reused unchanged, no new migration),
+      liquidity calculations, versioned Liquidity Score (`liquidity_score_v1`, versioned from the start), API
+      (`/api/v1/liquidity/{catalog,overview,history}`).
+- [ ] **User:** tests and `docker compose up --build` on Windows — see PROGRESS.md for the exact commands and the
+      expected test count (505 passed in Claude's scratch environment).
+- [ ] **User:** check `/api/v1/ingestion/runs` for `defillama` (its host is not reachable from Claude's workspace —
+      egress-proxy denied, like Blockchair in Phase 7 — so no live response has been seen from a network that can
+      actually reach it).
+- [ ] After the first real run: copy one real DefiLlama `/stablecoincharts/all` payload into the test fixtures and
+      confirm the documented shape (digit-string `date`, nested `totalCirculating.peggedUSD`).
+
+### Decisions needed from the user (Phase 9)
+
+- [ ] **Terms of use** of DefiLlama's public API (not reviewed; `terms_verified = false`).
+- [ ] **Judgment parameters (v1 methodology / initial parameters) — not yet reviewed by the user.** Liquidity Score
+      weights 0.30 / 0.30 / 0.25 / 0.15 (USDT growth / USDC growth / total growth / growth acceleration), reference
+      scales 5 % / 5 % / 4 % / 3 pp, bands ±50 / ±15 (see DATA_DICTIONARY.md §5e, ADR-0052). Chosen by design, not
+      fitted to data — same review invitation as Phase 8's Derivatives Health Score: if the user wants a different
+      breakdown, send it and a new version id (`liquidity_score_v2`) is published rather than editing v1.
+- [ ] **Frontend page** — not built this phase (not requested; see PROGRESS.md). A natural next step once the user
+      asks for it, following the `HealthScoreCard` pattern from Phase 8.
+- [ ] **Coverage gap, permanent (not a "to do"):** exchange stablecoin balances and flows are not calculable from
+      any free source found (checked DefiLlama, Coin Metrics, Blockchair) — would need paid, labelled on-chain
+      address attribution (Nansen, Arkham, CryptoQuant). `exchange_liquidity_change()` always reports
+      `"unavailable"`, shown as a named gap in the UI/API rather than omitted.
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.
@@ -223,7 +251,7 @@ against official documentation before any adapter is written.
 | Options | Deribit public API; options analytics vendors (e.g. Laevitas, Amberdata) |
 | ETF flows / holdings | **Implemented (Phase 6): SoSoValue OpenAPI.** Still candidates: issuer websites and filings; SEC EDGAR |
 | On-chain / exchange flows / whales | **Implemented (Phase 7): Coin Metrics Community, Blockchair; BitInfoCharts labels.** Still candidates: Glassnode, CryptoQuant, Santiment, Arkham, Nansen (paid); self-hosted node |
-| Stablecoins | DefiLlama; issuer transparency pages; on-chain supply queries |
+| Stablecoins | **Implemented (Phase 9): DefiLlama stablecoins API.** Still candidates: issuer transparency pages; on-chain supply queries; exchange-balance/flow data (paid: Nansen, Arkham, CryptoQuant) |
 | Macro | FRED (St. Louis Fed); other official statistical releases |
 | Retail / sentiment | Search-interest sources, app-ranking sources, social data vendors — terms need careful review |
 | Reference data / market caps | CoinGecko, CoinMarketCap, Coin Metrics |

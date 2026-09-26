@@ -19,6 +19,9 @@ from cfi.derivatives.sources import source as derivative_source
 from cfi.derivatives.sources import sources_for as derivative_sources_for
 from cfi.institutional.jobs import ingest_source
 from cfi.institutional.sources import credential_configured, source, sources_for
+from cfi.liquidity.jobs import ingest_source as ingest_liquidity_source
+from cfi.liquidity.sources import source as liquidity_source
+from cfi.liquidity.sources import sources_for as liquidity_sources_for
 from cfi.market.jobs import backfill_days, backfill_step, ingest_latest
 from cfi.market.sources import ADAPTERS, datasets_for
 from cfi.market.universe import ASSET_SYMBOLS, dataset_by_id
@@ -48,6 +51,7 @@ app.conf.update(
         settings.institutional_provider_ids,
         settings.whale_provider_ids,
         settings.derivative_provider_ids,
+        settings.liquidity_provider_ids,
     ),
 )
 
@@ -107,6 +111,13 @@ def _kick_institutional(**_: Any) -> None:
             queue=d.queue,
             expires=d.interval_seconds,
         )
+    for liq in liquidity_sources_for(settings.liquidity_provider_ids):
+        app.send_task(
+            "liquidity.ingest",
+            args=(liq.provider_id, liq.dataset.dataset_id, liq.subject),
+            queue=liq.queue,
+            expires=liq.interval_seconds,
+        )
 
 
 @app.task(name="institutional.ingest", time_limit=3600, soft_time_limit=3500)
@@ -157,6 +168,24 @@ def derivative_ingest_task(provider_id: str, dataset_id: str, subject: str) -> d
         ctx = await rt.context()
         item = derivative_source(provider_id, dataset_id, subject)
         results = await ingest_derivative_source(ctx, item)
+        return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
+
+    return rt.run(go())
+
+
+@app.task(name="liquidity.ingest", time_limit=1800, soft_time_limit=1700)
+def liquidity_ingest_task(provider_id: str, dataset_id: str, subject: str) -> dict[str, Any]:
+    """One liquidity dataset from one provider for one subject: the recent window, then one
+    history chunk while history is incomplete. Skipped (not failed) when the provider is
+    disabled."""
+    if provider_id not in settings.liquidity_provider_ids:
+        return {"skipped": f"provider {provider_id} is disabled"}
+    rt = runtime()
+
+    async def go() -> dict[str, Any]:
+        ctx = await rt.context()
+        item = liquidity_source(provider_id, dataset_id, subject)
+        results = await ingest_liquidity_source(ctx, item)
         return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
 
     return rt.run(go())

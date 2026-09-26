@@ -1169,3 +1169,80 @@ way).
 `service.py`, the API routes or the frontend needs to change for that. Historical reproducibility depends on nobody
 ever editing an existing `ParameterSet` entry's values in place — this is a code-review discipline, not something
 the type system enforces.
+
+---
+
+## ADR-0052 — Phase 9: liquidity / stablecoin intelligence layer (DefiLlama only), Liquidity Score
+
+**Status:** Accepted (implemented 2026-09-26)
+
+**Context.** The user asked to track USDT/USDC/total stablecoin supply, market share, minting, burning, exchange
+stablecoin balances and exchange stablecoin flows; calculate supply growth/contraction, growth acceleration/
+deceleration and exchange liquidity changes; and build a Liquidity Score exposing every component, showing
+observed data separately from interpretation (R2).
+
+**Decision — provider and scope.**
+- **DefiLlama only** (`stablecoins.llama.fi`), the sole free, keyless, real source found for stablecoin circulating
+  supply. `GET /stablecoincharts/all[?stablecoin={1|2}]` gives one calendar-day snapshot per row, aggregated across
+  every chain a stablecoin is issued on, for USDT (id `1`), USDC (id `2`) and — with no `stablecoin` parameter —
+  every stablecoin DefiLlama tracks (used as the `TOTAL` subject; this is not the sum of USDT + USDC, it also
+  includes DAI, USDe, USDS and others). Confirmed live and against DefiLlama's published API docs; not verifiable
+  as a byte-exact captured response inside the sandboxed development workspace, whose egress proxy cannot reach
+  `stablecoins.llama.fi` (the same limitation Blockchair had in Phase 7) — flagged plainly in
+  `cfi/providers/defillama.py`'s docstring rather than glossed over (R3), with real verification deferred to the
+  user's own ingestion run.
+- **Provider quirk handled explicitly:** the chart endpoint takes no date-range parameters — every call returns the
+  entire history (November 2017 to present) in one response. There is no page to request with `next_request`; the
+  adapter fetches the full array every time and filters it, in `parse_page`, down to the rows inside the requested
+  window, discarding the rest before they ever become `ProviderRecord`s. This is why the source is scheduled at a
+  low frequency (every 6 h, `cfi/liquidity/sources.py`) — the underlying data only changes once a day.
+- **No new migration.** The dataset (`liquidity.stablecoin_supply.1d`, one per subject: `USDT`, `USDC`, `TOTAL`) is
+  `kind="scalar"`, stored in the existing `obs.observation` table via the generalised scheduled-source runner
+  (`cfi/ingestion/scheduled.py`, built in Phase 7, already reused unchanged by Phase 8). Availability rule:
+  `event_time_plus` (36 h), `known_when_received=True` — DefiLlama's exact crawl/publish timing for a given day is
+  undocumented, so it is treated conservatively as knowable by the end of that UTC day plus a half-day margin,
+  falling back to receipt time when seen earlier (the same pattern Phase 8 uses for Deribit snapshots). Note:
+  `known_when_received` only applies to an *estimated* rule (`event_time_plus` / `next_us_trading_day`), not
+  `period_end_plus` — an early implementation used `period_end_plus` and failed fast at import time
+  (`domain/datasets.py`'s own validation), corrected to `event_time_plus` with an equivalent 36 h delay.
+- **Not tracked, and said so** (`NOT_TRACKED`, `cfi/liquidity/universe.py`): exchange stablecoin balances and
+  exchange stablecoin flows — no free source found publishes per-exchange stablecoin holdings or transfers; that
+  needs labelled on-chain address attribution to known exchange wallets, which only paid providers (Nansen, Arkham,
+  CryptoQuant) offer. The user's requested "exchange liquidity changes" calculation is implemented
+  (`metrics.py:exchange_liquidity_change`) but **always** returns `status="unavailable"` with this reason — a named,
+  visible gap (R3), never a silently omitted field and never folded into the Liquidity Score as a hidden zero.
+  Individual mint/burn transactions are likewise not tracked as discrete on-chain events (would need per-chain
+  contract-event tracking on every issuing chain); day-over-day change in stored circulating supply is used instead
+  as the honest, clearly-labelled proxy for net minting/burning.
+
+**Decision — Liquidity Score, versioned from the start.** Unlike Phase 8 (where versioned parameters were an
+addendum after initial hard-coded constants), Phase 9 reuses that pattern from the first commit: `ParameterSet`
+frozen dataclass, append-only `PARAMETER_SETS` registry, `CURRENT_VERSION`, `parameters(version=None)` raising
+`KeyError` on an unknown version (`cfi/liquidity/score_parameters.py`), current version `liquidity_score_v1`. The
+score is **signed** (−100 … +100), modeled on the Institutional Flow Score (`cfi/institutional/score.py`) rather
+than the direction-neutral Derivatives Health Score, because supply growth is inherently directional (growing vs.
+shrinking), unlike Phase 8's stress concept. Four components, each `clip(value ÷ scale, −1, +1)`: USDT 7-day growth
+(weight 0.30, scale 5 %), USDC 7-day growth (0.30, 5 %), TOTAL 7-day growth (0.25, 4 %), TOTAL growth acceleration
+— the 7-day growth rate ending now minus the 7-day growth rate ending 7 days earlier (0.15, 3 percentage points).
+Market-share shift and the (always-unavailable) exchange liquidity change are deliberately **not** scored
+components — displayed and calculated separately instead, exactly as the user asked ("show observed data
+separately from interpretation"). `min_available_weight` 0.5 (below it: "Insufficient data"); bands are descriptive
+labels of stablecoin-supply direction ("strong liquidity expansion" … "strong liquidity contraction"), never
+advice. Every result records `parameter_version`, `calculated_at`, per-component value/sub-score/effective
+weight/contribution/calculation, following the reproducibility fields the user required for Phase 8's addendum.
+Parameters are labelled "v1 methodology / initial parameters" — never "validated" — matching the same
+recommendation the user gave for Phase 8.
+
+**Alternatives considered.** Modeling the score on the Derivatives Health Score's direction-neutral "stress"
+concept (rejected: supply growth/contraction is inherently directional — a signed score, like the Institutional
+Flow Score, states that directly instead of discarding the sign). Folding market share or the unavailable exchange
+liquidity change into the score as a component (rejected: the user explicitly asked to show observed data
+separately from interpretation, and an always-unavailable component would either permanently shrink the available
+weight or need to be silently excluded — clearer to keep it a separate, clearly-labelled field). A database
+parameter table for the score (rejected for the same reason as ADR-0051: no runtime editing is needed).
+
+**Consequences.** No new database migration. Frontend work was not part of the Phase 9 request as given and was
+not built (see PROGRESS.md); the backend API (`/api/v1/liquidity/{catalog,overview,history}`) is complete and
+tested end-to-end (unit tests for the adapter, metrics and score; integration tests for ingestion and the API
+against a synthetic DefiLlama history, verified against an independently-computed expected result). Publishing a
+v2 Liquidity Score parameter set follows the same append-only pattern as ADR-0051.

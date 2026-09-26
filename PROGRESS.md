@@ -2,8 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 8 — Derivatives → ✅ complete (`ea124b5`)
-**Next phase:** 9 — to be defined by the user (do not start automatically)
+**Current phase:** 9 — Liquidity → ✅ complete (backend only, as requested); commit pending on Windows
+**Next phase:** 10 — to be defined by the user (do not start automatically)
 
 ---
 
@@ -20,7 +20,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 6 | Institutional capital | ✅ Complete — verified on Windows (`ef852b6`); real data pending a SoSoValue API key |
 | 7 | Whale intelligence | ✅ Complete — verified on Windows (`0529017`); first real whale runs to be checked |
 | 8 | Derivatives | ✅ Complete — verified on Windows (`ea124b5`); first real derivatives runs to be checked |
-| — | Liquidity | ⏳ Not started |
+| 9 | Liquidity | ✅ Complete (backend only, as requested) — commit pending on Windows; first real DefiLlama run to be checked |
 | — | Retail | ⏳ Not started |
 | — | Macro | ⏳ Not started |
 | — | Market structure | ⏳ Not started |
@@ -41,7 +41,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | — | Production | ⏳ Not started |
 | — | Real-time intelligence | ⏳ Not started |
 
-Phases 0–8 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
+Phases 0–9 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
 
 ---
 
@@ -614,6 +614,68 @@ for them to be externalised and versioned before locking, plus a reproducibility
   threshold and the score's funding scale both start at 30 % but are now independent parameters that can diverge.
 - Still open from the original Phase 8 build: no live Binance response seen (HTTP 451 from Claude's workspace);
   terms of use for Binance/OKX/Deribit not yet reviewed.
+
+**Delivered to the user's machine** via the device bridge (checksum-verified); commit is the user's own step on
+Windows (Git runs there — C5).
+
+### 2026-09-26 — Phase 9: Liquidity / stablecoins (DefiLlama), Liquidity Score
+
+**What changed** (ADR-0052; user's exact spec: "Track USDT/USDC/total stablecoin supply, market share, minting,
+burning, exchange stablecoin balances, stablecoin exchange flows where available. Calculate supply growth,
+contraction, growth acceleration, growth deceleration, exchange liquidity changes. Create Liquidity Score. Expose
+all components. Show observed data separately from interpretation. Build tests. Commit. Stop.")
+
+- **New provider adapter `backend/src/cfi/providers/defillama.py`:** DefiLlama stablecoins (`stablecoins.llama.fi`),
+  free and keyless — the only free source found for stablecoin circulating supply; confirmed live and against
+  DefiLlama's published API docs, though not as a byte-exact response captured inside the sandboxed workspace
+  (its host is unreachable from there, like Blockchair in Phase 7 — flagged plainly in the module docstring, real
+  verification deferred to the user's own ingestion run). Handles the endpoint's key quirk: it takes no date-range
+  parameters and always returns its entire history in one response, so the adapter filters client-side to the
+  requested window in `parse_page`.
+- **New `backend/src/cfi/liquidity/` package:** `universe.py` (dataset spec + `NOT_TRACKED`), `records.py`
+  (canonical-record helpers), `metrics.py` (supply growth/contraction, market share, growth acceleration/
+  deceleration, and `exchange_liquidity_change()` — always `"unavailable"`, a named gap rather than a silent one),
+  `score_parameters.py` + `score.py` (the versioned Liquidity Score, `liquidity_score_v1` — signed −100…+100,
+  modeled on the Institutional Flow Score since supply growth is directional, unlike Phase 8's stress concept;
+  versioned from the start, following the Phase 8 addendum's pattern rather than needing its own addendum),
+  `sources.py` (the generalised scheduled-source runner, no new migration — reuses `obs.observation`), `jobs.py`,
+  `queries.py`, `service.py`.
+- **API:** new router `backend/src/cfi/api/routes/liquidity.py` — `/api/v1/liquidity/{catalog,overview,history}`,
+  registered in `api/app.py`. New setting `CFI_LIQUIDITY_PROVIDERS` (default `defillama`). Worker wiring
+  (`worker/app.py`, `worker/schedule.py`): a `liquidity.ingest` Celery task, scheduled every 6 h per subject (the
+  data itself changes at most daily).
+- **Not tracked, and said so** (`NOT_TRACKED`): exchange stablecoin balances and exchange stablecoin flows — no
+  free source found (checked DefiLlama, Coin Metrics, Blockchair); would need paid, labelled on-chain address
+  attribution (Nansen, Arkham, CryptoQuant). The requested "exchange liquidity changes" calculation is implemented
+  but always reports `unavailable` with this reason, and is never folded into the score. Individual mint/burn
+  events are likewise not tracked (would need per-chain contract-event tracking); day-over-day change in stored
+  supply is used instead, and stated plainly as a proxy, never as an exact event count.
+- **Frontend: not built.** The Phase 9 instruction as given did not ask for it (unlike Phases 7–8, which explicitly
+  did); building it would have been unrequested scope (R13). The backend API is complete and ready for a frontend
+  page whenever the user asks for one.
+- **Docs:** ADR-0052, DATA_DICTIONARY.md §5e, CLAUDE.md phase table (9 = Liquidity; Retail demoted back to
+  provisional).
+
+**Tests run**
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_liquidity_adapters.py`, `test_liquidity_metrics.py`, `test_liquidity_score.py` | 48 new tests, all passed |
+| New integration tests: `test_liquidity_ingestion.py`, `test_liquidity_api.py` (real PostgreSQL + TimescaleDB, fake DefiLlama server serving a synthetic multi-month supply history) | 12 new tests, all passed |
+| Backend `uv run pytest` (unit + integration + API, scratch PostgreSQL 16 + TimescaleDB 2.30.1 + Redis) | 505 passed (445 + 48 + 12 new) |
+| `ruff format --check` / `ruff check` / `mypy` (strict), whole backend | clean |
+| Live check: scratch API server, `/api/v1/liquidity/catalog` and `/overview` | catalog lists the DefiLlama provider, dataset, schedule and the 4-component score definition; overview with no ingested data returns `"Insufficient data"` cleanly (no fabricated values) |
+
+**Final parameter representation:** `backend/src/cfi/liquidity/score_parameters.py`, version id
+`liquidity_score_v1`, one immutable `ParameterSet` entry in `PARAMETER_SETS`.
+
+**Known limitations**
+- No live DefiLlama response has been captured from a network that can actually reach it (see above); the user's
+  first real ingestion run on Windows is the real verification, same as Blockchair (Phase 7) and Binance (Phase 8).
+- Terms of use for DefiLlama not yet reviewed (`terms_verified = false` in `ProviderCapabilities`).
+- No frontend page — out of scope for this phase as instructed; a natural next step if the user wants one.
+- `TOTAL` is every stablecoin DefiLlama tracks, not the sum of USDT + USDC — stated in the docstring and the data
+  dictionary, but worth restating here since it is easy to misread.
 
 **Delivered to the user's machine** via the device bridge (checksum-verified); commit is the user's own step on
 Windows (Git runs there — C5).

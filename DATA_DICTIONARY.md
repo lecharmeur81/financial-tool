@@ -496,6 +496,72 @@ status:           implemented
 
 ---
 
+## 5e. Liquidity / stablecoin datasets (implemented in Phase 9)
+
+Sole provider: **DefiLlama** (`stablecoins.llama.fi`, free, keyless). Sole dataset, three subjects.
+
+| Dataset ID | Subject | Values (unit) | Provider | `available_at` |
+|---|---|---|---|---|
+| `liquidity.stablecoin_supply.1d` | `STABLECOIN:USDT` / `STABLECOIN:USDC` / `STABLECOIN:TOTAL` | circulating supply, one value per calendar day, aggregated across every chain (`usd`) | DefiLlama `/stablecoincharts/all` (`?stablecoin=1` USDT, `?stablecoin=2` USDC, no param = every stablecoin tracked = TOTAL) | `event_time` (UTC midnight of the day) + 36 h (receipt time if earlier) |
+
+`TOTAL` is every stablecoin DefiLlama tracks (USDT, USDC and every other one), not the sum of the two tracked
+individually. DefiLlama's chart endpoint takes no date-range parameters — every call returns its **entire**
+history in one response; the adapter (`cfi/providers/defillama.py`) fetches it every time and filters client-side
+to the requested window (`parse_page`). History loaded once, one 180-day chunk per run, back to a generous depth
+(DefiLlama's stablecoin charts start November 2017).
+
+**Not tracked** (`NOT_TRACKED`, `cfi/liquidity/universe.py`) — no free source found for any of these:
+
+- Exchange stablecoin balances and stablecoin exchange flows (would need labelled on-chain address attribution;
+  paid providers only: Nansen, Arkham, CryptoQuant). The "exchange liquidity change" calculation this phase was
+  asked for is defined (`liquidity/metrics.py:exchange_liquidity_change`) but always reports `unavailable` — a
+  named, visible gap, never a silently omitted field, and never folded into the Liquidity Score.
+- Individual mint/burn transactions: day-over-day change in stored circulating supply is used as the observable
+  proxy for net minting/burning instead (stated plainly wherever shown, never presented as an exact event count).
+- Stablecoins beyond USDT and USDC tracked individually (DAI, USDe, USDS, … count only inside `TOTAL`).
+
+### Liquidity calculated metrics (read time, point-in-time — `cfi/liquidity/metrics.py`)
+
+```
+supply_growth (24h/7d/30d):  supply now ÷ supply N days earlier − 1, per subject ("now" ≤ 36 h old)
+growth / contraction:        24 h ≥ +1 % or 7 d ≥ +3 % or 30 d ≥ +8 % (and the negatives; disagreement: "mixed")
+market_share:                subject circulating supply ÷ TOTAL circulating supply, same stored snapshot time
+growth_acceleration:         7-day growth rate ending now − 7-day growth rate ending 7 days earlier, for TOTAL
+acceleration / deceleration: |change in the 7-day rate| ≥ 2 percentage points, either direction
+exchange_liquidity_change:   always "unavailable" (see Not tracked, above) — never a scored component
+```
+
+### Liquidity Score (`liquidity_score`, calculated metric — ADR-0052)
+
+```
+version:          liquidity_score_v1 (versioned, immutable parameter set from the start — see
+                  cfi/liquidity/score_parameters.py, following the Derivatives Health Score addendum's pattern;
+                  a future revision publishes a new version id rather than editing this one)
+range:            −100 … +100, signed (unlike the direction-neutral Derivatives Health Score): higher = stronger
+                  measured growth in the tracked stablecoin supply
+components:       sub-score = clip(7-day change (or acceleration change) ÷ scale, −1, +1)
+  usdt_growth_7d        weight 0.30   USDT 7-day supply growth ÷ 5 %
+  usdc_growth_7d        weight 0.30   USDC 7-day supply growth ÷ 5 %
+  total_growth_7d       weight 0.25   TOTAL 7-day supply growth ÷ 4 %
+  growth_acceleration   weight 0.15   change in TOTAL's 7-day growth rate ÷ 3 percentage points
+score:            100 × Σ(weight × sub-score) ÷ Σ(weights of available components), 1 decimal
+missing_policy:   component excluded without a complete 7-day (or acceleration) window (never filled);
+                  "Insufficient data" below available weight 0.5 (min_available_weight, versioned parameter)
+bands:            ≥ 50 strong liquidity expansion · ≥ 15 liquidity expansion · ≥ −15 stable ·
+                  ≥ −50 liquidity contraction · below: strong liquidity contraction (versioned parameter)
+reproducibility:  every result records `parameter_version` and `calculated_at` alongside every component's
+                  value, sub-score, effective weight, contribution and calculation string
+semantic_note:    fixed API/UI text: "Higher Liquidity Score means stronger measured growth in the stablecoin
+                  supply this platform tracks (USDT, USDC, and DefiLlama's total). It is not a probability of
+                  price increase and does not indicate market direction."
+parameters_note:  v1 methodology / initial parameters, chosen by design and not fitted to data or empirically
+                  validated — never described as "validated"
+owner_phase:      9 (2026-09-26)
+status:           implemented
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.

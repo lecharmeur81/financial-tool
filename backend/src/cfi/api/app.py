@@ -11,7 +11,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from cfi.api.errors import register_exception_handlers
 from cfi.api.middleware import REQUEST_ID_HEADER, request_context_middleware
-from cfi.api.routes import derivatives, health, ingestion, institutional, market, meta, whales
+from cfi.api.routes import (
+    derivatives,
+    health,
+    ingestion,
+    institutional,
+    liquidity,
+    market,
+    meta,
+    whales,
+)
 from cfi.cache.redis import check_redis, create_redis
 from cfi.core.config import Settings, get_settings
 from cfi.core.health import HealthCheck
@@ -86,4 +95,5 @@ def create_app(
     app.include_router(institutional.router)
     app.include_router(whales.router)
     app.include_router(derivatives.router)
+    app.include_router(liquidity.router)
     return app

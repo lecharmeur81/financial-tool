@@ -14,6 +14,7 @@ from typing import Any
 from cfi.derivatives.sources import sources_for as derivative_sources_for
 from cfi.domain.datasets import DatasetSpec
 from cfi.institutional.sources import sources_for
+from cfi.liquidity.sources import sources_for as liquidity_sources_for
 from cfi.market.sources import ADAPTERS, datasets_for
 from cfi.whales.sources import sources_for as whale_sources_for
 
@@ -111,15 +112,31 @@ def derivative_entries(provider_ids: list[str]) -> dict[str, dict[str, Any]]:
     }
 
 
+def liquidity_entries(provider_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """One entry per (provider, dataset, subject); every 6 hours (the data itself changes at
+    most daily — see ``cfi.liquidity.sources``). Runs are idempotent."""
+    return {
+        f"liquidity:{item.provider_id}:{item.dataset.dataset_id}:{item.subject}": {
+            "task": "liquidity.ingest",
+            "schedule": float(item.interval_seconds),
+            "args": (item.provider_id, item.dataset.dataset_id, item.subject),
+            "options": {"queue": item.queue, "expires": item.interval_seconds},
+        }
+        for item in liquidity_sources_for(provider_ids)
+    }
+
+
 def beat_schedule(
     provider_ids: list[str],
     institutional_provider_ids: list[str] | None = None,
     whale_provider_ids: list[str] | None = None,
     derivative_provider_ids: list[str] | None = None,
+    liquidity_provider_ids: list[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     schedule: dict[str, dict[str, Any]] = institutional_entries(institutional_provider_ids or [])
     schedule.update(whale_entries(whale_provider_ids or []))
     schedule.update(derivative_entries(derivative_provider_ids or []))
+    schedule.update(liquidity_entries(liquidity_provider_ids or []))
     for item in scheduled_ingestions(provider_ids):
         schedule[f"latest:{item.provider_id}:{item.dataset_id}"] = {
             "task": "market.ingest_latest",
