@@ -2267,3 +2267,79 @@ explicit `valid_from`/`valid_to` membership record per asset-venue pair, mirrori
 Both remain open, tracked items: #10 in TODO.md as a candidate for a future Similarity Engine follow-up
 phase; #15 already covered by TODO.md's existing multi-asset-universe future-work entry, cross-referenced
 here so a future reader of RED_TEAM_REPORT.md does not mistake "no code change" for "not reviewed."
+
+## ADR-0066 — Phase 19: Market Anomaly Engine — percentile-band detection over 13 categories,
+MAD-based magnitude, a fixed non-AI interpretation registry
+
+**Status:** Accepted (implemented 2026-09-28)
+
+**Context.** The user's Phase 19 instruction asked for unusual-behavior detection across 13 named categories
+(ETF flows, institutional flows, whale flows, exchange flows, funding, OI, liquidations, stablecoin supply,
+retail activity, social activity, volume, volatility, market structure), using "historical distributions and
+percentiles" and explicitly avoiding "arbitrary thresholds where possible." Every anomaly must display metric,
+current value, historical percentile, magnitude, duration, source, timestamp, possible interpretations,
+contradicting evidence, and data quality — and "do not automatically label an anomaly bullish or bearish."
+
+**Decision.**
+
+1. **No new read layer.** `cfi.anomaly.service.AnomalyService` reuses `cfi.divergence.adapters.Adapters`
+   unchanged for every one of the 13 feeds, adding 4 new `Adapters` methods for feeds Phase 13 never needed:
+   `treasury_net_acquisitions` (institutional flows — listed-company BTC purchases, distinct from `etf_flows`'
+   `institutional_net_flow`), `liquidations_total` (bypasses `DerivativesService.history()`'s 30-day
+   `HISTORY_DAYS_MAX` API-facing cap by reading `DerivativesQueries.observations()` directly — the same
+   precedent as the existing whale-transfer read), `daily_volume`, and `realized_volatility` (both reused from
+   `cfi.market_structure.metrics.realized_volatility_series`, unchanged). Two categories — "whale flows" and
+   "exchange flows" — map to the SAME underlying `whale_net_flow` series (this platform does not separately
+   track aggregate exchange-wallet flow independent of the whale on-chain dataset); this is disclosed in
+   `NOT_TRACKED`, never presented as two independently observed feeds.
+
+2. **Percentile-band classification, not a fixed value threshold.** Every metric's current reading is ranked
+   against its own trailing history via `cfi.retail.metrics.percentile_rank` (reused unchanged, current
+   excluded from its own history per that function's convention), then classified into one of five bands by a
+   single versioned, disclosed, symmetric parameter set (`cfi.anomaly.universe.ANOMALY_BANDS_V1`: extreme_high
+   >= 97.5th percentile, notable_high >= 90th, notable_low <= 10th, extreme_low <= 2.5th, normal otherwise) —
+   the same band cut-points for every metric, chosen by design and never fitted to any metric's own data
+   (R13). This satisfies "avoid arbitrary thresholds where possible": the classification boundary is fixed,
+   but what it is being compared against is always the metric's own history, never a hard-coded raw value
+   (e.g. "funding > 0.01%").
+
+3. **Magnitude is a robust (MAD-based) modified z-score**, `(current - median) / (1.4826 * MAD)`, computed
+   over the same historical window used for the percentile. A median/MAD estimator was chosen over a
+   mean/stdev z-score specifically because a handful of already-extreme historical readings (exactly the kind
+   an anomaly detector's own history will accumulate over time) would otherwise inflate the standard deviation
+   and mechanically shrink the z-score of a genuinely new extreme — the median/MAD pair is far less sensitive
+   to the very outliers this feature exists to flag. Reported as `None` (never a fabricated 0) when history is
+   empty or has zero spread (R3).
+
+4. **Duration re-derives the band at every trailing day**, walking backward from `as_of`, against only the
+   history strictly before that day's own reading — never the shared lookback window every day would otherwise
+   share, which would let later data leak into an earlier day's own classification (R3/R4 no look-ahead bias).
+   This mirrors `cfi.divergence.metrics.duration`'s "never let today's history judge yesterday" discipline,
+   adapted from a two-leg direction comparison to a single-metric band walk.
+
+5. **`possible_interpretations` is a fixed, versioned, non-AI-generated registry** (`ANOMALY_METRICS` in
+   `cfi.anomaly.universe`), one hedged, mechanism-level candidate reading per (metric, band) combination —
+   e.g. "exchange deposits are commonly associated with preparing to trade or to post collateral, but custody
+   transfers and cold-storage moves are not distinguishable from this data alone." This is still L3 Statistical
+   Signal territory (R2), never an L5 AI Interpretation — Phase 20's Claude AI Analyst is the only future place
+   an L5 interpretation belongs, and pre-empting it here would blur the evidence hierarchy this platform's
+   entire design rests on. A dedicated test (`test_no_interpretation_ever_labels_bullish_bearish_buy_or_sell`)
+   structurally enforces the user's explicit "do not label bullish or bearish" instruction by banning that
+   vocabulary from every interpretation string, not just by convention.
+
+6. **`contradicting_evidence` reuses the existing four-way vocabulary** already established by
+   `cfi.whales.score`'s contradiction indicators (`"consistent"` / `"contradiction"` / `"no_clear_direction"` /
+   `"insufficient_data"`), applied as a purely mechanical percentile-band-sign comparison against each metric's
+   curated list of counterpart metrics (e.g. funding vs. OI vs. liquidations; volume vs. volatility) — never an
+   economic or directional judgment call, consistent with point 5.
+
+**Consequences.** No database migration (mirrors `divergence`/`regime`/`similarity`'s "no new tables, computed
+live at read time" precedent — every anomaly reading is recomputed per request from already-ingested data).
+Two new endpoints (`GET /api/v1/anomaly/catalog`, `/scan`, `/metric`) and one new package (`cfi.anomaly`). 27
+new unit tests (`test_anomaly_metrics.py`, `test_anomaly_universe.py`, all pure-function/registry, hand-verified
+expected values) and 6 new integration tests (`test_anomaly_api.py`, seeded with the lightest existing harness —
+Coinbase daily bars — covering the empty-database, seeded, single-metric, unknown-metric-id, and
+bullish/bearish-language-ban paths). `NOT_TRACKED` documents every scope limit: whale/exchange flows share one
+feed, treasury purchases are BTC-only accumulation events, liquidations and volume are single-venue (OKX /
+Coinbase respectively), social/retail activity are attention/activity proxies, and market structure is TOTAL
+market cap only (the pre-existing Phase 12 ranged-history gap).

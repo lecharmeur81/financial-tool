@@ -1244,6 +1244,98 @@ status:            implemented
 
 ---
 
+## 5l. Market Anomaly Engine (implemented in Phase 19)
+
+**No datasets ingested.** `cfi/anomaly/` reads nothing from any provider — pure computation over
+`cfi.divergence.adapters.Adapters`, reused unchanged, the same posture as `cfi/divergence/` (Phase 13),
+`cfi/regime/` (Phase 14) and `cfi/similarity/` (Phase 15). Every reading is a **Calculated Metric (L2)** or
+**Statistical Signal (L3)** — never a Regime Classification, an AI Interpretation (L5), or an automatic trading
+recommendation.
+
+### The 13 tracked categories (`cfi/anomaly/universe.py::ANOMALY_METRICS`)
+
+| metric_id | category | unit | source (adapter) | evidence_class |
+|---|---|---|---|---|
+| `etf_flows` | ETF flows | usd/day | `institutional_net_flow` | direct |
+| `institutional_flows` | institutional flows | usd/day | `treasury_net_acquisitions` (new, Phase 19) | attributed |
+| `whale_flows` | whale flows | native units/day | `whale_net_flow` | direct |
+| `exchange_flows` | exchange flows | native units/day | `whale_net_flow` (same series as `whale_flows`) | direct |
+| `funding` | funding | ratio per interval | `funding_rate` | direct |
+| `oi` | OI | native units | `open_interest` | direct |
+| `liquidations` | liquidations | native units/day | `liquidations_total` (new, Phase 19) | direct |
+| `stablecoin_supply` | stablecoin supply | usd | `stablecoin_supply` (subject=`TOTAL`) | direct |
+| `retail_activity` | retail activity | count/day | `retail_small_tx_count` | direct |
+| `social_activity` | social activity | count | `retail_meme_trending_count` | direct |
+| `volume` | volume | native units/day | `daily_volume` (new, Phase 19; base-asset volume — Coinbase reports no quote volume) | direct |
+| `volatility` | volatility | annualized ratio | `realized_volatility` (new, Phase 19; reuses `cfi.market_structure.metrics.realized_volatility_series`) | direct |
+| `market_structure` | market structure | usd | `total_market_cap` | direct |
+
+`whale_flows` and `exchange_flows` read the SAME underlying series (this platform has no aggregate
+exchange-wallet flow independent of the whale on-chain dataset) — disclosed in `NOT_TRACKED`, never presented
+as two independently observed feeds.
+
+### Percentile bands (`cfi/anomaly/universe.py::ANOMALY_BANDS_V1`, versioned parameter set)
+
+| Band | Cut-point |
+|---|---|
+| `extreme_high` | percentile >= 97.5 |
+| `notable_high` | percentile >= 90 |
+| `normal` | otherwise |
+| `notable_low` | percentile <= 10 |
+| `extreme_low` | percentile <= 2.5 |
+| `unavailable` | percentile not computable (fewer than `MIN_PERCENTILE_SAMPLE` = 20 historical readings) |
+
+Every metric is judged by the same symmetric, disclosed cut-points — never fitted to any metric's own
+distribution (R13) — applied to that metric's own percentile rank (`cfi.retail.metrics.percentile_rank`,
+reused unchanged), never to a raw hard-coded value.
+
+### Magnitude (`cfi/anomaly/metrics.py::robust_magnitude`, `magnitude_method = "modified_zscore_mad_v1"`)
+
+A robust (median/MAD-based) modified z-score: `(current − median) / (1.4826 × MAD)` over the same historical
+window used for the percentile (current excluded). `1.4826` is the standard constant that makes MAD a
+consistent estimator of the standard deviation under normality. Chosen over a mean/stdev z-score because a
+handful of already-extreme historical readings — exactly what an anomaly detector's own history accumulates —
+would otherwise inflate the standard deviation and mechanically shrink the z-score of a genuinely new extreme.
+`None` (never a fabricated 0) when the history is empty or has zero spread.
+
+### Duration
+
+The number of consecutive trailing days (walking backward from `as_of`) the metric's OWN band has matched
+today's — each day's band is recomputed against only the history strictly before that day's own reading, never
+the full lookback window every day would otherwise share (R3/R4: no look-ahead bias). Capped at
+`MAX_DURATION_LOOKBACK_DAYS` = 180 (never an unbounded scan; the cap is reported, not silently truncated).
+
+### Possible interpretations and contradicting evidence
+
+`possible_interpretations` is a **fixed, versioned, non-AI-generated registry** (one hedged, mechanism-level
+candidate reading per metric/band combination) — still L3 territory, never an L5 AI Interpretation (R2/R6).
+Phase 20's Claude AI Analyst is the only future place an L5 interpretation belongs. A dedicated test bans
+"bullish"/"bearish"/"buy"/"sell" language from every interpretation string, enforcing the Phase 19
+instruction structurally, not just by convention.
+
+`contradicting_evidence` compares each metric's band against a curated list of counterpart metrics
+(`AnomalyMetricDef.counterparts`, e.g. funding vs. OI vs. liquidations; volume vs. volatility) using the same
+four-way vocabulary already established by `cfi.whales.score`'s contradiction indicators — `"consistent"` /
+`"contradiction"` / `"no_clear_direction"` / `"insufficient_data"` — a purely mechanical percentile-band-sign
+comparison, never an economic or directional judgment call.
+
+### NOT_TRACKED (`cfi/anomaly/universe.py::NOT_TRACKED`)
+
+Whale/exchange flows share one feed; treasury purchases are BTC-only accumulation events (disposals are not
+tracked); liquidations are single-venue (OKX); volume is single-venue (Coinbase, base-asset units — Coinbase
+reports no quote volume); social/retail activity are attention/activity proxies, never capital-flow measures;
+market structure is TOTAL crypto market capitalization only (the pre-existing Phase 12 ranged-history gap);
+mid-cap/DeFi/AI/meme assets have no tracked anomaly feed (tracked universe: BTC/ETH/SOL/XRP; whale/exchange
+flows: BTC/ETH only).
+
+```
+metric:            Market Anomaly Engine (13 categories)
+owner_phase:       19 (2026-09-28)
+status:            implemented
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.

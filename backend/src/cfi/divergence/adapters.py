@@ -18,11 +18,12 @@ from typing import Any
 from cfi.derivatives.queries import DerivativesQueries
 from cfi.derivatives.service import DerivativesService
 from cfi.derivatives.universe import PERP_ASSETS
+from cfi.derivatives.universe import dataset as derivatives_dataset
 from cfi.divergence.metrics import Series, SeriesPoint
 from cfi.divergence.universe import LOAD_SPAN_DAYS
 from cfi.institutional.queries import InstitutionalQueries
 from cfi.institutional.service import InstitutionalService
-from cfi.institutional.universe import ETF_ASSETS
+from cfi.institutional.universe import ETF_ASSETS, TREASURY_PURCHASE_ASSETS
 from cfi.liquidity.queries import LiquidityQueries
 from cfi.liquidity.service import LiquidityService
 from cfi.macro import metrics as macro_metrics
@@ -36,6 +37,7 @@ from cfi.macro.universe import (
 from cfi.market.queries import MarketQueries
 from cfi.market.sources import VENUES
 from cfi.market.universe import ASSET_SYMBOLS, ohlcv_dataset_id
+from cfi.market_structure import metrics as market_structure_metrics
 from cfi.market_structure.queries import MarketStructureQueries
 from cfi.market_structure.service import MarketStructureService
 from cfi.retail.queries import RetailQueries
@@ -348,3 +350,112 @@ class Adapters:
                 out.append(SeriesPoint(day, reading.net_liquidity_usd_b, "ok"))
             day += timedelta(days=1)
         return out
+
+    # ------------------------------------------------------------------ institutional treasuries
+    # (Phase 19 — Anomaly Engine: distinct from ``institutional_net_flow``'s ETF creations/
+    # redemptions — this is listed-company balance-sheet BTC purchases, self-disclosed and
+    # compiled by the provider, R2 ``evidence_class: attributed``.)
+
+    async def treasury_net_acquisitions(
+        self, asset: str, as_of: datetime, knowledge_time: datetime
+    ) -> Series:
+        """Daily USD cost of listed-company BTC treasury purchases (``cost_usd`` bucket sum; a
+        purchase with no disclosed cost contributes to ``btc_acquired`` only and is not silently
+        priced — Phase 19 uses whichever buckets report a cost). Only BTC is tracked
+        (``TREASURY_PURCHASE_ASSETS``)."""
+        if asset not in TREASURY_PURCHASE_ASSETS:
+            return []
+        svc = self.institutional()
+        start, end = (as_of - timedelta(days=LOAD_SPAN_DAYS)).date(), as_of.date()
+        resp = await svc.treasury(
+            asset=asset,
+            interval="1d",
+            start=start,
+            end=end,
+            as_of=as_of,
+            knowledge_time=knowledge_time,
+        )
+        purchases = resp.get("purchases") or {}
+        out: Series = []
+        for b in purchases.get("buckets", []):
+            cost = _decimal(b.get("cost_usd"))
+            if cost is None:
+                continue
+            status = (b.get("quality") or {}).get("status") or "ok"
+            out.append(SeriesPoint(_dt(b["start"]), cost, status))
+        return out
+
+    # ------------------------------------------------------------------ derivatives liquidations
+
+    async def liquidations_total(
+        self, asset: str, as_of: datetime, knowledge_time: datetime
+    ) -> Series:
+        """Daily total liquidation notional (long + short sides summed, OKX venue — the only
+        tracked liquidations source, ``derivatives/universe.py``), read directly from
+        ``DerivativesQueries.observations`` rather than ``DerivativesService.history()`` (whose
+        30-day ``HISTORY_DAYS_MAX`` is an API-facing business rule, not a query-layer limitation —
+        same precedent as this module's whale-transfer reads)."""
+        if asset not in PERP_ASSETS:
+            return []
+        dq = DerivativesQueries(self.engine)
+        start, end = as_of - timedelta(days=LOAD_SPAN_DAYS), as_of + timedelta(seconds=1)
+        rows = await dq.observations(
+            derivatives_dataset("liquidations", asset).dataset_id,
+            asset=asset,
+            start=start,
+            end=end,
+            as_of=as_of,
+            knowledge_time=knowledge_time,
+        )
+        by_day: dict[date, Decimal] = {}
+        status_by_day: dict[date, str] = {}
+        for r in rows:
+            v = _decimal(r.get("value"))
+            if v is None:
+                continue
+            d = r["event_time"].date()
+            by_day[d] = by_day.get(d, Decimal(0)) + abs(v)
+            if status_by_day.get(d, "ok") == "ok":
+                status_by_day[d] = r.get("quality_status") or "ok"
+        return [SeriesPoint(_dt(d), by_day[d], status_by_day.get(d, "ok")) for d in sorted(by_day)]
+
+    # ------------------------------------------------------------------ market volume / volatility
+
+    async def daily_volume(self, asset: str, as_of: datetime) -> Series:
+        """Daily native-unit (base-asset) traded volume on Coinbase (same one-venue precedent as
+        ``price_close``). ``volume_base`` is used, not ``volume_quote``: Coinbase's own candle
+        response reports base volume only — Phase 5's provider adapter never fabricates a quote
+        volume from it (R3), so this metric is always native units, not USD."""
+        if asset not in ASSET_SYMBOLS or asset not in PRICE_VENUE.instruments:
+            return []
+        instrument = PRICE_VENUE.instruments[asset]
+        mq = self.market()
+        series_id = await mq.series_id(PRICE_DATASET_ID, instrument)
+        if series_id is None:
+            return []
+        start, end = _range(as_of)
+        rows = await mq.bars(series_id, PRICE_VENUE.provider_id, start, end, as_of)
+        return [
+            SeriesPoint(
+                _dt(r["event_time"]), _decimal(r.get("volume_base")), r.get("quality_status", "ok")
+            )
+            for r in rows
+            if r.get("volume_base") is not None
+        ]
+
+    async def realized_volatility(self, asset: str, as_of: datetime) -> Series:
+        """Annualized standard deviation of 30-day rolling daily log returns
+        (``cfi.market_structure.metrics.realized_volatility_series``, reused unchanged), from the
+        same Coinbase daily bars as ``price_close``."""
+        if asset not in ASSET_SYMBOLS or asset not in PRICE_VENUE.instruments:
+            return []
+        instrument = PRICE_VENUE.instruments[asset]
+        mq = self.market()
+        series_id = await mq.series_id(PRICE_DATASET_ID, instrument)
+        if series_id is None:
+            return []
+        start, end = _range(as_of)
+        rows = await mq.bars(series_id, PRICE_VENUE.provider_id, start, end, as_of)
+        bars = market_structure_metrics.bars_from_rows(rows)
+        series = market_structure_metrics.realized_volatility_series(bars)
+        return [SeriesPoint(t, v, "ok") for t, v in series]

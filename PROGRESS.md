@@ -2,11 +2,13 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 18 — Fix Quant Issues → implemented, fully self-verified (unit + integration tests against
-a real PostgreSQL/TimescaleDB instance, ruff, mypy all clean). 13 of RED_TEAM_REPORT.md's 15 findings
-corrected (ADR-0060–ADR-0064); findings #10 and #15 documented as deferred, no code change (ADR-0065), per
-the report's own guidance. Delivered to Windows and committed alongside Phases 16 and 17 (neither had reached
-the real repository before now) as `5333434` — see the Phase 18 log entry below.
+**Current phase:** 19 — Anomaly Engine → implemented, fully self-verified (909 unit + integration tests
+against a real PostgreSQL/TimescaleDB instance, ruff, mypy all clean). Market Anomaly Engine covering all 13
+requested categories (ETF/institutional/whale/exchange flows, funding, OI, liquidations, stablecoin supply,
+retail/social activity, volume, volatility, market structure), percentile-band detection (never a raw fixed
+threshold), MAD-based magnitude, day-by-day-recomputed duration, and a fixed non-AI interpretation registry
+that structurally bans bullish/bearish/buy/sell language (ADR-0066). See the Phase 19 log entry below for
+delivery status.
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -34,7 +36,7 @@ the real repository before now) as `5333434` — see the Phase 18 log entry belo
 | 16 | Backtesting | ✅ Complete — verified on Windows (`5333434`, delivered alongside Phases 17/18) |
 | 17 | Quant red-team | ✅ Complete — RED_TEAM_REPORT.md delivered, 15 findings, zero code changes; verified on Windows (`5333434`) |
 | 18 | Fix Quant Issues | ✅ Complete — verified on Windows (`5333434`) |
-| — | Anomaly engine | ⏳ Not started |
+| 19 | Anomaly engine | ✅ Complete — see Phase 19 log entry for delivery status |
 | — | Capital rotation | ⏳ Not started |
 | — | Claude AI Analyst | ⏳ Not started |
 | — | Daily intelligence | ⏳ Not started |
@@ -1744,3 +1746,58 @@ new, `test_regime_parameters.py` untouched — already identical).
 **Next step:** this phase stops here per the user's own closing instruction ("Commit. Stop.") — awaiting the
 user's next instruction.
 
+
+### 2026-09-28 — Phase 19: Market Anomaly Engine — 13 categories, percentile bands, non-AI interpretations
+
+**What changed** (ADR-0066; user's exact spec: "PHASE 19 — ANOMALY ENGINE: Build the Market Anomaly Engine.
+Detect unusual behavior in: ETF flows, institutional flows, whale flows, exchange flows, funding, OI,
+liquidations, stablecoin supply, retail activity, social activity, volume, volatility, market structure. Use
+historical distributions and percentiles. Avoid arbitrary thresholds where possible. For every anomaly
+display: metric, current value, historical percentile, magnitude, duration, source, timestamp, possible
+interpretations, contradicting evidence, data quality. Do not automatically label an anomaly bullish or
+bearish. Build tests. Commit. Stop.").
+
+- New package `cfi/anomaly/` (`universe.py` — the 13-metric registry, versioned `ANOMALY_BANDS_V1` percentile
+  bands, `NOT_TRACKED`; `metrics.py` — pure functions: `current_reading`, `robust_magnitude` (MAD-based
+  modified z-score), `duration` (day-by-day-recomputed band walk), `compare_bands`; `service.py` —
+  `AnomalyService`, orchestrating `cfi.divergence.adapters.Adapters` unchanged).
+- 4 new `Adapters` methods (`treasury_net_acquisitions`, `liquidations_total`, `daily_volume`,
+  `realized_volatility`) — no new read layer, no new ingestion.
+- New API routes `GET /api/v1/anomaly/{catalog,scan,metric}` (`cfi/api/routes/anomaly.py`, wired into
+  `cfi/api/app.py`), using `resolve_query_times` (ADR-0060) like every other point-in-time route.
+- `possible_interpretations` is a fixed, versioned, non-AI-generated registry (never an L5 AI Interpretation,
+  R2/R6) — structurally banned from bullish/bearish/buy/sell language by a dedicated test, not just
+  convention, per the user's explicit instruction.
+- `contradicting_evidence` reuses `cfi.whales.score`'s existing four-way vocabulary
+  (`consistent`/`contradiction`/`no_clear_direction`/`insufficient_data`) as a purely mechanical
+  percentile-band comparison against each metric's curated counterparts.
+- Full design rationale (why MAD-based magnitude, why day-by-day duration recomputation, the
+  whale-flows/exchange-flows same-series disclosure) in ADR-0066.
+
+**Database changes:** none — every reading is computed live at read time from already-ingested data, the
+same posture as `divergence`/`regime`/`similarity` (Phases 13–15).
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_anomaly_metrics.py` (21), `test_anomaly_universe.py` (6) — every expected value hand-computed in the test's own comments, including the bullish/bearish/buy/sell language ban | all pass |
+| New integration tests: `test_anomaly_api.py` (6) — catalog (13 metrics), empty-database `insufficient_data` path, seeded-bars `ok` path (volume/volatility), single-metric endpoint parity, unknown-metric-id 404, and a whole-scan language-ban check | all pass against a real PostgreSQL/TimescaleDB instance |
+| One real bug found and fixed during integration testing: `daily_volume` initially read `volume_quote`, which Coinbase's provider adapter never populates (only `volume_base` is ingested — Phase 5) — every reading would have silently been `insufficient_data` forever; switched to `volume_base` (native asset units, not USD) and corrected the metric's disclosed `unit` field | confirmed fixed by the integration test that first caught it |
+| Backend `uv run pytest -q` (whole suite: unit + integration, real `CFI_DATABASE_URL`/`CFI_REDIS_URL`) | **909 passed** |
+| `uv run ruff check .` (whole backend) | All checks passed! |
+| `uv run ruff format --check .` (whole backend) | 294 files already formatted |
+| `uv run mypy` (strict, whole backend) | Success: no issues found in 289 source files |
+
+**Known limitations**
+- `whale_flows` and `exchange_flows` read the same underlying series (disclosed in `NOT_TRACKED`) — this
+  platform has no aggregate exchange-wallet flow independent of the whale on-chain dataset.
+- `market_structure` is TOTAL crypto market cap only — the pre-existing Phase 12 ranged-history gap (no ranged
+  history yet for the Market Structure Score or BTC dominance) is unchanged by this phase.
+- Institutional treasury purchases (`institutional_flows`) are BTC-only, accumulation-events-only (no
+  disposal tracking) — same scope limit already documented for `cfi.institutional.universe`.
+- Liquidations and volume are single-venue (OKX / Coinbase respectively) — not whole-market totals.
+- No frontend work this phase (not requested).
+
+**Delivery:** pending — see the follow-up note below once copied to the Windows machine and committed.
+
+**Next step:** this phase stops here per the user's own closing instruction ("Commit. Stop.") — awaiting the
+user's next instruction.

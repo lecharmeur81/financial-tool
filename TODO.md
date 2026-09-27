@@ -491,6 +491,23 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 - [x] **Finding #15:** no code change — already covered by the existing multi-asset-universe entry below
       (the report's own recommendation is to defer until that universe exists).
 
+## Phase 19 — Market Anomaly Engine (built 2026-09-28; see PROGRESS.md, DECISIONS.md ADR-0066)
+
+- [x] All 13 requested categories implemented (ETF/institutional/whale/exchange flows, funding, OI,
+      liquidations, stablecoin supply, retail/social activity, volume, volatility, market structure),
+      percentile-band detection, MAD-based magnitude, day-by-day-recomputed duration, a fixed non-AI
+      interpretation registry (bullish/bearish/buy/sell language structurally banned by a dedicated test),
+      and mechanical contradicting-evidence comparison. Full unit + integration regression run green (909
+      total), ruff and mypy strict clean.
+- [ ] **Same-series overlap (documented, not a defect):** `whale_flows` and `exchange_flows` read the same
+      underlying `whale_net_flow` series — this platform has no aggregate exchange-wallet flow independent
+      of the whale on-chain dataset. If a genuinely independent exchange-wallet flow source is ever added, it
+      should replace `exchange_flows`' adapter rather than continuing to alias `whale_flows`.
+- [ ] **Institutional treasury disposals are not tracked** (`institutional_flows` only ever accumulates) — no
+      verified free source publishes dated disposal events; revisit if a provider is found.
+- [ ] Once Phase 20 (Claude AI Analyst) exists, its L5 interpretations should be layered ON TOP of Phase 19's
+      L3 `possible_interpretations`, never replacing them — the registry here must stay AI-free (ADR-0066).
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.
