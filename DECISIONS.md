@@ -1788,3 +1788,98 @@ catalog's shape and the empty-database `"insufficient_data"`/`mixed_unclear` pat
 suite proving its own ingestion/scoring pipeline, so re-seeding all seven here was deliberately scoped out
 rather than duplicating that coverage (documented, not silently narrowed). Frontend work was not part of the
 Phase 14 request as given and was not built.
+
+## ADR-0058 — Phase 15: Historical Similarity Engine — 9 fixed-normalized features, weekly-sampled
+candidates, forward returns/drawdown gated by knowability
+
+**Status:** Accepted (implemented 2026-09-27)
+
+**Context.** The user's Phase 15 instruction asked for a Historical Similarity Engine comparing the current
+market state against historical periods, using features from institutional flows, whale flows, retail
+activity, liquidity, funding, open interest, volatility, market structure and macro; normalizing them
+appropriately; using a documented similarity methodology; and for each historical analogue showing date,
+similarity score, regime, 7/30/90-day forward return, maximum drawdown and volatility. Two constraints were
+explicit and non-negotiable: "Historical future returns may only be displayed when they would genuinely have
+been known after that historical date. Never allow future information to influence the similarity score,"
+and "Do not produce a predicted future return. Show distributions and historical ranges instead."
+
+**Decision — feature normalization uses fixed, documented bounds decided once, never derived from any date's
+own data.** The 9 features map directly onto already-published fields: 5 are existing composite scores on a
+fixed, documented `-100..+100` range of their own (institutional, whale, liquidity, market structure, macro —
+all from the same `score = 100 x sum(weight x sub-score) / sum(available weights)` formula, confirmed by
+direct read of each domain's `score.py`), 1 is already a `0..100` score (retail activity), 1 is already a
+percentile (`market_structure`'s `volatility.percentile`), and the remaining 2 are raw, standalone fields with
+no natural 0..100 range of their own (`derivatives.asset()`'s `funding.annualised_7d_pct` and
+`open_interest.change_7d_pct`), given fixed clamp bounds (`±100%` and `±50%` respectively) chosen as generous,
+documented v1 judgment values, not fitted to data. An alternative — normalizing every feature via percentile
+rank against a trailing window, or via min/max scaling across the batch of dates actually being searched — was
+considered and rejected: either approach would make a candidate date's own similarity score depend on data
+from OTHER dates in the search (including dates chronologically after that candidate), which is exactly the
+kind of indirect look-ahead leakage the user's explicit instruction rules out. Fixed, data-independent bounds
+make it structurally impossible for the similarity score to be influenced by anything outside that one
+date's own snapshot.
+
+**Decision — pure computation, no ingestion of its own, its own self-contained snapshot module (not importing
+`cfi.regime`).** `cfi/similarity/` follows the same no-ingestion posture as `cfi.regime` (Phase 14) and
+`cfi.divergence` (Phase 13), reusing `cfi.divergence.adapters.Adapters` as a service factory. Seven of the nine
+features are the same underlying fields `cfi.regime.snapshot` already reads, but `cfi.similarity.snapshot` is a
+separate, self-contained copy rather than an import from `cfi.regime`: the two engines are independent
+consumers of the same domain services, and Phase 14's already-committed, already-verified module is not
+reopened to serve a later phase (R13). The 2 new standalone fields (funding, open interest) come from the same
+`derivatives().asset()` call `cfi.regime.snapshot` already makes for its own `derivatives_health` metric.
+
+**Decision — similarity is a weighted RMSE-based distance converted to a 0..100 score, insufficient-data-gated
+per pair.** For a query date and a candidate date, only features where BOTH are `"ok"` are compared; the
+similarity score is `100 - sqrt(weighted mean squared difference of normalized values)`, restricted to the
+common features, and the pair is not scored at all (`"insufficient_data"`) if the compared features' combined
+weight falls below `min_available_weight` (0.5) — the same discipline `cfi.regime.classifier` already applies
+to confidence, rather than assigning a misleadingly precise score from too little evidence.
+
+**Decision — weekly-sampled candidates over a 2-year lookback, greedily de-duplicated by a minimum gap.**
+Scoring every single day over a multi-year lookback would require one full 9-feature snapshot (7 domain
+service calls) per day; a weekly sample (`step_days=7`) over `lookback_days=730` is a deliberate, documented
+cost/precision trade-off, mirroring the same trade-off `cfi.regime.history.historical_examples` already made
+for Phase 14. Selecting the top-N candidates by raw similarity score alone was considered and rejected: it
+would often return several consecutive weeks of the same historical episode as if they were N independent
+analogues. Instead, candidates are ranked by similarity and greedily selected only if at least `min_gap_days`
+(30) from every already-selected date, so the results span genuinely different episodes.
+
+**Decision — forward returns and maximum drawdown are gated by the query's own `as_of`, never by what
+happens to be present in the fetched bar range.** `cfi.similarity.outcomes.forward_return` and `max_drawdown`
+both check that the horizon's target date is at or before the caller's `as_of` before reporting a value —
+returning a first-class `"not_yet_known"` status otherwise (R3: missing is a first-class state), regardless of
+whether a bar dated after that target happens to exist in the fetched range (a deliberate look-ahead-leak test
+proves this in `test_similarity_outcomes.py`, per TODO.md's own long-standing suggestion for this phase). A
+partial (not-yet-complete) drawdown window is reported with a `partial` flag rather than withheld entirely,
+since it reflects only genuinely elapsed, real data — never a projection of what the remainder of the window
+might bring.
+
+**Decision — no predicted future return; a distribution across analogues instead.** The API never produces
+a single expected/forecast return. Each of the (up to 5) detailed analogue rows reports its own actual
+historical forward returns; a broader, still de-duplicated set of up to 15 analogues (`max_distribution_sample`)
+feeds a per-horizon distribution (count, min, p25, median, p75, max) built with Python's `statistics` module,
+reported as `"insufficient_data"` below `min_distribution_sample` (3) rather than a distribution built from too
+few points.
+
+**Alternatives considered.** Reusing `cfi.regime.snapshot.gather_snapshot` directly and only adding the 2 new
+fields via a second, separate `derivatives().asset()` call (rejected: would call the same domain service twice
+per date for no benefit, and Phase 14's committed module would need to either be modified — reopening a closed
+phase, R13 — or imported for internals it was not designed to expose). Recomputing volatility from scratch for
+each analogue (rejected: `market_structure.overview()`'s own `volatility.annualized_pct`, already fetched as
+part of the 9-feature snapshot, is the same figure and reusing it avoids a second, redundant bar-range fetch
+per analogue). A single combined drawdown+forward-return bar fetch per analogue (rejected in favour of one
+bulk bar fetch per request, covering the earliest selected analogue through `as_of` — cheaper, and the
+point-in-time cutoff is identical either way since both use the same `as_of`).
+
+**Consequences.** No new database migration (the engine has zero storage of its own). New API surface:
+`/api/v1/similarity/{catalog,current}`, registered in `cfi/api/app.py` alongside every other domain router.
+Unit tests cover `cfi.similarity.parameters` (weights summing to 1, fixed-bound normalization, hard `KeyError`
+on an unknown version), `cfi.similarity.scorer` (common-feature comparison, insufficient-data gating), `cfi.
+similarity.outcomes` (forward return/drawdown knowability gating, including deliberate look-ahead-leak tests),
+`cfi.similarity.search` (candidate sampling, de-duplicated selection, and a look-ahead test proving each
+candidate is gathered at its own date only) and `cfi.similarity.snapshot`'s pure parsing helpers — all against
+fully synthetic data, no database required. Integration tests (DB-gated) cover the catalog's shape and the
+empty-database `"insufficient_data"` path through the real API; a fully "ok" search needs the same seven
+domains populated across many historical dates, each already covered by its own integration suite, so
+re-seeding them here was deliberately scoped out (documented, not silently narrowed). Frontend work was not
+part of the Phase 15 request as given and was not built.

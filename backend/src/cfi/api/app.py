@@ -24,6 +24,7 @@ from cfi.api.routes import (
     meta,
     regime,
     retail,
+    similarity,
     whales,
 )
 from cfi.cache.redis import check_redis, create_redis
@@ -106,4 +107,5 @@ def create_app(
     app.include_router(market_structure.router)
     app.include_router(divergence.router)
     app.include_router(regime.router)
+    app.include_router(similarity.router)
     return app

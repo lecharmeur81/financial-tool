@@ -1020,6 +1020,94 @@ performance_note:     when the current classification itself is "insufficient_da
 
 ---
 
+## 5k. Historical Similarity Engine (implemented in Phase 15)
+
+**No datasets ingested.** `cfi/similarity/` reads nothing from any provider — pure computation, the same
+posture as `cfi/regime/` (Phase 14) and `cfi/divergence/` (Phase 13). The similarity score is a **Statistical
+Signal (L3)**: a documented, fixed-normalization distance between the current 9-feature market state and a
+sampled historical date's own state, each read from already-published Calculated Metrics. It is never a
+Regime Classification of its own — each analogue's regime label simply cites Phase 14's already-computed
+classification for that date — and never an AI Interpretation (L5) or a price forecast.
+
+### The 9 features (`cfi/similarity/parameters.py`, version `similarity_v1`)
+
+| Feature | Weight | Source field | Normalization |
+|---|---|---|---|
+| Institutional flow score | 0.15 | `InstitutionalService.score()` | shift -100..100 -> 0..100 |
+| Whale flow score | 0.15 | `WhaleService.score()` | shift -100..100 -> 0..100 |
+| Retail activity score | 0.10 | `RetailService.overview()['activity_score']` | identity (already 0..100) |
+| Liquidity score | 0.10 | `LiquidityService.overview()['score']` | shift -100..100 -> 0..100 |
+| Perp funding rate (annualised, 7d) | 0.10 | `DerivativesService.asset()['funding']['annualised_7d_pct']` | clamp to [-100, 100]%, linear -> 0..100 |
+| Open interest, 7-day change | 0.10 | `DerivativesService.asset()['open_interest']['change_7d_pct']` | clamp to [-50, 50]%, linear -> 0..100 |
+| Realized volatility percentile | 0.10 | `MarketStructureService.overview()['assets']['BTC']['volatility']['percentile']` | identity (already a percentile) |
+| Market structure score | 0.10 | `MarketStructureService.overview()['score']` | shift -100..100 -> 0..100 |
+| Macro score | 0.10 | `MacroService.overview()['score']` | shift -100..100 -> 0..100 |
+
+Weights sum to exactly 1.00. Normalization bounds are **fixed constants, decided once, independent of any
+date's own data** (ADR-0058) — never a trailing percentile or a batch min/max, specifically so that no
+candidate's similarity score can ever be influenced by data from another date (including a later one).
+
+### Similarity methodology (`cfi/similarity/scorer.py`)
+
+```
+inputs:           the 9 features above, gathered for the query date and for each candidate date via
+                  cfi.similarity.snapshot.gather_snapshot — each read through the owning domain's own
+                  already-tested public service method, never a raw query
+comparison:       only features where BOTH dates are "ok" are compared; each contributes
+                  weight * (normalized_query - normalized_candidate)^2 to a weighted mean-squared
+                  difference over the compared features' combined weight
+similarity_score: 100 - sqrt(weighted mean squared difference) — 0..100, 100 = identical normalized
+                  profile across every compared feature
+missing_policy:   a pair is not scored ("insufficient_data") if the compared features' combined weight is
+                  below min_available_weight (0.5) — never a misleadingly precise score from too little
+                  evidence (same discipline as cfi.regime.classifier's confidence)
+evidence_category: Statistical Signal (L3) — NOT a Regime Classification, NOT a probability, NOT a
+                  prediction
+owner_phase:      15 (2026-09-27)
+status:           implemented
+```
+
+### Candidate search and selection (`cfi/similarity/search.py`, `cfi/similarity/universe.py`)
+
+```
+sampling:         weekly (STEP_DAYS=7) over a 2-year lookback (LOOKBACK_DAYS=730) — a documented
+                  cost/precision trade-off mirroring cfi.regime.history.historical_examples (Phase 14);
+                  candidates must be at least MIN_CANDIDATE_AGE_DAYS (14) before the query's own as_of
+selection:        candidates ranked by similarity score, highest first; greedily selected only if at
+                  least MIN_GAP_DAYS (30) from every already-selected date — so results span genuinely
+                  different episodes rather than several consecutive weeks of the same one
+detailed_rows:    TOP_N_ANALOGUES (5) — date, similarity score, regime, forward returns, drawdown,
+                  volatility, and the per-feature comparison breakdown
+distribution_set: a larger, equally de-duplicated superset (MAX_DISTRIBUTION_SAMPLE=15, a superset of
+                  the detailed rows) whose forward returns feed the distribution section only — never
+                  used to produce a single predicted value
+```
+
+### Forward returns, maximum drawdown and volatility (`cfi/similarity/outcomes.py`)
+
+```
+forward_return:   % change in BTC close price from the analogue date to analogue_date + horizon_days,
+                  for horizons (7, 30, 90) — reported ONLY once that target date is at or before the
+                  query's own as_of ("not_yet_known" otherwise, R3: missing is a first-class state);
+                  gated structurally, never by what happens to be present in the fetched bar range
+                  (proven by a deliberate look-ahead-leak test, per TODO.md's own Phase 15/16 suggestion)
+max_drawdown:     largest peak-to-trough decline in BTC close price within [analogue_date,
+                  analogue_date + 90 days], truncated to whatever of that window has already elapsed by
+                  as_of (marked "partial" when not yet complete — real, observed data, never a
+                  projection of the remaining window)
+volatility:       the same analogue date's own realized volatility (annualized %, market_structure's
+                  volatility.annualized_pct) already fetched as part of its 9-feature snapshot — not a
+                  forward-looking measure, no separate recomputation
+no_prediction:    the API never produces a single expected/forecast return — only each analogue's own
+                  realized outcome, plus a distribution (count, min, p25, median, p75, max) across the
+                  broader analogue set per horizon, reported "insufficient_data" below
+                  MIN_DISTRIBUTION_SAMPLE (3) analogues rather than a range built from too few points
+owner_phase:      15 (2026-09-27)
+status:           implemented
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.

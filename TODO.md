@@ -440,6 +440,42 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 - [ ] **Frontend page** — not built this phase (not requested; see PROGRESS.md). A natural next step once the
       user asks for it.
 
+## Phase 15 — Historical Similarity Engine (built 2026-09-27; see PROGRESS.md)
+
+- [x] No new ingestion; pure computation over 9 features (institutional flow score, whale flow score, retail
+      activity score, liquidity score, perp funding rate, open interest 7d change, realized volatility
+      percentile, market structure score, macro score), read via `cfi.divergence.adapters.Adapters` as a
+      service factory (a self-contained `cfi.similarity.snapshot`, not importing Phase 14's module — R13).
+      Weekly-sampled candidates over a 2-year lookback, de-duplicated by a 30-day minimum gap; a documented
+      fixed-normalization similarity score (never data-derived, so no candidate's score can be influenced by
+      another date); per-analogue regime label (citing Phase 14), 7/30/90-day forward return, maximum
+      drawdown and volatility, gated so a horizon is only shown once genuinely knowable as of `as_of`; a
+      distribution (never a single predicted value) across a broader analogue set per horizon. API:
+      `/api/v1/similarity/{catalog,current}`. See DATA_DICTIONARY.md §5k, DECISIONS.md ADR-0058.
+- [x] Look-ahead-bias tests: a deliberate leaky-fixture test proving `forward_return`/`max_drawdown` never use
+      bars dated after `as_of` even when present in the fetched range, and a test proving each candidate date
+      is gathered at its own date only, never the query's later `as_of` — see `test_similarity_outcomes.py`,
+      `test_similarity_search.py` (closes the Phase 15/16 reminder below).
+- [ ] **User:** run the full test/lint/mypy suite and `docker compose up --build` on Windows — see PROGRESS.md
+      for the exact commands and expected counts. The integration suite (`test_similarity_api.py`) needs
+      `CFI_DATABASE_URL`/`CFI_REDIS_URL`, unavailable in Claude's own sandbox; only the unit suite (fully
+      synthetic, no DB) has been run and verified in this environment.
+
+### Decisions needed from the user (Phase 15)
+
+- [ ] **The 9 features' weights and normalization bounds are v1 judgment parameters** — 5 reuse each domain
+      score's own already-published `-100..+100` range as-is, 2 reuse an already-published `0..100` scale,
+      and 2 (funding, open-interest change) use fixed clamp bounds chosen as generous v1 values, not fitted to
+      data. See `cfi/similarity/parameters.py`, DATA_DICTIONARY.md §5k, ADR-0058. Send different weights or
+      clamp bounds if these don't match the user's own intuition.
+- [ ] **Candidate sampling is weekly over a 2-year lookback, de-duplicated by a 30-day minimum gap between
+      selected analogues** — a documented cost/precision trade-off (ADR-0058). Accept this, or ask for daily
+      sampling / a longer lookback in a later phase (at a higher, documented compute cost).
+- [ ] **Similarity search is evaluated only for BTC** (`cfi.similarity.universe.BENCHMARK_ASSET`), the same
+      "one benchmark" convention as Phases 12/13/14. Accept this scope, or ask for per-asset similarity later.
+- [ ] **Frontend page** — not built this phase (not requested; see PROGRESS.md). A natural next step once the
+      user asks for it.
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.
@@ -477,9 +513,10 @@ against official documentation before any adapter is written.
 
 ## Later phases — reminders captured now
 
-- [ ] **Phase 15/16:** build a deliberate look-ahead leak into a test fixture and prove the leakage tests catch it.
+- [x] **Phase 15/16:** build a deliberate look-ahead leak into a test fixture and prove the leakage tests catch
+      it — done in Phase 15, see `test_similarity_outcomes.py`.
 - [ ] **Phase 15/16:** record the number of strategy/signal variants tried per backtest (multiple-testing control).
-- [ ] **Phase 13/14:** regime and similarity models must be evaluated on periods not used to design them.
+- [ ] **Phase 13/14/15:** regime and similarity models must be evaluated on periods not used to design them.
 - [ ] **Phase 19:** AI validator must reject any number not present in the snapshot; add adversarial tests (prompted to invent data).
 - [ ] **Phase 21:** alerts fire on signals/regimes, never on AI text alone.
 - [ ] **Phase 25:** API-key storage, rate-limit abuse, prompt injection via ingested text (e.g. social data fed to Claude), dependency audit.

@@ -1309,3 +1309,158 @@ verified), then the user runs `uv sync`, `uv run pytest -q`, `uv run ruff check 
 updated with the resulting commit hash and verification transcript once the user reports back, following the
 exact pattern of every prior phase.
 
+**Verified on Windows (2026-09-27)**
+
+All 18 files (7 new `cfi/regime/*.py`, 1 new `api/routes/regime.py`, 1 modified `api/app.py`, 4 new unit test
+files, 1 new integration test file, plus the 4 modified doc files) delivered via the device bridge to
+`E:\FINANCIAL TOOL` and byte-for-byte SHA-256 checksum-verified before the user ran the suite themselves.
+
+| Check (Windows, `E:\FINANCIAL TOOL\backend`) | Result |
+|---|---|
+| `uv sync` | Resolved 62 packages, checked 60 packages |
+| `uv run pytest -q` | **591 passed, 162 skipped, 0 failed** in 3.51s — including the 2 new `test_regime_api.py` tests, correctly skipped (`CFI_DATABASE_URL`/`CFI_REDIS_URL` not set for this run) |
+| `uv run ruff check .` | All checks passed! |
+| `uv run ruff format --check .` | 252 files already formatted |
+| `uv run mypy` | Success: no issues found in 247 source files |
+
+Identical to the sandbox's own self-verification (591 passed, 162 skipped, 0 failed; ruff clean; 252 files
+formatted; mypy clean across 247 files) — confirming the delivered files are correct on the real development
+machine, not just in the scratch environment.
+
+**Git status confirmed** (only the 18 Phase 14 files staged; `git add -A` / `git status` reviewed before
+committing — no `.env`, no unrelated files):
+```
+modified:   ../DATA_DICTIONARY.md
+modified:   ../DECISIONS.md
+modified:   ../PROGRESS.md
+modified:   ../TODO.md
+modified:   src/cfi/api/app.py
+new file:   src/cfi/api/routes/regime.py
+new file:   src/cfi/regime/__init__.py
+new file:   src/cfi/regime/classifier.py
+new file:   src/cfi/regime/history.py
+new file:   src/cfi/regime/parameters.py
+new file:   src/cfi/regime/service.py
+new file:   src/cfi/regime/snapshot.py
+new file:   src/cfi/regime/universe.py
+new file:   tests/integration/test_regime_api.py
+new file:   tests/unit/test_regime_classifier.py
+new file:   tests/unit/test_regime_history.py
+new file:   tests/unit/test_regime_parameters.py
+new file:   tests/unit/test_regime_snapshot.py
+```
+
+**Committed:** `42bd2b0` — `[P14] Market Regime Engine: seven rule-based regimes, explainable confidence`
+(18 files changed, 2117 insertions(+), 3 deletions(-))
+
+Phase 14 is therefore fully verified end-to-end on the development machine, not just in the scratch environment
+here. No outstanding verification gap remains beyond the same recurring, expected integration-suite
+database-gated skips as every prior phase (closed only when the user runs against a live Postgres instance).
+
+### 2026-09-27 — Phase 15: Historical Similarity Engine, 9 fixed-normalized features, weekly-sampled analogues
+
+**What changed** (ADR-0058; user's exact spec: "PHASE 15 — HISTORICAL SIMILARITY: Build a Historical
+Similarity Engine. The engine should compare the current market state against historical periods. Features
+may include: institutional flows, whale flows, retail activity, liquidity, funding, OI, volatility, market
+structure, macro. Normalize features appropriately. Use a documented similarity methodology. For each
+historical analogue display: date, similarity score, regime, 7-day forward return, 30-day forward return,
+90-day forward return, maximum drawdown, volatility. IMPORTANT: Historical future returns may only be
+displayed when they would genuinely have been known after that historical date. Never allow future information
+to influence the similarity score. Do not produce a predicted future return. Show distributions and historical
+ranges instead. Create look-ahead-bias tests. Commit. Stop.")
+
+- **Research first** (delegated subagent survey — R3/R7): confirmed the exact price/OHLCV storage
+  (`obs.market_bar`, via `cfi.market.queries.MarketQueries.bars()`, already point-in-time filtered), the exact
+  return shape of every domain's composite score and each domain's own already-published, documented numeric
+  range (`-100..+100` for institutional/whale/liquidity/market-structure/macro; `0..100` for retail activity
+  and derivatives health), the exact standalone (non-composite) funding and open-interest fields on
+  `DerivativesService.asset()`, and confirmed no shared stats/return/drawdown utility exists anywhere in the
+  codebase (would need to be built fresh, reusing only `market_structure`'s `Bar`/`bars_from_rows` helpers for
+  parsing bars).
+- **New `backend/src/cfi/similarity/` package — ingests nothing of its own** (no `sources.py`, no `jobs.py`, no
+  worker/schedule changes, no new provider settings): `universe.py` (benchmark asset, lookback/step/gap/top-N
+  parameters), `parameters.py` (the versioned `similarity_v1` parameter set: 9 `FeatureDef`s with fixed,
+  documented normalization bounds — never data-derived, so no candidate's score can be influenced by another
+  date, including a later one — see ADR-0058's rejection of percentile-rank/batch normalization), `snapshot.py`
+  (`gather_snapshot`: a self-contained 9-feature reader via `cfi.divergence.adapters.Adapters`, deliberately not
+  importing Phase 14's already-committed `cfi.regime.snapshot` — R13), `scorer.py` (pure, no-I/O weighted-RMSE
+  similarity scoring with an insufficient-data gate, mirroring `cfi.regime.classifier`'s confidence discipline),
+  `outcomes.py` (forward return / maximum drawdown / distribution — each forward-looking calculation gated on
+  the query's own `as_of`, never on what happens to be present in the fetched bar range), `search.py`
+  (weekly-sampled candidate dates, scoring, and greedy de-duplicated top-N/distribution-sample selection,
+  mirroring the backward-walk shape `cfi.regime.history` already established), `service.py`
+  (`SimilarityService`: `catalog()`, `current()` — one bulk BTC bar fetch per request, reused across every
+  selected analogue's forward-return/drawdown calculation).
+- **API:** new router `backend/src/cfi/api/routes/similarity.py` — `/api/v1/similarity/{catalog,current}`,
+  registered in `api/app.py`, mirroring every other domain router's `_service(request)`/`_times()` pattern.
+- **Look-ahead-bias tests (this phase's explicit instruction, and TODO.md's own long-standing Phase 15/16
+  reminder):** a deliberately leaky bar fixture proves `forward_return`/`max_drawdown` never use a bar dated
+  after the query's own `as_of` even when one is present in the fetched range; a separate test proves every
+  candidate date is gathered with `as_of = knowledge_time = candidate_date`, never the query's later `as_of`.
+- **Scope decisions, each recorded transparently, not silently narrowed (see ADR-0058/TODO.md):** similarity is
+  evaluated only for BTC (the same "one benchmark" convention as Phases 12/13/14); candidates are sampled
+  weekly over a 2-year lookback and de-duplicated by a 30-day minimum gap (documented cost/precision trade-off,
+  not exhaustive daily search); the 9 feature weights and the 2 fixed clamp bounds (funding, open-interest
+  change) are v1 judgment parameters, not fitted to data; no predicted future return is ever produced — only
+  each analogue's own realized outcome plus a distribution across the broader analogue set.
+- **Frontend: not built.** Not requested for this phase (matching every prior backend-only phase's own scope
+  decision).
+- **Docs:** ADR-0058, DATA_DICTIONARY.md §5k, TODO.md Phase 15 section, this log entry.
+
+**Tests run (Claude's scratch environment: Python 3.12, no local PostgreSQL/Redis — see below)**
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_similarity_parameters.py`, `test_similarity_snapshot.py`, `test_similarity_scorer.py`, `test_similarity_outcomes.py`, `test_similarity_search.py` | 34 new tests, all passed, fully synthetic (no DB) |
+| New integration tests: `test_similarity_api.py` (written against a real PostgreSQL harness, same pattern as every prior phase; deliberately scoped to the catalog's shape and the empty-database path — a fully "ok" search needs all seven domains populated across many historical dates, each already covered by its own integration suite) | 2 new tests — not executed here (no local `CFI_DATABASE_URL`/`CFI_REDIS_URL` in this workspace; will run on the user's Windows machine) |
+| Backend `uv run pytest -q` (whole suite, unit-only in this workspace) | **623 passed, 164 skipped, 0 failed** in 2.34s |
+| `uv run ruff check .` | all checks passed |
+| `uv run ruff format --check .` | 267 files already formatted |
+| `uv run mypy` (strict, whole backend) | Success: no issues found in 262 source files |
+
+**Bugs found and fixed during this phase's own test run** (first time any of this code executed — R7): none
+were logic bugs in the production code itself. Two mypy errors were fixed, both in test fixtures, not
+production code: two dict literals in `test_similarity_scorer.py` needed an explicit `dict[str, Decimal |
+None]` annotation (mypy had inferred `dict[str, Decimal]` from `dict(_ALL_OK)` before a `None` was assigned
+into them). Several ruff issues were fixed — one `RUF002` (an ambiguous Unicode minus sign in a docstring,
+replaced with `...`), two `PT018` (compound assertions split into separate `assert` statements), and two
+`E501` (line too long) — none changed any behavior.
+
+Covered by tests: `cfi.similarity.parameters` (weights sum to exactly 1, all 9 feature ids present, hard
+`KeyError` on an unknown version, `normalize()`'s three normalization methods including clamping outside fixed
+bounds); `cfi.similarity.scorer` (identical snapshots score 100, a more different candidate scores lower, only
+common `"ok"` features are compared, `"insufficient_data"` below the minimum available weight);
+`cfi.similarity.outcomes` (forward return computed once a horizon has elapsed, `"not_yet_known"` when it has
+not, the deliberate look-ahead-leak test, maximum drawdown finding the correct peak-to-trough decline, a
+partial-window drawdown never using bars after `as_of`, `build_distribution`'s insufficient-data gate and its
+range — never a single value); `cfi.similarity.search` (candidate dates respect the minimum age and lookback
+window and are weekly spaced, `select_analogues` picks highest similarity first and skips anything within the
+minimum gap of an already-selected date, the distribution sample is a capped superset of the top-N, and the
+look-ahead test proving `gather_candidates` only ever gathers a candidate at its own date); `cfi.similarity.
+snapshot`'s pure parsing helpers (`_decimal`, `_score_reading`, `_field_reading`); the integration suite
+(catalog shape with all 9 features summing to weight 1, the empty-database path returning
+`"insufficient_data"` with no analogues and no distribution) collects cleanly and is ready for the user's
+database-backed run.
+
+**Known limitations**
+- The new integration tests (`test_similarity_api.py`) were written and confirmed to collect cleanly, but have
+  not been executed against a real PostgreSQL instance in this workspace (none is running here) — the user's
+  run on Windows is the real verification, same pattern as every prior phase's first Windows run. A fully "ok"
+  search (multiple historical dates all with sufficient data) is not separately re-tested here — each domain's
+  own integration suite already proves its own ingestion/scoring pipeline, and the search/scoring logic is
+  fully unit-tested against synthetic snapshots.
+- The 9 feature weights and the 2 fixed clamp bounds (funding annualised %, open-interest 7-day change %) are
+  v1 judgment parameters awaiting the user's explicit review (TODO.md), same posture as every score/parameter
+  set in this platform.
+- Candidate search samples weekly over a 2-year lookback and de-duplicates selected analogues by a 30-day
+  minimum gap — a documented performance/precision trade-off, not an exhaustive daily search over all history.
+- Similarity is evaluated only for BTC (the platform's established benchmark asset) — not a per-asset
+  similarity search.
+- No frontend page — out of scope for this phase as instructed.
+
+**Next step:** deliver the new/modified files to the user's Windows machine via the device bridge (checksum-
+verified), then the user runs `uv sync`, `uv run pytest -q`, `uv run ruff check .`, `uv run ruff format --check
+.`, `uv run mypy` and commits from `E:\FINANCIAL TOOL\backend` (Git runs there — C5); this section will be
+updated with the resulting commit hash and verification transcript once the user reports back, following the
+exact pattern of every prior phase.
+
