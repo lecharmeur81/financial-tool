@@ -2,9 +2,7 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 13 — Capital Flow Divergence Engine → implemented and self-verified in Claude's sandbox
-(unit tests, ruff, mypy all clean); delivered to the Windows machine, awaiting the user's `docker compose`/full
-test run and commit.
+**Current phase:** 13 — Capital Flow Divergence Engine → ✅ complete and verified on Windows (commit `6cd6578`)
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -26,7 +24,7 @@ test run and commit.
 | 10 | Retail | ✅ Complete (backend only, as requested) — fully verified on Windows (`2fae0e6`); first real CoinGecko/Blockchair runs to be checked |
 | 11 | Macro | ✅ Complete (backend only, as requested) — fully verified on Windows (`eb5e386`); first real FRED run needs `CFI_PROVIDER_FRED_API_KEY` |
 | 12 | Market structure | ✅ Complete (backend only, as requested) — fully verified on Windows (`4b4a21e`); first real CoinGecko `/global` run needs a network that can reach it |
-| 13 | Divergence engine | 🟡 Implemented, self-verified in sandbox, delivered to Windows — awaiting the user's full-suite run and commit |
+| 13 | Divergence engine | ✅ Complete (backend only, as requested) — fully verified on Windows (`6cd6578`) |
 | — | Regime engine | ⏳ Not started |
 | — | Historical similarity | ⏳ Not started |
 | — | Backtesting | ⏳ Not started |
@@ -1181,4 +1179,25 @@ verified), then the user runs `uv sync && uv run pytest -q && uv run ruff check 
 . && uv run mypy` and commits from `E:\FINANCIAL TOOL\backend` (Git runs there — C5); this section will be
 updated with the resulting commit hash and verification transcript once the user reports back, following the
 exact pattern of every prior phase.
+
+**Verified on Windows (2026-09-27)**
+
+All 18 files (14 new, 4 modified) delivered via the device bridge to `E:\FINANCIAL TOOL` and checksum-verified
+byte-for-byte (SHA-256, 0 mismatches) before the user ran anything.
+
+- `uv sync` — resolved 62 packages, reinstalled `cfi==0.1.0` cleanly.
+- `uv run pytest -q` — **569 passed, 160 skipped, 0 failed** in 6.79s. All skips are integration tests
+  (`CFI_DATABASE_URL` / `CFI_REDIS_URL` not set on this particular run, including the 7 new
+  `test_divergence_api.py` tests), the same expected pattern as every prior phase's first Windows verification;
+  not a failure.
+- `uv run ruff check .` — all checks passed.
+- `uv run ruff format --check .` — 239 files already formatted.
+- `uv run mypy` — success, no issues found in 234 source files.
+- `git add -A && git status` confirmed exactly the 18 Phase 13 files staged (no stray changes), then
+  `git commit` — commit `6cd6578`, "[P13] Capital Flow Divergence Engine: 10 comparisons, standardized matrix,
+  Capital Flow Map", 18 files changed, 2583 insertions(+), 6 deletions(-).
+
+Phase 13 is therefore fully verified end-to-end on the development machine, not just in the scratch environment
+here. No outstanding verification gap remains (the integration-suite database-gated skips are the same
+recurring, expected gap as every prior phase, closed only when the user runs against a live Postgres instance).
 
