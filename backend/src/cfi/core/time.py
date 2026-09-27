@@ -18,8 +18,14 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 EpochUnit = Literal["s", "ms"]
 
-_PERIOD = re.compile(r"^(\d+)(m|h|d|w)$")
+_PERIOD = re.compile(r"^(\d+)(mo|m|h|d|w)$")
 _PERIOD_UNITS = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
+# Calendar months have no fixed length; "mo" periods (Phase 11 — macro data: CPI, PCE,
+# unemployment) use a nominal 30-day length for scheduling/freshness bucketing only. This is a
+# documented approximation, never used to compute an exact release or period-end date — real
+# monthly economic data uses ``AvailabilityRule("event_time_plus", ...)`` with a delay estimated
+# from the series' actual documented release schedule, not from this nominal length.
+_NOMINAL_MONTH_DAYS = 30
 
 
 def utc_now() -> datetime:
@@ -67,15 +73,20 @@ def parse_timestamp(value: str, *, source_timezone: str | None = None) -> dateti
 
 
 def parse_period(period: str) -> timedelta | None:
-    """``'1h'`` → 1 hour. ``'event'`` (irregular series) → ``None``."""
+    """``'1h'`` → 1 hour. ``'1mo'`` → a nominal 30-day month (approximation; see module note
+    above — Phase 11). ``'event'`` (irregular series) → ``None``."""
     if period == "event":
         return None
     match = _PERIOD.fullmatch(period)
     if not match:
-        raise ValueError(f"unsupported period {period!r} (use e.g. 1m, 5m, 1h, 8h, 1d, 1w, event)")
+        raise ValueError(
+            f"unsupported period {period!r} (use e.g. 1m, 5m, 1h, 8h, 1d, 1w, 1mo, event)"
+        )
     amount, unit = int(match.group(1)), match.group(2)
     if amount <= 0:
         raise ValueError("period must be positive")
+    if unit == "mo":
+        return timedelta(days=_NOMINAL_MONTH_DAYS * amount)
     return timedelta(**{_PERIOD_UNITS[unit]: amount})
 
 

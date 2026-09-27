@@ -93,6 +93,16 @@ class Settings(BaseSettings):
     def retail_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.retail_providers.split(",") if p.strip()]
 
+    # Macro environment (Phase 11). Comma-separated provider IDs the workers ingest from. FRED
+    # needs a free API key (CFI_PROVIDER_FRED_API_KEY, required — unlike every optional-key
+    # provider in this project except SoSoValue); without it, its jobs are skipped and the
+    # dashboard says so.
+    macro_providers: str = "fred"
+
+    @property
+    def macro_provider_ids(self) -> list[str]:
+        return [p.strip() for p in self.macro_providers.split(",") if p.strip()]
+
     @property
     def market_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.market_providers.split(",") if p.strip()]

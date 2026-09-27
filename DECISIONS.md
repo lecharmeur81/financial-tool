@@ -179,6 +179,11 @@ The architecture design work is unscheduled until the user places it in the phas
 **Amendment 2 (2026-09-23).** The user's guide defines Phase 2 as "Architecture" (ADR-0014 – ADR-0044). Infrastructure is unscheduled;
 phase numbers from 3 onward are provisional.
 
+**Amendment 3 (2026-09-27).** The user issued "PHASE 11 — MACRO" directly, so Phase 11 is now "Macroeconomic data
+layer" (see ADR-0054), not "Market structure" as the provisional table previously listed at that number. "Market
+structure" is unscheduled again until the user places it; phase numbers from 12 onward remain provisional until
+each is issued, same as before.
+
 ---
 
 ## ADR-0013 — Master engineering rules
@@ -1358,3 +1363,114 @@ and for the API (derivatives proxy and small-transaction activity verified again
 expected result using the same production metric functions; percentiles and both scores verified for shape —
 status, sample size, measurement class — with their numeric formulas already covered at the unit level).
 Publishing a v2 parameter set for either score follows the same append-only pattern as ADR-0051/ADR-0052.
+
+---
+
+## ADR-0054 — Phase 11: macroeconomic data layer, FRED provider, monthly cadence, Macro Environment Score
+
+**Status:** Accepted (implemented 2026-09-27)
+
+**Context.** The user asked to build the macroeconomic data layer, tracking DXY, US 2-year and 10-year
+yields, the Fed funds rate, CPI, PCE, unemployment, VIX, S&P 500, Nasdaq, gold, oil and global liquidity
+proxies, wherever reliable historical/current data is available; to normalise all macro timestamps; to
+support daily, weekly, monthly and event-based cadence; and to build a Macro Environment Score with its
+components exposed, explicitly never converted into a deterministic crypto prediction.
+
+**Decision — a single provider, the official FRED keyed JSON API, over the undocumented keyless CSV
+endpoint.** FRED's raw data endpoints (both `fredgraph.csv` and `api.stlouisfed.org/fred/...`) are blocked by
+the sandboxed build environment's egress proxy, but FRED's own HTML documentation pages are not — the same
+class of split seen with Blockchair/Binance/DefiLlama in earlier phases. `WebSearch`/`WebFetch` against
+`fred.stlouisfed.org/docs/api/fred/series_observations.html` confirmed the real, current shape of the
+documented `series/observations` endpoint (base URL, required `api_key` and `file_type=json` parameters, and
+the `realtime_start`/`realtime_end`/`vintage_dates` parameters for point-in-time vintage data) without ever
+needing a live response. The official JSON API was chosen over `fredgraph.csv` (the graph page's underlying
+CSV download, keyless but not a documented, versioned API surface) precisely because it is documented and
+versioned — matching R8's adapter-architecture requirement and R3's "never fabricate provider capabilities"
+rule. `CFI_PROVIDER_FRED_API_KEY` is required, not optional, the same pattern as SoSoValue (Phase 6).
+
+**Decision — three scope calls, each recorded transparently rather than silently substituted or dropped.**
+- **DXY substitute.** The real ICE US Dollar Index (DXY) is proprietary/licensed and not freely available
+  from FRED or any other free source found. `DTWEXBGS`, the Fed's own trade-weighted Broad Dollar Index, is
+  used instead — labelled "DXY substitute" everywhere it appears (dataset description, score component
+  description, API field), never presented as the literal DXY (R3 — never silently substitute one provider
+  or series for another).
+- **US-only net liquidity, not a true global aggregate.** "Global liquidity proxies" was in the user's list,
+  but no free source aggregates non-US central-bank balance sheets (China, EU, Japan, etc.) this phase. The
+  system instead computes and clearly labels a **US-only** net-liquidity proxy: Fed balance sheet (`WALCL`,
+  weekly) minus Treasury General Account (`WTREGEN`, weekly) minus overnight reverse repo (`RRPONTSYD`,
+  daily), a commonly cited formulation. Every field and docstring referencing it says "US-only proxy, not a
+  true global aggregate"; "true global liquidity aggregate" is recorded in `NOT_TRACKED` for the user's
+  review rather than silently narrowed without saying so.
+- **Gold marked `NOT_TRACKED`.** FRED's only free daily gold series (`GOLDAMGBD228NLBM`/`GOLDPMGBD228NLBM`,
+  the LBMA fixing) was discontinued in January 2022 at ICE Benchmark Administration's own request — confirmed
+  via `WebFetch` against FRED's own removal notice, not assumed. `WebSearch` for a free, keyless replacement
+  found only unverified third-party aggregators, so gold is recorded `NOT_TRACKED` rather than sourced from an
+  unverified provider (R3).
+
+**Decision — extend the shared `parse_period` utility for monthly cadence, rather than a period string that
+misrepresents true cadence.** The spec explicitly requires supporting monthly data (CPI, PCE, unemployment,
+M2 monthly). `cfi/core/time.py`'s `parse_period` previously supported only minutes/hours/days/weeks; it now
+also accepts `"1mo"` (a nominal 30-day month, `_NOMINAL_MONTH_DAYS = 30`), added as a new regex alternative
+distinct from `"m"` (minutes) so existing period strings are unaffected — verified against the existing
+`test_periods()` test, unchanged and still passing. This is a small, deliberate, backward-compatible
+cross-cutting change to a shared utility, justified by an explicit phase requirement (R13 — not
+over-engineered; not a private one-off parser bolted onto the macro module alone).
+
+**Decision — conservative documented release-schedule delays for revised series, not full ALFRED vintage
+tracking.** CPI, PCE, unemployment and M2 are revised by their publisher after first release. FRED's default
+API returns only the current (most-revised) vintage; true point-in-time vintage data is available via FRED's
+own `realtime_start`/`realtime_end`/`vintage_dates` parameters (confirmed in its docs), but building
+full revision-history tracking was deliberately not done this phase — not requested, and would be
+over-engineering relative to the stated goal (R13). Instead, each series' `available_at` uses a conservative,
+documented publication-delay estimate via `AvailabilityRule("event_time_plus", delay, known_when_received=True)`
+— the same conservative-estimate pattern as Phase 9's DefiLlama 36-hour rule. The universe module's docstring
+records that true vintage support is available later if requested.
+
+**Decision — tolerance windows sized to worst-case staleness, found and fixed via real ingestion, not
+assumed.** Running the full FRED ingestion pipeline against a synthetic fake server (`tests/macro_fakes.py`)
+surfaced a genuine design flaw before any user-facing bug could occur: `cfi/macro/metrics.py`'s
+`latest()`/`trend()` tolerance windows (`DAILY_TOLERANCE`, `WEEKLY_TOLERANCE`, `MONTHLY_TOLERANCE`) were
+originally sized to roughly a series' publication delay alone. In fact, a data point's worst-case staleness —
+right before the *next* point supersedes it, under completely normal, correct operation — is
+**period length + publication delay**: a weekly series (7-day cadence, 3-day delay) can legitimately be up to
+~17 days old (7 + 3 + one more period before the next point clears its own delay), not just ~10. The original
+windows (5d/11d/50d) were too tight and would have produced spurious "unavailable" readings — including
+inside the Macro Environment Score itself — under ordinary, correct operation, not just at an edge case.
+Fixed to 7d/18d/95d with the reasoning recorded in the module's own comments. This is the kind of bug R7
+("never claim something works without testing it") exists to catch: it was found only by exercising the real
+ingestion → API pipeline end-to-end, not by unit-testing formulas in isolation.
+
+**Decision — one score, seven components, direction-annotated.** The **Macro Environment Score**
+(`macro_environment_score_v1`, `cfi/macro/score_parameters.py`) follows the same versioned-parameters and
+weighted-sub-score pattern established in ADR-0051/ADR-0052/ADR-0053 (frozen `ParameterSet` dataclass,
+`CURRENT_VERSION`, hard `KeyError` on an unknown version; sub-score = clip(value ÷ scale, −1, +1); score =
+100 × Σ(weight × sub-score) ÷ Σ(available weights); renormalisation on missing components; "Insufficient
+data" below `min_available_weight` 0.5). Components: yield-curve slope (0.20), real policy rate (0.20,
+inverted), VIX level (0.15, inverted), equity trend (0.15), dollar trend (0.10, inverted), net-liquidity trend
+(0.15), oil trend (0.05, inverted) — each carries a `direction_note` explaining which direction is
+accommodative vs. restrictive, since several components are inverted relative to their raw sign (e.g. a
+*lower* real policy rate is more accommodative). The score's fixed `semantic_note` states plainly it is not a
+crypto price prediction, matching the spec's explicit instruction not to convert macro data into a
+deterministic crypto prediction, and matching the same non-prediction framing used by every prior phase's
+score (Derivatives Health, Liquidity, Retail Activity/Speculation).
+
+**Alternatives considered.** Scraping FRED's graph-download CSV endpoint instead of the JSON API (rejected:
+undocumented, unversioned, more fragile to silent schema changes — R8). Sourcing gold from an unverified
+third-party aggregator rather than marking it `NOT_TRACKED` (rejected: R3 forbids fabricating or assuming
+provider capabilities that were not verified). Building a private one-off period parser inside the macro
+module rather than extending the shared `parse_period` (rejected: would duplicate logic already centralised
+in `cfi/core/time.py` and risk two divergent definitions of "a month"). Full ALFRED-style vintage tracking
+for revised series (rejected this phase as not requested and out of proportion to the ask — R13; noted as
+available later).
+
+**Consequences.** No new database migration (all 18 datasets are `kind="scalar"`, stored via the existing
+scheduled-source runner). The backend API (`/api/v1/macro/{catalog,overview,history}`) is complete and
+tested end-to-end: unit tests for the FRED adapter (request building, FRED's own `"."` missing-value marker,
+availability-rule wiring per period kind), the metrics module (all readings and conditions, including the
+corrected tolerance windows) and the score; integration tests for ingestion against a synthetic FRED fake
+(daily/weekly/monthly/event cadence, no-duplication-on-repeated-recent-window) and for the API (catalog
+shape, an "ok" score once every component has data, "insufficient_data" with nothing loaded, history
+endpoint). `CFI_PROVIDER_FRED_API_KEY` must be obtained and set by the user before this phase's data can flow
+in a live environment (restated in `TODO.md`). Frontend work was not part of the Phase 11 request as given
+and was not built. Publishing a v2 parameter set for the score follows the same append-only pattern as
+ADR-0051/ADR-0052/ADR-0053.

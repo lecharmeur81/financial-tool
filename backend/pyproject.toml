@@ -62,6 +62,7 @@ select = [
 "src/cfi/whales/**" = ["RUF001", "RUF002"]
 "src/cfi/derivatives/**" = ["RUF001", "RUF002"]
 "src/cfi/liquidity/**" = ["RUF001", "RUF002", "RUF003"]
+"src/cfi/macro/**" = ["RUF001", "RUF002", "RUF003"]
 "src/cfi/providers/{binance_futures,okx_derivatives}.py" = ["RUF001", "RUF002"]
 "tests/**/*derivative*.py" = ["RUF001", "RUF002", "RUF003", "S101"]
 "src/cfi/providers/blockchair.py" = ["RUF002"]

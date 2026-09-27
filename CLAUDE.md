@@ -328,15 +328,17 @@ Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 | 8 | Derivatives | 22 | Paper trading |
 | 9 | Liquidity | 23 | Decision journal |
 | 10 | Retail | 24 | Executive dashboard |
-| 11 | Market structure | 25 | Security + AI + stress testing |
+| 11 | Macro | 25 | Security + AI + stress testing |
 | 12 | Divergence engine | 26 | Production |
 | 13 | Regime engine | 27 | Real-time intelligence |
+| — | Market structure | | |
 
-Phases 0–10 follow the user's guide: 0 project foundation, 1 master engineering rules (Part B), 2 architecture,
+Phases 0–11 follow the user's guide: 0 project foundation, 1 master engineering rules (Part B), 2 architecture,
 3 application foundation (infrastructure), 4 data ingestion engine, 5 market data, 6 institutional capital, 7 whale
-intelligence, 8 derivatives, 9 liquidity / stablecoins, 10 retail activity intelligence. Phase numbers from 11
-onward are **provisional** until the user issues each phase ("Macro", previously listed as 10, is not yet
-re-scheduled).
+intelligence, 8 derivatives, 9 liquidity / stablecoins, 10 retail activity intelligence, 11 macroeconomic data
+layer (ADR-0054, ADR-0012 Amendment 3). "Market structure" — previously listed provisionally as 11 — is
+unscheduled again until the user places it. Phase numbers from 12 onward remain **provisional** until the user
+issues each phase.
 
 **Testing rule:** integration tests that write data run only in the separate `<database>_test` database, which the test
 suite creates and migrates itself. Never point data-writing tests at the development or production database.

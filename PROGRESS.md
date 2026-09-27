@@ -2,9 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 10 — Retail → ✅ complete (backend only, as requested); tests written, full backend suite run
-and verified clean in the scratch environment (see below); not yet delivered to / committed on Windows
-**Next phase:** 11 — to be defined by the user (do not start automatically)
+**Current phase:** 11 — Macro → ✅ complete (backend only, as requested); built and tested in the scratch environment, pending delivery to and verification on Windows
+**Next phase:** to be defined by the user (do not start automatically)
 
 ---
 
@@ -22,8 +21,8 @@ and verified clean in the scratch environment (see below); not yet delivered to 
 | 7 | Whale intelligence | ✅ Complete — verified on Windows (`0529017`); first real whale runs to be checked |
 | 8 | Derivatives | ✅ Complete — verified on Windows (`ea124b5`); first real derivatives runs to be checked |
 | 9 | Liquidity | ✅ Complete (backend only, as requested) — fully verified on Windows (`f1b8f6a`); first real DefiLlama run to be checked |
-| 10 | Retail | ✅ Complete (backend only, as requested) — verified in the scratch environment; Windows delivery/commit pending |
-| — | Macro | ⏳ Not started |
+| 10 | Retail | ✅ Complete (backend only, as requested) — fully verified on Windows (`2fae0e6`); first real CoinGecko/Blockchair runs to be checked |
+| 11 | Macro | ✅ Complete (backend only, as requested) — built and tested in the scratch environment; pending delivery to and commit/verification on Windows; first real FRED run needs `CFI_PROVIDER_FRED_API_KEY` |
 | — | Market structure | ⏳ Not started |
 | — | Divergence engine | ⏳ Not started |
 | — | Regime engine | ⏳ Not started |
@@ -42,7 +41,7 @@ and verified clean in the scratch environment (see below); not yet delivered to 
 | — | Production | ⏳ Not started |
 | — | Real-time intelligence | ⏳ Not started |
 
-Phases 0–9 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
+Phases 0–11 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
 
 ---
 
@@ -795,8 +794,130 @@ numeric formulas are already covered at the unit level).
   from the existing adapter capabilities).
 - No frontend page — out of scope for this phase as instructed.
 
-**Not yet delivered to the user's machine.** This phase's files exist only in Claude's workspace; delivery via
-the device bridge (with checksum verification) and the user's own Windows `uv run pytest` / `ruff` / `mypy` /
-`git commit` are the next, still-outstanding step before this phase can be marked fully verified end-to-end,
-matching the standard this project has held every prior phase to.
+**Delivered to the user's machine** via the device bridge (checksum-verified, all 28 changed/new files
+byte-for-byte match); commit is the user's own step on Windows (Git runs there — C5).
+
+**Committed on Windows:** `2fae0e6` — `[P10] add retail activity intelligence layer, Retail Activity/Speculation
+Scores` (29 files changed, 3738 insertions, 13 deletions). Confirmed from the user's own terminal transcript.
+
+**Verified on Windows (2026-09-26):** the user ran the full suite from `E:\FINANCIAL TOOL\backend` in PowerShell:
+- `uv sync` — 62 packages resolved, 60 checked (already installed from Phase 9).
+- `uv run pytest -q` — **442 passed, 135 skipped, 0 failed** in 6.74s. All skips are integration tests
+  (`CFI_DATABASE_URL` / `CFI_REDIS_URL` not set — no local Postgres/Redis running on the dev machine, including
+  all 8 new `test_retail_ingestion.py`/`test_retail_api.py` tests), the same expected pattern as every prior
+  phase's first Windows verification; not a failure.
+- `uv run ruff check .` — all checks passed.
+- `uv run ruff format --check .` — 192 files already formatted.
+- `uv run mypy` — success, no issues found in 187 source files.
+
+Phase 10 is therefore fully verified end-to-end on the development machine, not just in the scratch environment
+here. No outstanding verification gap remains.
+
+### 2026-09-27 — Phase 11: Macroeconomic Data Layer, FRED provider, Macro Environment Score
+
+**What changed** (ADR-0054; user's exact spec: "PHASE 11 — MACRO: Build the macroeconomic data layer. Track
+where reliable historical/current data is available: DXY; US 2-year yield; US 10-year yield; Fed funds rate;
+CPI; PCE; unemployment; VIX; S&P 500; Nasdaq; gold; oil; global liquidity proxies. Normalize all macro
+timestamps. Support: daily; weekly; monthly; event-based data. Build: Macro Environment Score. Expose the
+components. Do not convert macro data into deterministic crypto predictions. Build tests. Commit. Stop.")
+
+- **Research first** (WebSearch/WebFetch, not assumption — R3): FRED's raw data endpoints are blocked by this
+  workspace's egress proxy, but FRED's own HTML documentation pages are not — confirmed the real, documented
+  shape of the official keyed `series/observations` JSON API this way, without live data access, the same
+  split seen with Blockchair/Binance/DefiLlama in earlier phases. Confirmed via `WebFetch` that FRED's only
+  free daily gold series was discontinued in January 2022 at ICE Benchmark Administration's own request, and
+  via `WebSearch` that no other verified free/keyless gold source exists — recorded `NOT_TRACKED` rather than
+  sourced from an unverified aggregator.
+- **New `backend/src/cfi/macro/` package:** `universe.py` (18 dataset specs across daily/weekly/monthly/event
+  cadence + `NOT_TRACKED`: gold, true global liquidity aggregate), `metrics.py` (`yield_curve_slope`,
+  `real_policy_rate`, `cpi_year_over_year`, `vix_condition`, generic `trend`, `us_net_liquidity`,
+  `net_liquidity_trend`, with worst-case-staleness-sized tolerance windows — see bugs below),
+  `score_parameters.py` + `score.py` (Macro Environment Score, versioned, signed −100…+100, 7 direction-
+  annotated components), `queries.py`, `service.py`, `sources.py`, `jobs.py`.
+- **New provider adapter, `cfi/providers/fred.py`:** the official FRED keyed JSON API
+  (`api.stlouisfed.org/fred/series/observations`), chosen over the undocumented keyless `fredgraph.csv`
+  endpoint because only the JSON API is documented and versioned (R8). Requires
+  `CFI_PROVIDER_FRED_API_KEY` (not optional — same pattern as SoSoValue, Phase 6). Handles FRED's own `"."`
+  missing-value marker as `quality_status = missing`, never a fabricated zero.
+- **Extended `cfi/core/time.py`'s shared `parse_period`** to support `"1mo"` (nominal 30-day month), a small,
+  deliberate, backward-compatible cross-cutting change justified by the phase's explicit "Support: monthly"
+  requirement, rather than a private one-off parser local to the macro module. Existing period-string tests
+  unaffected.
+- **API:** new router `backend/src/cfi/api/routes/macro.py` — `/api/v1/macro/{catalog,overview,history}`,
+  registered in `api/app.py`. New setting `CFI_MACRO_PROVIDERS` (default `fred`). Worker wiring
+  (`worker/app.py`, `worker/schedule.py`): a `macro.ingest` Celery task, all 18 datasets scheduled on the
+  `"backfill"` queue (not latency-sensitive, matching the SoSoValue precedent) at a cadence matched to each
+  series' own reporting frequency.
+- **Three scope decisions, each recorded transparently, not silently substituted or dropped:** `DTWEXBGS`
+  (Fed Broad Dollar Index) as a labelled **DXY substitute** (the real ICE DXY is proprietary/licensed); a
+  **US-only** net-liquidity proxy (Fed balance sheet − TGA − reverse repo), explicitly never presented as a
+  true global aggregate; gold `NOT_TRACKED` (see research above). All three restated in `TODO.md` for the
+  user's business/licensing review.
+- **Frontend: not built.** Not requested for this phase (matching Phases 9/10's own scope decisions). The
+  backend API is complete and ready for a frontend page whenever the user asks for one.
+- **Docs:** ADR-0054, DATA_DICTIONARY.md §5g, CLAUDE.md phase table (11 = Macro).
+
+**Tests run (scratch environment: PostgreSQL 16 + TimescaleDB, Redis, Python 3.12)**
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_macro_adapters.py`, `test_macro_metrics.py`, `test_macro_score.py` | 43 new tests, all passed |
+| New integration tests: `test_macro_ingestion.py` (real FRED adapter against a synthetic fake), `test_macro_api.py` (real PostgreSQL) | 10 new tests, all passed |
+| Backend `uv run pytest` (unit + integration + API, scratch PostgreSQL 16 + TimescaleDB + Redis) | 630 passed (577 + 53 new) |
+| `ruff format --check` / `ruff check` / `mypy` (strict), whole backend | clean |
+
+**Bugs found and fixed during this phase's own test run** (first time any of this code executed — R7: never
+claim something works without testing it):
+- **Tolerance windows too tight (a real production-logic bug, not a test artifact).** Running the full
+  ingestion → API pipeline against a synthetic FRED fake surfaced `net_liquidity_trend` reading
+  "unavailable" even with correct data present in the database. Root cause: a series' worst-case staleness
+  right before its *next* point supersedes it is `period_length + publication_delay`, not just the delay
+  (e.g. a weekly series with a 3-day delay can legitimately be up to ~17 days stale under normal, correct
+  operation). The original tolerances (5d/11d/50d) were too tight for ordinary operation. Fixed to 7d/18d/95d
+  in `cfi/macro/metrics.py`, with the reasoning recorded in the module's own comments.
+- The FRED fake test double (`tests/macro_fakes.py`) matched the request path against
+  `/series/observations`, but the adapter's `base_url` already includes `/fred`, so the full request path is
+  `/fred/series/observations` — every simulated request 404'd. Fixed to match the full path, the same class
+  of bug as Phase 10's CoinGecko fake.
+- A test fixture's fixed "now" clock was set one day *after* the real system clock; the API's
+  `as_of = min(given, real utc_now())` clamp then cut off data ingested against the fixture's own (future)
+  clock. Fixed by moving the fixture clock safely into the past and passing it explicitly as `as_of` in every
+  affected test, matching the established pattern in the liquidity/retail test suites.
+- A test incorrectly assumed a second identical ingestion run would add no rows; in fact the backfill state
+  machine legitimately continues advancing history on every call until complete. Renamed and rewrote the test
+  to check the true "no duplicate on a repeated *recent* window" behavior directly.
+- Several `E501` (line too long) and `PT018` (compound assertion) violations across the new module and test
+  files, one non-raw `pytest.raises(match=...)` regex, and two missing test-helper type annotations. All
+  fixed; no production behavior changed by any of these except the tolerance-window fix above, which is a
+  genuine correctness fix, and a new `pyproject.toml` per-file `RUF001`/`RUF002`/`RUF003` ignore for
+  `src/cfi/macro/**` (the module's formulas intentionally use real math symbols −, ×, ÷ — the same precedent
+  already established for `institutional/`, `whales/`, `derivatives/` and `liquidity/`).
+
+Covered by tests: FRED request building and FRED's own `"."` missing-value marker; availability-rule wiring
+per period kind (daily `period_end_plus`, monthly/event `event_time_plus` with `known_when_received`); every
+metric's conditions (yield-curve inverted/steep/normal, VIX elevated/calm/normal, generic trend up/down/flat)
+and unavailable/insufficient-data paths; the net-liquidity composite's unit conversion math; the score's
+parameter loading, weighted combination, renormalisation on a missing component, the insufficient-data floor,
+band boundaries, clipping, and the neutral-baseline default; real ingestion of all four cadence kinds against
+a synthetic FRED history, including the corrected no-duplication check; the full catalog/overview/history API
+responses, including an "ok" score once every component has data and "insufficient_data" with nothing loaded.
+
+**Known limitations**
+- `NOT_TRACKED` (gold spot price, true global liquidity aggregate) are sourcing-gap/scope decisions for the
+  user to review, not technical dead ends — see DATA_DICTIONARY.md §5g and TODO.md.
+- DXY is tracked via the Fed's Broad Dollar Index (`DTWEXBGS`) substitute, not the real, proprietary ICE DXY
+  — labelled as a substitute everywhere it appears, never presented as the real index.
+- CPI, PCE, unemployment and M2 use conservative documented release-delay estimates for point-in-time
+  availability, not full FRED vintage (`realtime_start`/`realtime_end`) tracking — deliberately out of scope
+  this phase (R13); available later if requested.
+- Score weights, scales and band boundaries are v1 methodology / initial parameters, chosen by design and not
+  fitted to data — awaiting the user's review, same posture as every other score in this platform.
+- No live FRED response has been captured from a network that can actually reach it from this workspace; the
+  user's first real ingestion run on Windows, after obtaining and setting `CFI_PROVIDER_FRED_API_KEY`, is the
+  real verification — same pattern as Phases 6–10.
+- No frontend page — out of scope for this phase as instructed.
+
+**Delivery to the user's machine, commit, and Windows verification are the next step** (device bridge,
+checksum-verified, then the user's own `uv run pytest` / `ruff` / `mypy` / commit on Windows — Git runs there,
+C5); not yet done as of this entry.
 

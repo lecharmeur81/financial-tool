@@ -22,6 +22,10 @@ from cfi.institutional.sources import credential_configured, source, sources_for
 from cfi.liquidity.jobs import ingest_source as ingest_liquidity_source
 from cfi.liquidity.sources import source as liquidity_source
 from cfi.liquidity.sources import sources_for as liquidity_sources_for
+from cfi.macro.jobs import ingest_source as ingest_macro_source
+from cfi.macro.sources import credential_configured as macro_credential_configured
+from cfi.macro.sources import source as macro_source
+from cfi.macro.sources import sources_for as macro_sources_for
 from cfi.market.jobs import backfill_days, backfill_step, ingest_latest
 from cfi.market.sources import ADAPTERS, datasets_for
 from cfi.market.universe import ASSET_SYMBOLS, dataset_by_id
@@ -56,6 +60,7 @@ app.conf.update(
         settings.derivative_provider_ids,
         settings.liquidity_provider_ids,
         settings.retail_provider_ids,
+        settings.macro_provider_ids,
     ),
 )
 
@@ -128,6 +133,13 @@ def _kick_institutional(**_: Any) -> None:
             args=(ret.provider_id, ret.dataset.dataset_id, ret.subject),
             queue=ret.queue,
             expires=ret.interval_seconds,
+        )
+    for mac in macro_sources_for(settings.macro_provider_ids):
+        app.send_task(
+            "macro.ingest",
+            args=(mac.provider_id, mac.dataset.dataset_id, mac.subject),
+            queue=mac.queue,
+            expires=mac.interval_seconds,
         )
 
 
@@ -215,6 +227,28 @@ def retail_ingest_task(provider_id: str, dataset_id: str, subject: str) -> dict[
         ctx = await rt.context()
         item = retail_source(provider_id, dataset_id, subject)
         results = await ingest_retail_source(ctx, item)
+        return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
+
+    return rt.run(go())
+
+
+@app.task(name="macro.ingest", time_limit=1800, soft_time_limit=1700)
+def macro_ingest_task(provider_id: str, dataset_id: str, subject: str) -> dict[str, Any]:
+    """One macro dataset from FRED: the recent window, then one history chunk while history is
+    incomplete. Skipped (not failed) when the provider is disabled or its API key is not
+    configured (FRED's key is required, not optional — mirrors institutional_ingest_task's
+    SoSoValue posture, Phase 6)."""
+    if provider_id not in settings.macro_provider_ids:
+        return {"skipped": f"provider {provider_id} is disabled"}
+    if not macro_credential_configured(provider_id):
+        log.warning("macro_skipped_no_credential", provider=provider_id)
+        return {"skipped": f"provider {provider_id} has no API key configured"}
+    rt = runtime()
+
+    async def go() -> dict[str, Any]:
+        ctx = await rt.context()
+        item = macro_source(provider_id, dataset_id, subject)
+        results = await ingest_macro_source(ctx, item)
         return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
 
     return rt.run(go())

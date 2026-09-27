@@ -651,6 +651,109 @@ status:           implemented
 
 ---
 
+## 5g. Macroeconomic datasets (implemented in Phase 11)
+
+All 18 datasets in this section come from a single provider, the **official FRED (Federal Reserve Economic
+Data) keyed JSON API** (`cfi/providers/fred.py`, `cfi/macro/universe.py`) — chosen over FRED's undocumented
+keyless `fredgraph.csv` download endpoint because only the JSON API is documented and versioned. Requires
+`CFI_PROVIDER_FRED_API_KEY` (free, user-obtained; not optional — same pattern as SoSoValue, Phase 6).
+`subject` is always `US` — every series in this phase is a US macro series.
+
+| Dataset ID | Cadence | FRED series | Values (unit) | `available_at` |
+|---|---|---|---|---|
+| `macro.dxy_broad_proxy.1d` | daily | `DTWEXBGS` | Fed Broad Dollar Index (index, **DXY SUBSTITUTE** — see note below) | day end + 1 day |
+| `macro.ust_yield_2y.1d` | daily | `DGS2` | US 2-year Treasury yield (%) | day end + 1 day |
+| `macro.ust_yield_10y.1d` | daily | `DGS10` | US 10-year Treasury yield (%) | day end + 1 day |
+| `macro.fed_funds_effective.1d` | daily | `DFF` | Effective federal funds rate (%) | day end + 1 day |
+| `macro.vix.1d` | daily | `VIXCLS` | CBOE Volatility Index (index) | day end + 1 day |
+| `macro.sp500.1d` | daily | `SP500` | S&P 500 close (index) | day end + 1 day |
+| `macro.nasdaq_composite.1d` | daily | `NASDAQCOM` | Nasdaq Composite close (index) | day end + 1 day |
+| `macro.oil_wti.1d` | daily | `DCOILWTICO` | WTI crude spot price (USD/barrel) | day end + 1 day |
+| `macro.reverse_repo.1d` | daily | `RRPONTSYD` | Overnight reverse repo, Treasury securities (USD billions) | day end + 1 day |
+| `macro.fed_balance_sheet.1w` | weekly | `WALCL` | Fed total assets, weekly (USD millions) | week end + 3 days |
+| `macro.treasury_general_account.1w` | weekly | `WTREGEN` | Treasury General Account balance, weekly (USD millions) | week end + 3 days |
+| `macro.m2_money_stock.1w` | weekly | `WM2NS` | M2 money stock, weekly, not seasonally adjusted (USD billions) | week end + 3 days |
+| `macro.cpi.1mo` | monthly | `CPIAUCSL` | CPI, all urban consumers, seasonally adjusted (index) | published (event) + 45 days (est., `known_when_received`) |
+| `macro.pce_price_index.1mo` | monthly | `PCEPI` | PCE price index (index) | published (event) + 60 days (est., `known_when_received`) |
+| `macro.unemployment_rate.1mo` | monthly | `UNRATE` | Civilian unemployment rate (%) | published (event) + 38 days (est., `known_when_received`) |
+| `macro.m2_money_stock.1mo` | monthly | `M2SL` | M2 money stock, monthly, seasonally adjusted (USD billions) | published (event) + 52 days (est., `known_when_received`) |
+| `macro.fed_funds_target_upper.event` | event | `DFEDTARU` | FOMC target rate, upper bound (%) | event + 1 day (est., `known_when_received`) |
+| `macro.fed_funds_target_lower.event` | event | `DFEDTARL` | FOMC target rate, lower bound (%) | event + 1 day (est., `known_when_received`) |
+
+**Point-in-time note (revised series):** CPI, PCE, unemployment and M2 are subject to later revision by their
+publisher. FRED's default API returns only the current (most-revised) vintage, not the value as first
+published; true vintage tracking is available via FRED's own `realtime_start`/`realtime_end`/`vintage_dates`
+parameters but was deliberately not built this phase (CLAUDE.md R13 — not requested). Instead, conservative
+documented release-schedule delays are used (`event_time_plus` + `known_when_received=True`), which is the
+same conservative-estimate pattern as Phase 9's DefiLlama 36h-estimated-availability rule.
+
+**Not tracked** (`NOT_TRACKED`, `cfi/macro/universe.py`) — each a verified sourcing gap or scope decision, not
+a technical dead end, restated in `TODO.md` for the user's review:
+
+- **Gold spot price** — FRED's only free daily gold series (`GOLDAMGBD228NLBM` / `GOLDPMGBD228NLBM`, the LBMA
+  fixing) was discontinued in January 2022 at ICE Benchmark Administration's own request (verified via FRED's
+  own removal notice). No other verified $0/keyless replacement was found.
+- **True global liquidity aggregate** — `us_net_liquidity` (below) is explicitly a **US-only proxy**
+  (Fed balance sheet − TGA − reverse repo), never presented as a true global aggregate, which would need
+  China, EU, Japan and other central-bank balance sheets this phase does not source.
+
+**DXY note:** `DTWEXBGS` (the Fed's trade-weighted Broad Dollar Index) is used as a substitute for the real
+ICE US Dollar Index (DXY), which is proprietary/licensed and not freely available. Every field and label
+referencing it says "DXY substitute", never "DXY".
+
+### Macro calculated metrics / statistical signals (read time, point-in-time — `cfi/macro/metrics.py`)
+
+```
+yield_curve_slope:      10-year Treasury yield − 2-year Treasury yield (pp); condition: inverted (≤ −0.10pp),
+                         steep (≥ 1.00pp), normal otherwise
+real_policy_rate:        effective federal funds rate − trailing 12-month CPI inflation (pp) — an
+                         approximation, not the Fed's own preferred real-rate measure
+cpi_year_over_year:      CPI now ÷ CPI 12 months earlier − 1 (%)
+vix_condition:           latest VIX level; condition: elevated (≥ 25), calm (≤ 15), normal otherwise
+trend (generic):         ratio change of a series over a window (default 90 days); condition: up/down (±3%
+                         threshold) / flat — used for equities, dollar, oil, and net-liquidity trend
+us_net_liquidity:        (Fed balance sheet − Treasury General Account) ÷ 1000 − overnight reverse repo, in
+                         USD billions — US-ONLY PROXY, NOT A TRUE GLOBAL AGGREGATE
+tolerance windows:       DAILY_TOLERANCE = 7 days, WEEKLY_TOLERANCE = 18 days, MONTHLY_TOLERANCE = 95 days —
+                         each sized to a series' worst-case staleness (period length + publication delay)
+                         before its next point becomes available, so normal operation never reads as
+                         "unavailable"
+```
+
+### Macro Environment Score (`macro_environment_score`, calculated metric — ADR-0054)
+
+```
+version:          macro_environment_score_v1 (versioned, immutable parameter set — cfi/macro/score_parameters.py)
+range:            −100 … +100, signed: how accommodative (positive) or restrictive (negative) the current US
+                  macro backdrop looks — NOT a crypto price prediction and NOT a directional trading signal
+components:       sub-score = clip(value ÷ scale, −1, +1), each with a documented direction_note explaining
+                  which way is accommodative vs. restrictive
+  yield_curve_slope        weight 0.20   10y − 2y slope ÷ 1.00pp
+  real_policy_rate         weight 0.20   real policy rate ÷ 2.00pp, INVERTED (lower real rate = more accommodative)
+  vix_level                weight 0.15   (VIX − 20 reference) ÷ 10, INVERTED (higher VIX = more risk-off)
+  equity_trend              weight 0.15   S&P 500 90-day change ÷ 10%
+  dollar_trend               weight 0.10   DXY-substitute 90-day change ÷ 5%, INVERTED (stronger dollar = more
+                            restrictive for risk assets)
+  net_liquidity_trend       weight 0.15   US net-liquidity composite 90-day change ÷ 5%
+  oil_trend                 weight 0.05   WTI 90-day change ÷ 15%, INVERTED (rising oil = inflationary pressure)
+score:            100 × Σ(weight × sub-score) ÷ Σ(weights of available components), 1 decimal
+missing_policy:   component excluded when its underlying metric is "unavailable" (never filled with a
+                  default), with automatic renormalisation over the remaining weight; "Insufficient data"
+                  below available weight 0.5 (min_available_weight, versioned parameter)
+bands:            ≥ 50 broadly accommodative macro backdrop · ≥ 15 leaning accommodative · ≥ −15 neutral ·
+                  ≥ −50 leaning restrictive · below: broadly restrictive macro backdrop (versioned parameter)
+reproducibility:  every result records `parameter_version` and `calculated_at` alongside every component's
+                  value, sub-score, effective weight, contribution and calculation string
+semantic_note:    fixed API text states plainly this score does not convert macro data into a deterministic
+                  crypto prediction
+parameters_note:  v1 methodology / initial parameters, chosen by design and not fitted to data or empirically
+                  validated — never described as "validated"
+owner_phase:      11 (2026-09-27)
+status:           implemented
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.

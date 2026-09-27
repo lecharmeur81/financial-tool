@@ -15,6 +15,7 @@ from cfi.derivatives.sources import sources_for as derivative_sources_for
 from cfi.domain.datasets import DatasetSpec
 from cfi.institutional.sources import sources_for
 from cfi.liquidity.sources import sources_for as liquidity_sources_for
+from cfi.macro.sources import sources_for as macro_sources_for
 from cfi.market.sources import ADAPTERS, datasets_for
 from cfi.retail.sources import sources_for as retail_sources_for
 from cfi.whales.sources import sources_for as whale_sources_for
@@ -141,6 +142,22 @@ def retail_entries(provider_ids: list[str]) -> dict[str, dict[str, Any]]:
     }
 
 
+def macro_entries(provider_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """One entry per (provider, dataset); every 6 hours (daily series), 12 hours (weekly/event) or
+    24 hours (monthly) — see ``cfi.macro.sources``. Runs are idempotent. FRED needs a free API key
+    (credential_configured); an unconfigured key means the task is skipped at run time, not that
+    it is left unscheduled here (mirrors ``institutional_entries``'s SoSoValue posture)."""
+    return {
+        f"macro:{item.provider_id}:{item.dataset.dataset_id}": {
+            "task": "macro.ingest",
+            "schedule": float(item.interval_seconds),
+            "args": (item.provider_id, item.dataset.dataset_id, item.subject),
+            "options": {"queue": item.queue, "expires": item.interval_seconds},
+        }
+        for item in macro_sources_for(provider_ids)
+    }
+
+
 def beat_schedule(
     provider_ids: list[str],
     institutional_provider_ids: list[str] | None = None,
@@ -148,12 +165,14 @@ def beat_schedule(
     derivative_provider_ids: list[str] | None = None,
     liquidity_provider_ids: list[str] | None = None,
     retail_provider_ids: list[str] | None = None,
+    macro_provider_ids: list[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     schedule: dict[str, dict[str, Any]] = institutional_entries(institutional_provider_ids or [])
     schedule.update(whale_entries(whale_provider_ids or []))
     schedule.update(derivative_entries(derivative_provider_ids or []))
     schedule.update(liquidity_entries(liquidity_provider_ids or []))
     schedule.update(retail_entries(retail_provider_ids or []))
+    schedule.update(macro_entries(macro_provider_ids or []))
     for item in scheduled_ingestions(provider_ids):
         schedule[f"latest:{item.provider_id}:{item.dataset_id}"] = {
             "task": "market.ingest_latest",

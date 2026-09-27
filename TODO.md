@@ -268,6 +268,56 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
       wherever the metric is shown, never smoothed over. If the user wants a cleaner signal, that needs either a
       paid provider with UTXO-level classification or an accepted false-positive rate.
 
+## Phase 11 — Macroeconomic Data Layer (built 2026-09-27; see PROGRESS.md)
+
+- [x] FRED provider adapter (official keyed JSON API), 18 datasets across daily/weekly/monthly/event cadence,
+      macro calculations (`yield_curve_slope`, `real_policy_rate`, `cpi_year_over_year`, `vix_condition`,
+      generic `trend`, `us_net_liquidity`, `net_liquidity_trend`), one versioned score
+      (`macro_environment_score_v1`, 7 direction-annotated components), API
+      (`/api/v1/macro/{catalog,overview,history}`).
+- [ ] **User:** register a free FRED API key (https://fred.stlouisfed.org/docs/api/api_key.html) and set
+      `CFI_PROVIDER_FRED_API_KEY` in `.env` — required, not optional, same as SoSoValue in Phase 6. No data can
+      be ingested from a live environment without it.
+- [ ] **User:** tests and `docker compose up --build` on Windows — see PROGRESS.md for the exact commands and
+      the expected test count (630 passed in Claude's scratch environment).
+- [ ] **User:** check `/api/v1/ingestion/runs` for `fred` — its host is not reachable from Claude's workspace
+      (egress-proxy denied, like Blockchair/DefiLlama in earlier phases), so no live response has been seen from
+      a network that can actually reach it; the user's first real run, after setting the API key, is the real
+      verification.
+- [ ] After the first real run: copy one real FRED `/fred/series/observations` payload per series (or a
+      representative subset) into the test fixtures and confirm the documented shape (`realtime_start`/
+      `realtime_end`, `"."` missing-value marker).
+
+### Decisions needed from the user (Phase 11)
+
+- [ ] **DXY substitute.** The real ICE US Dollar Index (DXY) is proprietary/licensed and not freely available;
+      the Fed's own trade-weighted Broad Dollar Index (`DTWEXBGS`) is tracked instead and labelled "DXY
+      substitute" everywhere it appears. Accept the substitute, or evaluate a paid DXY source later.
+- [ ] **US-only net liquidity, not a true global aggregate.** "Global liquidity proxies" was requested, but no
+      free source aggregates non-US central-bank balance sheets. `us_net_liquidity` (Fed balance sheet − TGA −
+      reverse repo) is explicitly labelled a US-only proxy. Accept as the working proxy, or scope in
+      China/EU/Japan balance-sheet sources later (all currently unverified for free access).
+- [ ] **Gold not tracked.** FRED's only free daily gold series was discontinued by ICE Benchmark Administration
+      in January 2022; no other verified free/keyless source was found. Accept the gap, or evaluate a paid gold
+      data source later.
+- [ ] **Point-in-time integrity for revised series (CPI, PCE, unemployment, M2).** Conservative documented
+      release-delay estimates are used for `available_at`, not full FRED vintage
+      (`realtime_start`/`realtime_end`/`vintage_dates`) tracking — deliberately out of scope this phase (not
+      requested; R13). Full vintage tracking can be built later if point-in-time backtests need the value *as
+      first published* rather than today's most-revised figure.
+- [ ] **Judgment parameters (v1 methodology / initial parameters) — not yet reviewed by the user.** Macro
+      Environment Score weights 0.20 / 0.20 / 0.15 / 0.15 / 0.10 / 0.15 / 0.05 (yield curve / real policy rate /
+      VIX / equity trend / dollar trend / net-liquidity trend / oil trend), reference scales 1.00pp / 2.00pp /
+      10 / 10% / 5% / 5% / 15%, `min_available_weight` 0.5, bands ±50/±15. See DATA_DICTIONARY.md §5g, ADR-0054.
+      Chosen by design, not fitted to data — same review invitation as every prior phase's score: if the user
+      wants a different breakdown, send it and a new version id (`macro_environment_score_v2`) is published
+      rather than editing v1.
+- [ ] **Frontend page** — not built this phase (not requested; see PROGRESS.md). A natural next step once the
+      user asks for it.
+- [ ] **Terms of use** of FRED's public API not separately reviewed (`terms_verified` unchanged from the
+      existing adapter capabilities default) — FRED data is US federal government work and is generally public
+      domain, but this has not been formally verified against FRED's own terms page.
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.
@@ -296,7 +346,7 @@ against official documentation before any adapter is written.
 | ETF flows / holdings | **Implemented (Phase 6): SoSoValue OpenAPI.** Still candidates: issuer websites and filings; SEC EDGAR |
 | On-chain / exchange flows / whales | **Implemented (Phase 7): Coin Metrics Community, Blockchair; BitInfoCharts labels.** Still candidates: Glassnode, CryptoQuant, Santiment, Arkham, Nansen (paid); self-hosted node |
 | Stablecoins | **Implemented (Phase 9): DefiLlama stablecoins API.** Still candidates: issuer transparency pages; on-chain supply queries; exchange-balance/flow data (paid: Nansen, Arkham, CryptoQuant) |
-| Macro | FRED (St. Louis Fed); other official statistical releases |
+| Macro | **Implemented (Phase 11): FRED (St. Louis Fed) official keyed JSON API.** Still candidates: other official statistical releases (BLS, BEA direct, ECB, PBoC) for series FRED does not carry |
 | Retail / sentiment | Search-interest sources, app-ranking sources, social data vendors — terms need careful review |
 | Reference data / market caps | CoinGecko, CoinMarketCap, Coin Metrics |
 
