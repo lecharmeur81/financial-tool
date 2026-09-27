@@ -103,6 +103,17 @@ class Settings(BaseSettings):
     def macro_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.macro_providers.split(",") if p.strip()]
 
+    # Market structure (Phase 12). CoinGecko's existing adapter (Phase 5/6) extended with one new
+    # endpoint (/global, for TOTAL market cap); no new provider or key needed. Everything else
+    # (moving averages, RSI, ATR, volatility, breadth, dominance, ETH/BTC, the Market Structure
+    # Score) is calculated from already-ingested Phase 5 OHLCV bars and market caps — no ingestion
+    # of its own.
+    market_structure_providers: str = "coingecko"
+
+    @property
+    def market_structure_provider_ids(self) -> list[str]:
+        return [p.strip() for p in self.market_structure_providers.split(",") if p.strip()]
+
     @property
     def market_provider_ids(self) -> list[str]:
         return [p.strip() for p in self.market_providers.split(",") if p.strip()]

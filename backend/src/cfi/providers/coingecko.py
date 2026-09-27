@@ -30,6 +30,17 @@ Verified 2026-09-23 against the official documentation (docs.coingecko.com, v3.0
   was received. This is a RETAIL PROXY for search/attention interest (``cfi.retail.universe``),
   never trade or holder data.
 
+- ``GET /global`` (Phase 12; verified 2026-09-27 against docs.coingecko.com/reference/crypto-global
+  — Demo/keyless available) → ``{"data": {"active_cryptocurrencies", "total_market_cap": {"usd":
+  <number>, ...}, "market_cap_percentage": {"btc": <number>, "eth": <number>, ...},
+  "market_cap_change_percentage_24h_usd", "updated_at": <epoch s>}}``. Only ``data.total_market_cap
+  .usd`` and ``data.updated_at`` are stored (the TOTAL market-cap dataset,
+  ``cfi.market_structure.universe.TOTAL_MARKET_CAP_USD``); CoinGecko's own
+  ``market_cap_percentage`` is not used — BTC/ETH dominance are instead calculated from this TOTAL
+  and the per-asset market caps this adapter already stores (``MARKET_CAP_USD``), keeping every
+  dominance figure and its inputs point-in-time consistent with each other rather than mixing a
+  CoinGecko-computed percentage with independently-fetched market caps.
+
 Terms (https://www.coingecko.com/en/api_terms, brand attribution guide): attribution such as
 "Data provided by CoinGecko" with a link must be shown next to the data; the terms discourage
 storing data and ask that stored data be refreshed at least every 24 hours. The storage question is
@@ -55,6 +66,7 @@ from cfi.institutional.universe import (
     companies_group_ref,
 )
 from cfi.market.universe import MARKET_CAP_USD, MARKET_CAP_USD_1D
+from cfi.market_structure.universe import GLOBAL_SUBJECT, TOTAL_MARKET_CAP_USD
 from cfi.providers.base import (
     AuthSpec,
     FetchWindow,
@@ -76,6 +88,7 @@ SIMPLE_PRICE_PATH = "/simple/price"
 _CHART_PATH = re.compile(r"^/coins/(?P<coin>[a-z0-9-]+)/market_chart$")
 _TREASURY_PATH = re.compile(r"^/companies/public_treasury/(?P<coin>[a-z0-9-]+)$")
 TRENDING_PATH = "/search/trending"
+GLOBAL_PATH = "/global"
 DAILY_ALIGNMENT_TOLERANCE = timedelta(minutes=5)
 MAX_DAYS = 365
 ATTRIBUTION = {"text": "Data provided by CoinGecko", "url": "https://www.coingecko.com"}
@@ -90,6 +103,7 @@ CAPABILITIES = ProviderCapabilities(
             MARKET_CAP_USD_1D.dataset_id,
             TREASURY_HOLDINGS_COMPANIES.dataset_id,
             TRENDING.dataset_id,
+            TOTAL_MARKET_CAP_USD.dataset_id,
         }
     ),
     auth=AuthSpec(AuthType.API_KEY_HEADER, "x-cg-demo-api-key", API_KEY_ENV, optional=True),
@@ -123,6 +137,8 @@ class CoinGecko(ProviderAdapter):
     def first_request(self, dataset_id: str, window: FetchWindow) -> RequestSpec:
         if dataset_id == TRENDING.dataset_id:
             return RequestSpec(TRENDING_PATH)
+        if dataset_id == TOTAL_MARKET_CAP_USD.dataset_id:
+            return RequestSpec(GLOBAL_PATH)
         if window.subject is not None and window.subject not in COIN_IDS:
             raise ProviderNotConfiguredError(
                 f"CoinGecko: unsupported subject {window.subject!r}.", provider_id=PROVIDER_ID
@@ -187,6 +203,23 @@ class CoinGecko(ProviderAdapter):
                     )
                 )
             return records
+        if raw.endpoint == GLOBAL_PATH:
+            if not isinstance(data, dict) or not isinstance(data.get("data"), dict):
+                raise schema_error(raw, "expected an object with a 'data' object")
+            body = data["data"]
+            missing = [k for k in ("total_market_cap", "updated_at") if k not in body]
+            if missing:
+                raise schema_error(raw, f"'data' lacks {', '.join(missing)}")
+            cap = body["total_market_cap"]
+            if not isinstance(cap, dict) or "usd" not in cap:
+                raise schema_error(raw, "'data.total_market_cap' lacks a 'usd' figure")
+            return [
+                ProviderRecord(
+                    PROVIDER_ID,
+                    TOTAL_MARKET_CAP_USD.dataset_id,
+                    {"total_market_cap_usd": cap["usd"], "updated_at": body["updated_at"]},
+                )
+            ]
         if raw.endpoint == SIMPLE_PRICE_PATH:
             if not isinstance(data, dict):
                 raise schema_error(raw, "expected an object keyed by coin id")
@@ -249,6 +282,8 @@ class CoinGecko(ProviderAdapter):
         dataset = ctx.dataset
         if dataset.dataset_id == TRENDING.dataset_id:
             return _trending_rank(p, ctx)
+        if dataset.dataset_id == TOTAL_MARKET_CAP_USD.dataset_id:
+            return _total_market_cap(p, ctx)
         asset = _asset_for(str(p["coin_id"]))
         if dataset.dataset_id == TREASURY_HOLDINGS_COMPANIES.dataset_id:
             return _treasury_totals(p, ctx, asset)
@@ -351,6 +386,41 @@ def _trending_rank(p: Any, ctx: NormaliseContext) -> CanonicalObservation:
         quality_note=None,
         pit_reliability=PitReliability.NATIVE,
         transformations=("event_time: snapshot receipt time (trending endpoint has no timestamp)",),
+    )
+
+
+def _total_market_cap(p: Any, ctx: NormaliseContext) -> CanonicalObservation:
+    """One TOTAL market-cap snapshot from ``/global`` (Phase 12) — a single global reading, not
+    per-asset (``asset`` and ``subject_ref`` are both the sentinel ``GLOBAL_SUBJECT``)."""
+    dataset = ctx.dataset
+    updated = p["updated_at"]
+    if not isinstance(updated, int):
+        raise DataValidationError(f"updated_at is not an epoch integer: {updated!r}")
+    event_time = from_epoch(updated, "s")
+    value = to_decimal(p["total_market_cap_usd"], "total_market_cap_usd")
+    if value <= 0:
+        raise DataValidationError(f"non-positive total market cap {value}")
+    available_at, estimated = dataset.available_at(event_time, event_time, ctx.ingested_at)
+    return CanonicalObservation(
+        dataset_id=dataset.dataset_id,
+        metric=dataset.metric,
+        asset=GLOBAL_SUBJECT,
+        subject_ref=GLOBAL_SUBJECT,
+        venue=None,
+        period=dataset.period,
+        unit=dataset.unit,
+        event_time=event_time,
+        available_at=available_at,
+        available_at_estimated=estimated,
+        ingested_at=ctx.ingested_at,
+        value=value,
+        source_provider=PROVIDER_ID,
+        original_source=CAPABILITIES.original_source,
+        raw_ref=ctx.raw_ref,
+        quality_status=QualityStatus.OK,
+        quality_note=None,
+        pit_reliability=PitReliability.NATIVE,
+        transformations=("event_time: epoch seconds -> UTC",),
     )
 
 

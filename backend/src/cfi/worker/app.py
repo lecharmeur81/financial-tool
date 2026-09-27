@@ -29,6 +29,9 @@ from cfi.macro.sources import sources_for as macro_sources_for
 from cfi.market.jobs import backfill_days, backfill_step, ingest_latest
 from cfi.market.sources import ADAPTERS, datasets_for
 from cfi.market.universe import ASSET_SYMBOLS, dataset_by_id
+from cfi.market_structure.jobs import ingest_source as ingest_market_structure_source
+from cfi.market_structure.sources import source as market_structure_source
+from cfi.market_structure.sources import sources_for as market_structure_sources_for
 from cfi.retail.jobs import ingest_source as ingest_retail_source
 from cfi.retail.sources import source as retail_source
 from cfi.retail.sources import sources_for as retail_sources_for
@@ -61,6 +64,7 @@ app.conf.update(
         settings.liquidity_provider_ids,
         settings.retail_provider_ids,
         settings.macro_provider_ids,
+        settings.market_structure_provider_ids,
     ),
 )
 
@@ -140,6 +144,13 @@ def _kick_institutional(**_: Any) -> None:
             args=(mac.provider_id, mac.dataset.dataset_id, mac.subject),
             queue=mac.queue,
             expires=mac.interval_seconds,
+        )
+    for ms in market_structure_sources_for(settings.market_structure_provider_ids):
+        app.send_task(
+            "market_structure.ingest",
+            args=(ms.provider_id, ms.dataset.dataset_id, ms.subject),
+            queue=ms.queue,
+            expires=ms.interval_seconds,
         )
 
 
@@ -249,6 +260,25 @@ def macro_ingest_task(provider_id: str, dataset_id: str, subject: str) -> dict[s
         ctx = await rt.context()
         item = macro_source(provider_id, dataset_id, subject)
         results = await ingest_macro_source(ctx, item)
+        return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
+
+    return rt.run(go())
+
+
+@app.task(name="market_structure.ingest", time_limit=1800, soft_time_limit=1700)
+def market_structure_ingest_task(provider_id: str, dataset_id: str, subject: str) -> dict[str, Any]:
+    """The one market-structure dataset directly ingested (TOTAL market cap, from CoinGecko's
+    ``/global``): the recent window only (no history to catch up on — see
+    ``market_structure/sources.py``). Skipped (not failed) when the provider is disabled. No
+    credential gate: CoinGecko's key is optional, mirroring ``retail_ingest_task``."""
+    if provider_id not in settings.market_structure_provider_ids:
+        return {"skipped": f"provider {provider_id} is disabled"}
+    rt = runtime()
+
+    async def go() -> dict[str, Any]:
+        ctx = await rt.context()
+        item = market_structure_source(provider_id, dataset_id, subject)
+        results = await ingest_market_structure_source(ctx, item)
         return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
 
     return rt.run(go())

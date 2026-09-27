@@ -184,6 +184,11 @@ layer" (see ADR-0054), not "Market structure" as the provisional table previousl
 structure" is unscheduled again until the user places it; phase numbers from 12 onward remain provisional until
 each is issued, same as before.
 
+**Amendment 4 (2026-09-27).** The user issued "PHASE 12 — MARKET STRUCTURE" directly, so Phase 12 is now "Market
+structure engine" (see ADR-0055). The phases the provisional table previously listed at 12–27 ("Divergence
+engine", "Regime engine", and every phase after) each shift down by one, to 13–28; phase numbers from 13 onward
+remain provisional until each is issued, same as before.
+
 ---
 
 ## ADR-0013 — Master engineering rules
@@ -1474,3 +1479,100 @@ endpoint). `CFI_PROVIDER_FRED_API_KEY` must be obtained and set by the user befo
 in a live environment (restated in `TODO.md`). Frontend work was not part of the Phase 11 request as given
 and was not built. Publishing a v2 parameter set for the score follows the same append-only pattern as
 ADR-0051/ADR-0052/ADR-0053.
+
+## ADR-0055 — Phase 12: Market Structure Engine, TOTAL/dominance as calculated metrics, Market Structure Score
+
+**Status:** Accepted (implemented 2026-09-27)
+
+**Context.** The user asked to build the Market Structure Engine, calculating trend, moving averages, RSI,
+ATR, volatility, volume trends, VWAP where appropriate, relative strength, support/resistance, market breadth
+where available, BTC dominance, ETH/BTC, TOTAL market capitalisation, TOTAL2 and TOTAL3; to create a Market
+Structure Score with a transparent methodology; and to never turn these metrics into automatic trading
+recommendations.
+
+**Decision — one new ingested dataset (TOTAL market cap), everything else calculated.** The ingestion engine
+enforces one dataset per `ingest()` call (`cfi/ingestion/engine.py`), so BTC/ETH dominance, TOTAL2 and TOTAL3
+cannot be ingested as a single combined call alongside TOTAL itself, and deriving them from already-tracked
+data is architecturally cleaner besides. CoinGecko's `/global` endpoint (verified 2026-09-27 against
+`docs.coingecko.com/reference/crypto-global` — the sandbox's egress proxy blocks CoinGecko's raw API like
+every other provider's raw endpoints, but not its documentation pages, the same pattern as FRED/Blockchair/
+Binance/DefiLlama in earlier phases) is extended onto the existing `cfi/providers/coingecko.py` adapter (no
+new adapter). Only `data.total_market_cap.usd` and `data.updated_at` are stored; CoinGecko's own
+`market_cap_percentage` (BTC/ETH dominance, computed at CoinGecko's own snapshot time) is deliberately **not**
+used — dominance is instead calculated here from this TOTAL value and the per-asset market caps Phase 5/6
+already tracks (`cfi.market.universe.MARKET_CAP_USD`), keeping every dominance figure and its inputs
+point-in-time consistent with each other rather than mixing a CoinGecko-computed percentage with
+independently-fetched market caps. TOTAL2 = TOTAL − BTC market cap; TOTAL3 = TOTAL2 − ETH market cap, matching
+the common charting convention (e.g. TradingView's CRYPTOCAP:TOTAL2/TOTAL3) — all Calculated Metrics (R2),
+never directly observed. The one new dataset uses the sentinel-subject pattern established by Phase 9's
+`TOTAL_SUBJECT` and Phase 10's `TRENDING_SUBJECT`: `asset = subject_ref = GLOBAL_SUBJECT = "GLOBAL"`, since a
+global reading has no per-asset dimension.
+
+**Decision — one venue (Coinbase), one benchmark (BTC), for every technical calculation.** Every technical
+indicator (moving averages, trend, RSI, ATR, volatility, volume trend, VWAP, relative strength,
+support/resistance) is computed from Coinbase Exchange's daily OHLCV bars — Phase 5's priority-10 default
+venue, with native daily bars for all four tracked assets (BTC, ETH, SOL, XRP) — so every asset is compared on
+the same venue and timeframe rather than blending venues (mirrors the market module's own "never blend
+venues" rule, `cfi/market/sources.py`). Relative strength, ETH/BTC and (by construction) dominance are always
+benchmarked against BTC (`BENCHMARK_ASSET`), the market's largest, most liquid, longest-history asset — a
+judgment call recorded in `cfi/market_structure/universe.py`, not assumed silently. ETH/BTC needs no new
+ingestion: it is ETH's close ÷ BTC's close from already-ingested Coinbase bars.
+
+**Decision — market breadth is a four-asset proxy, recorded in `NOT_TRACKED`, never presented as full-market
+breadth.** No free source publishes an advance/decline line across the whole crypto market (thousands of
+listed assets). Market breadth here is the fraction of this platform's own four tracked assets trading above
+their own 50-day SMA — restated in `NOT_TRACKED` and `TODO.md` for the user's review rather than silently
+narrowed without saying so (R3), the same posture as Phase 11's US-only net-liquidity proxy (ADR-0054).
+
+**Decision — standard, named formulas for every indicator, each a judgment parameter, not a fitted or
+optimised one.** Moving averages: SMA over 20/50/200 daily bars. Trend: the conventional golden/death-cross
+ordering (`uptrend`: close > SMA50 > SMA200; `downtrend`: close < SMA50 < SMA200; `mixed` otherwise). RSI:
+Wilder's 14-day relative-strength index (average gain/loss, Wilder-smoothed). ATR: Wilder's 14-day average
+true range, reported as a percentage of price and ranked as a nearest-rank percentile of its own trailing
+~365-day history (minimum 20 readings) — the same percentile-ranking idea as every other phase's statistical
+signals (e.g. `cfi.retail.metrics.percentile_rank`), reimplemented locally in `cfi/market_structure/metrics.py`
+to keep the module self-contained rather than importing across unrelated business domains (R13). Realized
+volatility: annualized standard deviation of 30-day rolling daily log returns (`std × √365`), computed with
+`Decimal.ln()`/`Decimal.sqrt()` for full precision rather than converting to float, percentile-ranked the same
+way as ATR. VWAP: a rolling 20-day volume-weighted average price, explicitly documented and labelled
+everywhere as a **rolling-window approximation**, never a session-anchored intraday VWAP — daily bars have no
+intraday session to anchor to. Support/resistance: a naive rolling 20-day and 50-day high/low (a
+Donchian-channel-style method), explicitly never a fitted, clustered or ML-derived level. All thresholds
+(RSI 70/30, ATR/volatility percentile 80/20, volume 1.5x/0.5x, relative strength ±5pp, breadth 75%/25%, ETH/BTC
+trend ±3pp) are published verbatim in the `/catalog` endpoint's `parameters` field, matching every prior
+phase's transparency posture.
+
+**Decision — one score, five components, direction-annotated, explicitly not a trading recommendation.** The
+**Market Structure Score** (`market_structure_score_v1`, `cfi/market_structure/score_parameters.py`) follows
+the same versioned-parameters and weighted-sub-score pattern established in ADR-0051/ADR-0052/ADR-0053/
+ADR-0054 (frozen `ParameterSet` dataclass, `CURRENT_VERSION`, hard `KeyError` on an unknown version; sub-score
+= clip(value ÷ scale, −1, +1); score = 100 × Σ(weight × sub-score) ÷ Σ(available weights); renormalisation on
+missing components; "Insufficient data" below `min_available_weight` 0.5). Components: BTC price vs. 200-day
+SMA (0.25), BTC momentum/RSI vs. neutral (0.20), market breadth (0.20), altcoin relative strength — the
+average of ETH/SOL/XRP's spread vs. BTC across whichever of the three have enough history (0.20, never a
+fabricated fill-in for a missing asset — R3), and BTC's realized-volatility percentile (0.15, inverted: calmer
+than usual is more constructive). The score's fixed `semantic_note` states plainly it does not convert these
+metrics into an automatic trading recommendation, matching the phase's explicit instruction and the same
+non-prediction framing used by every prior phase's score.
+
+**Alternatives considered.** Storing CoinGecko's own `market_cap_percentage` for BTC/ETH dominance instead of
+calculating it (rejected: would mix a CoinGecko-computed snapshot with independently-fetched market caps,
+breaking point-in-time consistency between dominance and its own inputs). Ingesting BTC/ETH dominance as part
+of the same `/global` call as TOTAL (rejected: the two would still need separate `dataset_id`s under the
+ingestion engine's one-dataset-per-call rule, so nothing is saved by combining them versus calculating
+dominance directly). Importing `cfi.retail.metrics.percentile_rank` instead of a local `_percentile_rank()`
+helper (rejected: would couple two unrelated business-domain modules for a few lines of identical logic —
+R13). Blending OHLCV bars across multiple venues per asset (rejected: would violate the project's existing
+never-blend-venues rule and make cross-asset comparisons venue-inconsistent).
+
+**Consequences.** One new migration-free dataset (`market_structure.total_market_cap.usd`, `kind="scalar"`,
+stored via the existing scheduled-source runner, no new database migration). The backend API
+(`/api/v1/market-structure/{catalog,overview,history}`) is complete and tested end-to-end: unit tests for the
+CoinGecko `/global` adapter extension (request building, schema validation, non-positive-value rejection), the
+metrics module (every reading and condition, including edge cases like flat prices and too-little history) and
+the score (renormalisation, insufficient-data floor, bands, clipping, the inverted volatility component);
+integration tests for ingestion against a synthetic CoinGecko `/global` fake (stored value, sentinel subject,
+no-duplication-on-repeated-recent-window) and for the API (catalog shape, an "ok" score once bars and TOTAL are
+loaded, "insufficient_data"/"unavailable" with nothing loaded, history endpoint). Frontend work was not part
+of the Phase 12 request as given and was not built. Publishing a v2 parameter set for the score follows the
+same append-only pattern as ADR-0051/ADR-0052/ADR-0053/ADR-0054.

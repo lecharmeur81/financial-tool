@@ -2,7 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 11 — Macro → ✅ complete (backend only, as requested); built and tested in the scratch environment, pending delivery to and verification on Windows
+**Current phase:** 12 — Market Structure → ✅ backend complete (as requested); tests/lint/mypy passing in Claude's
+scratch environment; pending delivery to the user's Windows machine and commit
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -22,8 +23,8 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 8 | Derivatives | ✅ Complete — verified on Windows (`ea124b5`); first real derivatives runs to be checked |
 | 9 | Liquidity | ✅ Complete (backend only, as requested) — fully verified on Windows (`f1b8f6a`); first real DefiLlama run to be checked |
 | 10 | Retail | ✅ Complete (backend only, as requested) — fully verified on Windows (`2fae0e6`); first real CoinGecko/Blockchair runs to be checked |
-| 11 | Macro | ✅ Complete (backend only, as requested) — built and tested in the scratch environment; pending delivery to and commit/verification on Windows; first real FRED run needs `CFI_PROVIDER_FRED_API_KEY` |
-| — | Market structure | ⏳ Not started |
+| 11 | Macro | ✅ Complete (backend only, as requested) — fully verified on Windows (`eb5e386`); first real FRED run needs `CFI_PROVIDER_FRED_API_KEY` |
+| 12 | Market structure | ✅ Backend complete (as requested) — tests/lint/mypy passing in scratch environment; pending delivery + Windows verification |
 | — | Divergence engine | ⏳ Not started |
 | — | Regime engine | ⏳ Not started |
 | — | Historical similarity | ⏳ Not started |
@@ -41,7 +42,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | — | Production | ⏳ Not started |
 | — | Real-time intelligence | ⏳ Not started |
 
-Phases 0–11 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
+Phases 0–12 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
 
 ---
 
@@ -917,7 +918,132 @@ responses, including an "ok" score once every component has data and "insufficie
   real verification — same pattern as Phases 6–10.
 - No frontend page — out of scope for this phase as instructed.
 
-**Delivery to the user's machine, commit, and Windows verification are the next step** (device bridge,
-checksum-verified, then the user's own `uv run pytest` / `ruff` / `mypy` / commit on Windows — Git runs there,
-C5); not yet done as of this entry.
+**Delivered to the user's machine** via the device bridge (checksum-verified, all 30 changed/new files
+byte-for-byte match); commit is the user's own step on Windows (Git runs there — C5).
+
+**Committed on Windows:** `eb5e386` — `[P11] add macroeconomic data layer, FRED provider, Macro Environment
+Score` (30 files changed, 3563 insertions, 19 deletions). Confirmed from the user's own terminal transcript.
+
+**Verified on Windows (2026-09-27):** the user ran the full suite from `E:\FINANCIAL TOOL\backend` in
+PowerShell:
+- `uv sync` — 62 packages resolved, 1 package (`cfi`) reinstalled from the updated source.
+- `uv run pytest -q` — **485 passed, 145 skipped, 0 failed** in 6.48s. All skips are integration tests
+  (`CFI_DATABASE_URL` / `CFI_REDIS_URL` not set — no local Postgres/Redis running on the dev machine, including
+  all 5 new `test_macro_ingestion.py`/`test_macro_api.py` tests), the same expected pattern as every prior
+  phase's first Windows verification; not a failure.
+- `uv run ruff check .` — all checks passed.
+- `uv run ruff format --check .` — 210 files already formatted.
+- `uv run mypy` — success, no issues found in 205 source files.
+
+Phase 11 is therefore fully verified end-to-end on the development machine, not just in the scratch environment
+here. No outstanding verification gap remains.
+
+### 2026-09-27 — Phase 12: Market Structure Engine, TOTAL/dominance as calculated metrics, Market Structure Score
+
+**What changed** (ADR-0055; user's exact spec: "PHASE 12 — MARKET STRUCTURE: Build the Market Structure Engine.
+Calculate: trend; moving averages; RSI; ATR; volatility; volume trends; VWAP where appropriate; relative
+strength; support/resistance; market breadth where available; BTC dominance; ETH/BTC; TOTAL market
+capitalization; TOTAL2; TOTAL3. Create: Market Structure Score. Make the methodology transparent. Do not turn
+these metrics into automatic trading recommendations. Create tests. Commit. Stop.")
+
+- **Research first** (WebFetch against `docs.coingecko.com/reference/crypto-global`, not assumption — R3):
+  confirmed the real, documented shape of CoinGecko's `/global` endpoint (CoinGecko's raw API is blocked by
+  this workspace's egress proxy, but its documentation pages are not — the same split seen with FRED/
+  Blockchair/Binance/DefiLlama in earlier phases).
+- **New `backend/src/cfi/market_structure/` package:** `universe.py` (the one new dataset spec,
+  `TOTAL_MARKET_CAP_USD`, plus `GLOBAL_SUBJECT`/`BENCHMARK_ASSET`/`SECONDARY_ASSET` and `NOT_TRACKED`: full-
+  market breadth, full TOTAL-family constituent breakdown), `metrics.py` (moving averages, trend, RSI, ATR,
+  realized volatility, volume trend, rolling VWAP, relative strength, support/resistance, market breadth,
+  dominance/TOTAL2/TOTAL3, ETH/BTC — all pure Calculated Metrics over already-ingested OHLCV bars and market
+  caps), `score_parameters.py` + `score.py` (Market Structure Score, versioned, signed −100…+100, 5 direction-
+  annotated components), `queries.py`, `service.py`, `sources.py`, `jobs.py`.
+- **Extended the existing `cfi/providers/coingecko.py` adapter** with the new `/global` endpoint (no new
+  provider). Only `data.total_market_cap.usd` and `data.updated_at` are stored; CoinGecko's own
+  `market_cap_percentage` is deliberately not used — dominance is calculated instead from TOTAL and the
+  per-asset market caps Phase 5/6 already tracks, keeping every dominance figure point-in-time consistent with
+  its own inputs (see ADR-0055 for the full reasoning).
+- **API:** new router `backend/src/cfi/api/routes/market_structure.py` —
+  `/api/v1/market-structure/{catalog,overview,history}`, registered in `api/app.py`. New setting
+  `CFI_MARKET_STRUCTURE_PROVIDERS` (default `coingecko`). Worker wiring (`worker/app.py`, `worker/schedule.py`):
+  a `market_structure.ingest` Celery task (no credential gate — CoinGecko's key is optional, mirroring
+  `retail_ingest_task`), scheduled every 5 minutes (the same cadence as the existing per-asset market-cap
+  dataset it reuses the provider from).
+- **Scope decisions, each recorded transparently, not silently narrowed:** market breadth is a four-asset
+  proxy (BTC/ETH/SOL/XRP), never full-market breadth; VWAP is a rolling 20-day window, never a session-anchored
+  intraday VWAP; every technical indicator uses one venue (Coinbase Exchange, Phase 5's priority-10 default)
+  and one benchmark (BTC) rather than blending venues. All restated in `TODO.md` for the user's review.
+- **Frontend: not built.** Not requested for this phase (matching Phases 9/10/11's own scope decisions). The
+  backend API is complete and ready for a frontend page whenever the user asks for one.
+- **Docs:** ADR-0055, ADR-0012 Amendment 4 (phase renumbering: Divergence engine/Regime engine and everything
+  after shift from 12–27 to 13–28, since the user issued Phase 12 directly as Market Structure),
+  DATA_DICTIONARY.md §5h, CLAUDE.md phase table.
+
+**Tests run (Claude's scratch environment: Python 3.12, no local PostgreSQL/Redis — see below)**
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_market_structure_adapters.py`, `test_market_structure_metrics.py`, `test_market_structure_score.py` | 53 new tests, all passed |
+| New integration tests: `test_market_structure_ingestion.py`, `test_market_structure_api.py` (written against a real PostgreSQL/TimescaleDB harness, same pattern as every prior phase) | 7 new tests — not executed here (no local `CFI_DATABASE_URL`/`CFI_REDIS_URL` in this workspace; collect cleanly, will run on the user's Windows machine) |
+| Backend `uv run pytest -q` (whole suite, unit-only in this workspace) | 538 passed, 153 skipped (integration tests needing services — expected, same as every prior phase's scratch-environment run) |
+| `ruff format --check` / `ruff check` / `mypy` (strict), whole backend | clean |
+
+**Bugs found and fixed during this phase's own test run** (first time any of this code executed — R7: never
+claim something works without testing it):
+- `realized_volatility_series`'s variance computation (`sum((x - mean) ** 2 for x in chunk) / (window - 1)`)
+  used a bare `sum()` with no `Decimal` start value; Python's `sum()` overload resolution then produced a
+  `Decimal | float` union that failed `mypy` (`variance.sqrt()` has no `float` attribute) and would have risked
+  a genuine float/Decimal mixing bug at runtime for certain inputs. Fixed by passing an explicit
+  `Decimal(0)` start value, matching the pattern already used everywhere else in the module.
+- `rolling_vwap`'s volume filtering (`[b for b in bars if b.volume is not None]`) did not narrow `b.volume`'s
+  type for `mypy` across the list comprehension, producing `Decimal | None` operand errors on the VWAP
+  calculation. Fixed by extracting `(bar, volume)` pairs into a properly-typed list at filter time, removing
+  two defensive `# type: ignore` comments that were papering over the same issue.
+- Several `E501` (line too long) violations across the new modules and test files, and a missing
+  `pyproject.toml` per-file `RUF001`/`RUF002`/`RUF003` ignore for `src/cfi/market_structure/**` (the module's
+  formulas intentionally use real math symbols −, ×, ÷ — the same precedent already established for
+  `institutional/`, `whales/`, `derivatives/`, `liquidity/` and `macro/`). All fixed; no production behavior
+  changed by any of these except the two real bugs above.
+- Two unit-test assertions were written against an intuitive but incorrect expectation of the nearest-rank
+  percentile formula on degenerate (all-identical) input series (ATR history depth, flat-price volatility
+  condition): a value tied with its entire trailing history ranks at the 100th percentile ("elevated"), not
+  the 0th ("low"). Corrected the test expectations and documented the reasoning inline rather than changing
+  the (correct) production formula to fit a wrong assumption.
+
+Covered by tests: the CoinGecko `/global` adapter extension (request building, schema validation for a
+missing `data` block/`total_market_cap.usd`/`updated_at`, non-positive-value and non-integer-epoch rejection);
+every metric's readings and conditions (moving averages, uptrend/downtrend/mixed, RSI overbought/oversold/
+neutral including the zero-average-loss edge case, ATR/volatility insufficient-history vs. ok once the
+percentile window fills, volume-trend elevated/low/normal, VWAP position, relative-strength outperforming/
+underperforming, support/resistance rolling high/low, market-breadth broad_advance/broad_decline/mixed with
+partial-availability exclusion, the TOTAL/TOTAL2/TOTAL3/dominance family including partial-data cases, ETH/BTC
+strengthening/weakening) and their unavailable paths; the score's parameter loading, weighted combination,
+renormalisation on a missing component (including the altcoin-relative-strength component's "average whichever
+of ETH/SOL/XRP are available" behavior), the insufficient-data floor, band boundaries, and clipping; real
+ingestion of the TOTAL market-cap dataset against a synthetic CoinGecko `/global` fake, including the sentinel
+subject and no-duplication-on-repeated-recent-window check; the full catalog/overview/history API responses,
+including an "ok" score once daily bars and TOTAL are loaded and "insufficient_data"/"unavailable" with nothing
+loaded.
+
+**Known limitations**
+- `NOT_TRACKED` (full-market breadth, full TOTAL-family constituent breakdown) are sourcing-gap/scope decisions
+  for the user to review, not technical dead ends — see DATA_DICTIONARY.md §5h and TODO.md.
+- Market breadth, relative strength, ETH/BTC and dominance are all limited to/benchmarked against this
+  platform's own four tracked assets (BTC, ETH, SOL, XRP) — never presented as full-market figures.
+- VWAP is a rolling 20-day window, not a true session-anchored intraday VWAP (daily bars have no intraday
+  session) — labelled as a "rolling-window approximation" everywhere it appears.
+- Score weights, scales and band boundaries are v1 methodology / initial parameters, chosen by design and not
+  fitted to data — awaiting the user's review, same posture as every other score in this platform.
+- The new integration tests (`test_market_structure_ingestion.py`, `test_market_structure_api.py`) were written
+  and confirmed to collect cleanly, but have not been executed against a real PostgreSQL/TimescaleDB instance
+  in this workspace (none is running here) — the user's run on Windows (which does have Docker Compose
+  services) is the real verification, same pattern as every prior phase's first Windows run.
+- No live CoinGecko `/global` response has been captured from a network that can actually reach it from this
+  workspace; the user's first real ingestion run on Windows is the real verification.
+- No frontend page — out of scope for this phase as instructed.
+
+**Next step:** deliver the changed/new files to the user's Windows machine via the device bridge (checksum-
+verified), then the user runs `uv sync && uv run pytest -q && uv run ruff check . && uv run ruff format --check
+. && uv run mypy` and commits from `E:\FINANCIAL TOOL\backend` (Git runs there — C5); this section will be
+updated with the resulting commit hash and verification transcript once the user reports back, following the
+exact pattern of every prior phase.
 

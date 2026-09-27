@@ -317,28 +317,27 @@ Phases are **numbered** (ADR-0012). Always refer to them as "Phase <number>".
 
 | # | Phase | # | Phase |
 |---|---|---|---|
-| 0 | Project foundation | 14 | Historical similarity |
-| 1 | Master engineering rules | 15 | Backtesting |
-| 2 | Architecture | 16 | Quant red-team |
-| 3 | Foundation (infrastructure) | 17 | Anomaly engine |
-| 4 | Data ingestion engine | 18 | Capital rotation |
-| 5 | Market data | 19 | Claude AI Analyst |
-| 6 | Institutional capital | 20 | Daily intelligence |
-| 7 | Whale intelligence | 21 | Alerts |
-| 8 | Derivatives | 22 | Paper trading |
-| 9 | Liquidity | 23 | Decision journal |
-| 10 | Retail | 24 | Executive dashboard |
-| 11 | Macro | 25 | Security + AI + stress testing |
-| 12 | Divergence engine | 26 | Production |
-| 13 | Regime engine | 27 | Real-time intelligence |
-| — | Market structure | | |
+| 0 | Project foundation | 15 | Historical similarity |
+| 1 | Master engineering rules | 16 | Backtesting |
+| 2 | Architecture | 17 | Quant red-team |
+| 3 | Foundation (infrastructure) | 18 | Anomaly engine |
+| 4 | Data ingestion engine | 19 | Capital rotation |
+| 5 | Market data | 20 | Claude AI Analyst |
+| 6 | Institutional capital | 21 | Daily intelligence |
+| 7 | Whale intelligence | 22 | Alerts |
+| 8 | Derivatives | 23 | Paper trading |
+| 9 | Liquidity | 24 | Decision journal |
+| 10 | Retail | 25 | Executive dashboard |
+| 11 | Macro | 26 | Security + AI + stress testing |
+| 12 | Market structure | 27 | Production |
+| 13 | Divergence engine | 28 | Real-time intelligence |
+| 14 | Regime engine | | |
 
-Phases 0–11 follow the user's guide: 0 project foundation, 1 master engineering rules (Part B), 2 architecture,
+Phases 0–12 follow the user's guide: 0 project foundation, 1 master engineering rules (Part B), 2 architecture,
 3 application foundation (infrastructure), 4 data ingestion engine, 5 market data, 6 institutional capital, 7 whale
 intelligence, 8 derivatives, 9 liquidity / stablecoins, 10 retail activity intelligence, 11 macroeconomic data
-layer (ADR-0054, ADR-0012 Amendment 3). "Market structure" — previously listed provisionally as 11 — is
-unscheduled again until the user places it. Phase numbers from 12 onward remain **provisional** until the user
-issues each phase.
+layer (ADR-0054, ADR-0012 Amendment 3), 12 market structure engine (ADR-0055, ADR-0012 Amendment 4). Phase
+numbers from 13 onward remain **provisional** until the user issues each phase.
 
 **Testing rule:** integration tests that write data run only in the separate `<database>_test` database, which the test
 suite creates and migrates itself. Never point data-writing tests at the development or production database.

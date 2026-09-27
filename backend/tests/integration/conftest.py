@@ -106,6 +106,7 @@ from tests.integration.derivative_support import deriv  # noqa: E402, F401
 from tests.integration.institutional_support import inst  # noqa: E402, F401
 from tests.integration.liquidity_support import liquidity  # noqa: E402, F401
 from tests.integration.macro_support import macro  # noqa: E402, F401
+from tests.integration.market_structure_support import market_structure  # noqa: E402, F401
 from tests.integration.market_support import market  # noqa: E402, F401
 from tests.integration.retail_support import retail  # noqa: E402, F401
 from tests.integration.whale_support import whales  # noqa: E402, F401

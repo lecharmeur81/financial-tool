@@ -19,6 +19,7 @@ from cfi.api.routes import (
     liquidity,
     macro,
     market,
+    market_structure,
     meta,
     retail,
     whales,
@@ -100,4 +101,5 @@ def create_app(
     app.include_router(liquidity.router)
     app.include_router(retail.router)
     app.include_router(macro.router)
+    app.include_router(market_structure.router)
     return app

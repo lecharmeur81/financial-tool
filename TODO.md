@@ -318,6 +318,52 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
       existing adapter capabilities default) — FRED data is US federal government work and is generally public
       domain, but this has not been formally verified against FRED's own terms page.
 
+## Phase 12 — Market Structure Engine (built 2026-09-27; see PROGRESS.md)
+
+- [x] One new dataset (`market_structure.total_market_cap.usd`, CoinGecko `/global`), everything else
+      calculated from already-tracked data: moving averages, trend, RSI, ATR, realized volatility, volume
+      trend, rolling VWAP, relative strength vs. BTC, support/resistance, market breadth, BTC/ETH dominance,
+      TOTAL2/TOTAL3, ETH/BTC, one versioned score (`market_structure_score_v1`, 5 direction-annotated
+      components), API (`/api/v1/market-structure/{catalog,overview,history}`).
+- [ ] **User:** tests and `docker compose up --build` on Windows — see PROGRESS.md for the exact commands and
+      the expected test count.
+- [ ] **User:** check `/api/v1/ingestion/runs` for `coingecko`'s `/global` calls — CoinGecko's host is not
+      reachable from Claude's workspace (egress-proxy denied, like every other provider's raw endpoints in
+      earlier phases), so no live response has been seen from a network that can actually reach it; the user's
+      first real run is the real verification.
+- [ ] After the first real run: copy one real CoinGecko `/global` payload into the test fixtures and confirm
+      the documented shape (`data.total_market_cap.usd`, `data.updated_at`) still matches.
+
+### Decisions needed from the user (Phase 12)
+
+- [ ] **Market breadth is a four-asset proxy, not full-market breadth.** No free source publishes an
+      advance/decline line across the whole crypto market. `market_breadth` is the fraction of this platform's
+      own four tracked assets (BTC, ETH, SOL, XRP) trading above their own 50-day SMA — accept as the working
+      proxy, or scope in a broader universe later if a suitable free source is found.
+- [ ] **BTC/ETH dominance calculated, not CoinGecko's own `market_cap_percentage`.** Dominance is derived from
+      the new TOTAL dataset and the per-asset market caps already tracked (Phase 5/6), to keep every dominance
+      figure point-in-time consistent with its own inputs, rather than storing CoinGecko's own percentage
+      (computed at CoinGecko's own snapshot time). Accept this approach, or ask for CoinGecko's own figure to
+      be stored alongside it for comparison.
+- [ ] **One venue (Coinbase), one benchmark (BTC), for every technical calculation.** Every indicator is
+      computed from Coinbase Exchange's daily bars (Phase 5's priority-10 default venue) rather than blending
+      venues; relative strength, ETH/BTC and dominance are always benchmarked against BTC. Accept these
+      defaults, or specify a different venue/benchmark.
+- [ ] **VWAP is a rolling 20-day window, not a session-anchored intraday VWAP.** Daily bars have no intraday
+      session to anchor to; every VWAP field/label says "rolling-window approximation". Accept this, or request
+      intraday bars for a true session VWAP later (a larger scope change).
+- [ ] **Judgment parameters (v1 methodology / initial parameters) — not yet reviewed by the user.** Market
+      Structure Score weights 0.25 / 0.20 / 0.20 / 0.20 / 0.15 (price trend / momentum / market breadth /
+      altcoin relative strength / volatility regime), reference scales 0.20 / 50 / 0.50 / 0.15 / 50,
+      `min_available_weight` 0.5, bands ±50/±15. See DATA_DICTIONARY.md §5h, ADR-0055. Chosen by design, not
+      fitted to data — same review invitation as every prior phase's score: if the user wants a different
+      breakdown, send it and a new version id (`market_structure_score_v2`) is published rather than editing
+      v1.
+- [ ] **Frontend page** — not built this phase (not requested; see PROGRESS.md). A natural next step once the
+      user asks for it.
+- [ ] **Terms of use** of CoinGecko's public API for `/global` not separately reviewed beyond the existing
+      adapter's attribution requirement (already tracked from Phase 5/6/10).
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.

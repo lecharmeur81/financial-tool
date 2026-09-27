@@ -17,6 +17,7 @@ from cfi.institutional.sources import sources_for
 from cfi.liquidity.sources import sources_for as liquidity_sources_for
 from cfi.macro.sources import sources_for as macro_sources_for
 from cfi.market.sources import ADAPTERS, datasets_for
+from cfi.market_structure.sources import sources_for as market_structure_sources_for
 from cfi.retail.sources import sources_for as retail_sources_for
 from cfi.whales.sources import sources_for as whale_sources_for
 
@@ -158,6 +159,21 @@ def macro_entries(provider_ids: list[str]) -> dict[str, dict[str, Any]]:
     }
 
 
+def market_structure_entries(provider_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """One entry per (provider, dataset, subject); every 5 minutes (TOTAL market cap, same
+    cadence as the per-asset market-cap dataset it reuses the provider from) — see
+    ``cfi.market_structure.sources``. Runs are idempotent."""
+    return {
+        f"market_structure:{item.provider_id}:{item.dataset.dataset_id}:{item.subject}": {
+            "task": "market_structure.ingest",
+            "schedule": float(item.interval_seconds),
+            "args": (item.provider_id, item.dataset.dataset_id, item.subject),
+            "options": {"queue": item.queue, "expires": item.interval_seconds},
+        }
+        for item in market_structure_sources_for(provider_ids)
+    }
+
+
 def beat_schedule(
     provider_ids: list[str],
     institutional_provider_ids: list[str] | None = None,
@@ -166,6 +182,7 @@ def beat_schedule(
     liquidity_provider_ids: list[str] | None = None,
     retail_provider_ids: list[str] | None = None,
     macro_provider_ids: list[str] | None = None,
+    market_structure_provider_ids: list[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     schedule: dict[str, dict[str, Any]] = institutional_entries(institutional_provider_ids or [])
     schedule.update(whale_entries(whale_provider_ids or []))
@@ -173,6 +190,7 @@ def beat_schedule(
     schedule.update(liquidity_entries(liquidity_provider_ids or []))
     schedule.update(retail_entries(retail_provider_ids or []))
     schedule.update(macro_entries(macro_provider_ids or []))
+    schedule.update(market_structure_entries(market_structure_provider_ids or []))
     for item in scheduled_ingestions(provider_ids):
         schedule[f"latest:{item.provider_id}:{item.dataset_id}"] = {
             "task": "market.ingest_latest",

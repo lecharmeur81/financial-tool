@@ -752,6 +752,93 @@ owner_phase:      11 (2026-09-27)
 status:           implemented
 ```
 
+## 5h. Market structure datasets (implemented in Phase 12)
+
+Only **one** dataset is directly ingested this phase — everything else is a **Calculated Metric** (R2) derived
+at read time from datasets Phase 5/6 already ingest (daily OHLCV bars, per-asset market caps), never
+re-ingested.
+
+| Dataset ID | Cadence | Provider | Values (unit) | `available_at` |
+|---|---|---|---|---|
+| `market_structure.total_market_cap.usd` | ~5 min (event) | CoinGecko `/global` | Total market capitalisation across every cryptocurrency CoinGecko tracks (USD) | provider (event time = provider's last update time) |
+
+`asset` and `subject_ref` are both the sentinel `GLOBAL` (`cfi.market_structure.universe.GLOBAL_SUBJECT`) —
+one global reading, no per-asset dimension (same pattern as Phase 9's `TOTAL_SUBJECT` and Phase 10's
+`TRENDING_SUBJECT`).
+
+**Reused, not re-ingested:** daily OHLCV bars (`market.ohlcv.usd.1d`, Coinbase Exchange — Phase 5's
+priority-10 default venue, so all four tracked assets are compared on the same venue/timeframe) and per-asset
+market capitalisation (`market.market_cap.usd`, Phase 5/6).
+
+**Not tracked** (`NOT_TRACKED`, `cfi/market_structure/universe.py`):
+
+- **Full-market breadth** — no free source publishes an advance/decline line across the whole crypto market
+  (thousands of listed assets). Market breadth here is a proxy limited to the four assets this platform
+  already tracks (BTC, ETH, SOL, XRP) — the fraction of them trading above their own 50-day moving average —
+  never presented as full-market breadth.
+- **Full market-cap-weighted TOTAL/TOTAL2/TOTAL3 constituent breakdown** — TOTAL2/TOTAL3 are calculated (TOTAL
+  minus BTC's, then BTC+ETH's, market cap), matching the common charting convention (e.g. TradingView's
+  CRYPTOCAP:TOTAL2/TOTAL3), never a directly observed value from any provider.
+
+### Market-structure calculated metrics (read time, point-in-time — `cfi/market_structure/metrics.py`)
+
+```
+moving_averages:         simple moving average (SMA) over 20/50/200 daily bars
+trend:                   uptrend: close > SMA50 > SMA200; downtrend: close < SMA50 < SMA200; mixed otherwise
+rsi:                     Wilder's 14-day relative strength index; overbought ≥ 70, oversold ≤ 30, neutral
+                         otherwise
+atr:                     Wilder's 14-day average true range, as a percentage of price, ranked as a nearest-
+                         rank percentile of its own trailing 365-day history (minimum 20 readings); elevated
+                         ≥ 80th percentile, low ≤ 20th, normal otherwise
+volatility:              annualized standard deviation of 30-day rolling daily log returns (std × √365), ranked
+                         the same way as ATR
+volume_trend:            latest daily volume vs. the trailing 20-day average (excluding the latest bar);
+                         elevated ≥ 1.5x, low ≤ 0.5x, normal otherwise
+vwap:                    rolling 20-day volume-weighted average price (Σ(typical price × volume) ÷ Σvolume) —
+                         a rolling-window approximation, NOT a session-anchored intraday VWAP
+relative_strength:       trailing 30-day return minus BTC's trailing 30-day return; outperforming ≥ +5pp,
+                         underperforming ≤ −5pp, in_line otherwise — always benchmarked against BTC
+support_resistance:      naive rolling 20-day and 50-day high (resistance) / low (support) — a Donchian-
+                         channel-style method, never fitted or clustered
+market_breadth:          fraction of the tracked universe (BTC, ETH, SOL, XRP) trading above its own 50-day
+                         SMA; broad_advance ≥ 75%, broad_decline ≤ 25%, mixed otherwise
+dominance_total_family:  BTC/ETH dominance = asset market cap ÷ TOTAL × 100; TOTAL2 = TOTAL − BTC market cap;
+                         TOTAL3 = TOTAL2 − ETH market cap
+eth_btc:                 ETH close ÷ BTC close (same venue/quote), plus its own 90-day trend (±3pp threshold)
+```
+
+### Market Structure Score (`market_structure_score`, calculated metric — ADR-0055)
+
+```
+version:          market_structure_score_v1 (versioned, immutable parameter set —
+                  cfi/market_structure/score_parameters.py)
+range:            −100 … +100, signed: how constructive (positive) or deteriorated (negative) the current
+                  technical structure looks — NOT a trading recommendation and NOT a directional signal
+components:       sub-score = clip(value ÷ scale, −1, +1)
+  price_trend                  weight 0.25   BTC (close ÷ SMA200 − 1) ÷ 0.20
+  momentum                     weight 0.20   BTC (RSI(14) − 50) ÷ 50
+  market_breadth                weight 0.20   (tracked-universe fraction above 50-day SMA − 0.5) ÷ 0.50
+  altcoin_relative_strength     weight 0.20   average ETH/SOL/XRP 30-day spread vs. BTC ÷ 0.15
+  volatility_regime             weight 0.15   (BTC realized-volatility percentile − 50) ÷ 50, INVERTED (calmer
+                                than usual = more constructive)
+score:            100 × Σ(weight × sub-score) ÷ Σ(weights of available components), 1 decimal
+missing_policy:   component excluded when its underlying metric is "unavailable" (never filled with a
+                  default; altcoin_relative_strength averages whichever of ETH/SOL/XRP are available and is
+                  only unavailable when all three are), with automatic renormalisation over the remaining
+                  weight; "Insufficient data" below available weight 0.5 (min_available_weight, versioned
+                  parameter)
+bands:            ≥ 50 broadly constructive technical structure · ≥ 15 improving · ≥ −15 neutral/mixed · ≥ −50
+                  deteriorating · below: broadly weak technical structure (versioned parameter)
+reproducibility:  every result records `parameter_version` and `calculated_at` alongside every component's
+                  value, sub-score, effective weight, contribution and calculation string
+semantic_note:    fixed API text states plainly this score does not convert these metrics into an automatic
+                  trading recommendation
+parameters_note:  v1 methodology / initial parameters, chosen by design and not fitted to data or empirically
+                  validated — never described as "validated"
+owner_phase:      12 (2026-09-27)
+status:           implemented
+```
+
 ---
 
 ## 6. Metric definition template (L2)
