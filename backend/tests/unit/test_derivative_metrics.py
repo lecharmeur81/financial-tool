@@ -313,6 +313,9 @@ def test_liquidations_last_24_hours_and_events() -> None:
     component = sc.liquidation_component(liq)
     assert component.stress == Decimal("0.1433")  # 0.1433 % ÷ 1 %
     assert "74 % of liquidated size was long" in (component.context or "")
+    # RED_TEAM_REPORT.md finding #9: single-venue liquidation data must be flagged, not treated
+    # as equally reliable as the multi-venue components (e.g. funding) beside it.
+    assert "single-venue" in (component.context or "").lower()
 
 
 def test_liquidations_with_missing_hours_or_short_history() -> None:

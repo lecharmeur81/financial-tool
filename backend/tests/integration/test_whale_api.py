@@ -213,9 +213,10 @@ async def test_transfers_are_listed_with_direction_and_classification(
     assert newest["quality_status"] == "suspect"
     assert newest["recipient"] is None  # invalid address: never classified
     to_unknown = next(t for t in body["transfers"] if t["value"] == "800")
-    # the recipient is in the latest top-100 snapshot: classified with that balance (size rule)
+    # classified with the balance snapshot in effect AT THE TRANSFER'S OWN TIME (2026-09-03), not
+    # the latest one (2026-09-09) — RED_TEAM_REPORT.md finding #13 / ADR-0064
     assert to_unknown["recipient"]["actor_class"] == "unknown_large_holder"
-    assert "10,100.00 BTC" in to_unknown["recipient"]["evidence"]
+    assert "10,000.00 BTC" in to_unknown["recipient"]["evidence"]
     to_binance = next(t for t in body["transfers"] if t["value"] == "1200")
     assert to_binance["recipient"]["entity_name"] == "Binance"
     assert to_binance["sender"] is None

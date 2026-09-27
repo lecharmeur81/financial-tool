@@ -202,6 +202,8 @@ class LiquidityService:
             "score": num(s.score),
             "band": s.band,
             "semantic_note": sc.SEMANTIC_NOTE,
+            "measurement_class": s.measurement_class,
+            "proxy_caveat": s.proxy_caveat,
             "available_weight": num(s.available_weight),
             "reason": s.reason,
             "components": [

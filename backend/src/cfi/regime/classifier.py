@@ -64,6 +64,11 @@ class ClassificationResult:
     contradicting: tuple[ConditionOutcome, ...]
     candidates: tuple[RegimeScore, ...]  # every regime's own score, ranked, for transparency
     reason: str | None = None
+    # RED_TEAM_REPORT.md finding #4 (ADR-0062): true when this result is the PREVIOUS regime,
+    # kept despite a higher-scoring challenger, because the challenger's margin did not clear
+    # ``ParameterSet.hysteresis_margin`` — surfaced, never silent (R3), so a reader can tell a
+    # "held" classification from one where this regime is simply, unambiguously the best match.
+    held_by_hysteresis: bool = False
 
 
 def _evaluate_condition(cond: ConditionDef, snapshot: RegimeSnapshot) -> ConditionOutcome:
@@ -158,7 +163,18 @@ def evaluate_regime(
     )
 
 
-def classify(snapshot: RegimeSnapshot, params: ParameterSet) -> ClassificationResult:
+def classify(
+    snapshot: RegimeSnapshot, params: ParameterSet, *, previous_regime_id: str | None = None
+) -> ClassificationResult:
+    """Classify ``snapshot`` against every regime in ``params``.
+
+    ``previous_regime_id`` (RED_TEAM_REPORT.md finding #4, ADR-0062) is the regime this same
+    asset/as_of walk was previously assigned — when supplied and ``params.hysteresis_margin`` is
+    non-zero, that regime is KEPT rather than replaced the instant a new regime edges narrowly
+    ahead, damping single-day threshold oscillation. It is never fabricated by this function: the
+    caller (``cfi.regime.service``) supplies it, typically from yesterday's own classification, and
+    omitting it (the default) reproduces the original always-take-the-highest-scorer behavior.
+    """
     scores = tuple(
         evaluate_regime(d, snapshot, min_available_weight=params.min_available_weight)
         for d in params.regimes
@@ -185,6 +201,38 @@ def classify(snapshot: RegimeSnapshot, params: ParameterSet) -> ClassificationRe
     margin = None if second is None else top.confidence - second.confidence  # type: ignore[operator]
     is_ambiguous = margin is not None and margin < params.tie_margin
     top_qualifies = top.confidence is not None and top.confidence >= params.min_confidence_assign
+
+    if (
+        params.hysteresis_margin > 0
+        and previous_regime_id is not None
+        and previous_regime_id != MIXED_UNCLEAR
+        and previous_regime_id != top.regime_id
+    ):
+        prev_score = next((s for s in ok_scores if s.regime_id == previous_regime_id), None)
+        if (
+            prev_score is not None
+            and prev_score.confidence is not None
+            and top.confidence is not None
+            and prev_score.confidence >= params.min_confidence_assign
+            and (top.confidence - prev_score.confidence) < params.hysteresis_margin
+        ):
+            return ClassificationResult(
+                prev_score.regime_id,
+                prev_score.label,
+                prev_score.confidence,
+                "ok",
+                prev_score.contributing,
+                prev_score.contradicting,
+                scores,
+                reason=(
+                    f"Held from the prior classification: '{prev_score.label}' "
+                    f"({prev_score.confidence}) still qualifies, and the current best match "
+                    f"'{top.label}' ({top.confidence}) did not exceed it by the "
+                    f"{params.hysteresis_margin} hysteresis margin."
+                ),
+                held_by_hysteresis=True,
+            )
+
     if top_qualifies and not is_ambiguous:
         return ClassificationResult(
             top.regime_id,

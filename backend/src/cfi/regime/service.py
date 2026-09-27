@@ -11,7 +11,7 @@ conditions satisfy the regime's own definition, never a probability of future pr
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -99,6 +99,7 @@ class RegimeService:
                 "min_available_weight": num(params.min_available_weight),
                 "min_confidence_assign": num(params.min_confidence_assign),
                 "tie_margin": num(params.tie_margin),
+                "hysteresis_margin": num(params.hysteresis_margin),
                 "max_duration_lookback_days": MAX_DURATION_LOOKBACK_DAYS,
                 "historical_lookback_days": HISTORICAL_LOOKBACK_DAYS,
                 "historical_step_days": HISTORICAL_STEP_DAYS,
@@ -130,19 +131,30 @@ class RegimeService:
             "not_tracked": list(NOT_TRACKED),
         }
 
-    async def _classify_at(self, as_of: datetime) -> ClassificationResult:
+    async def _classify_at(
+        self, as_of: datetime, *, previous_regime_id: str | None = None
+    ) -> ClassificationResult:
         """Point-in-time classification as it would have appeared on ``as_of`` — knowledge_time is
-        pinned to the same instant, deliberately excluding any later-ingested revision (R4)."""
+        pinned to the same instant, deliberately excluding any later-ingested revision (R4).
+
+        ``previous_regime_id`` threads hysteresis (finding #4, ADR-0062) through: the caller
+        supplies whichever regime it wants this day's classification to persist against, if it
+        still qualifies and the challenger has not cleared the margin."""
         snapshot = await gather_snapshot(
             self.adapters, asset=BENCHMARK_ASSET, as_of=as_of, knowledge_time=as_of
         )
-        return classify(snapshot, rp.parameters())
+        return classify(snapshot, rp.parameters(), previous_regime_id=previous_regime_id)
 
     async def current(self, *, as_of: datetime, knowledge_time: datetime) -> dict[str, Any]:
         snapshot = await gather_snapshot(
             self.adapters, asset=BENCHMARK_ASSET, as_of=as_of, knowledge_time=knowledge_time
         )
-        result = classify(snapshot, rp.parameters())
+        # Hysteresis (finding #4, ADR-0062): find out what yesterday's own classification was
+        # (itself un-hysteresis'd, since it has no "day before that" to check here) and let today's
+        # result persist against it rather than flipping on any margin at all.
+        yesterday = await self._classify_at(as_of - timedelta(days=1))
+        previous_regime_id = yesterday.regime_id if yesterday.status == "ok" else None
+        result = classify(snapshot, rp.parameters(), previous_regime_id=previous_regime_id)
 
         if result.status == "insufficient_data":
             # No regime could even be evaluated (zero available data) — a backward walk would
@@ -154,7 +166,10 @@ class RegimeService:
         else:
 
             async def classify_at(candidate: datetime) -> tuple[str, Decimal | None]:
-                r = await self._classify_at(candidate)
+                # Threading the anchor day's own (possibly hysteresis-held) regime through the
+                # backward walk means "does this regime still hold" is checked consistently with
+                # hysteresis at every earlier day too, not just at the anchor (finding #4).
+                r = await self._classify_at(candidate, previous_regime_id=result.regime_id)
                 return r.regime_id, r.confidence
 
             duration = await regime_duration(
@@ -185,6 +200,7 @@ class RegimeService:
             "confidence_semantic_note": CONFIDENCE_SEMANTIC_NOTE,
             "status": result.status,
             "reason": result.reason,
+            "held_by_hysteresis": result.held_by_hysteresis,
             "regime_start_date": _iso(duration.since),
             "regime_duration_days": duration.days,
             "regime_duration_capped": duration.capped,

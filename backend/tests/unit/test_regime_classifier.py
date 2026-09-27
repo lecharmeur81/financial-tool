@@ -196,3 +196,116 @@ def test_classify_returns_mixed_unclear_when_best_confidence_is_below_threshold(
     assert result.regime_id == cl.MIXED_UNCLEAR
     assert result.confidence == Decimal("0.50")
     assert "below the" in (result.reason or "")
+
+
+# --------------------------------------------------------------------------- classify: hysteresis
+# (RED_TEAM_REPORT.md finding #4, ADR-0062)
+
+
+def _hysteresis_params(*, a_confidence: Decimal, b_confidence: Decimal) -> rp.ParameterSet:
+    """Two single-metric regimes, A and B, whose confidences are driven to exact target values via
+    condition weights (rather than depending on a genuinely fractional match count), so the
+    hysteresis margin's boundary can be hit exactly."""
+    regime_a = rp.RegimeDefinition(
+        "a",
+        "A",
+        "d",
+        (
+            rp.ConditionDef(
+                "c1", "l1", "m1", "gte", a_confidence, "r", threshold=Decimal(1)
+            ),  # matches
+            rp.ConditionDef(
+                "c2", "l2", "m1b", "gte", Decimal(1) - a_confidence, "r", threshold=Decimal(1)
+            ),  # never matches (m1b unset)
+        ),
+    )
+    regime_b = rp.RegimeDefinition(
+        "b",
+        "B",
+        "d",
+        (
+            rp.ConditionDef("c1", "l1", "m2", "gte", b_confidence, "r", threshold=Decimal(1)),
+            rp.ConditionDef(
+                "c2", "l2", "m2b", "gte", Decimal(1) - b_confidence, "r", threshold=Decimal(1)
+            ),
+        ),
+    )
+    return rp.ParameterSet(
+        version="hysteresis_test",
+        regimes=(regime_a, regime_b),
+        min_available_weight=Decimal("0.5"),
+        min_confidence_assign=Decimal("0.55"),
+        tie_margin=Decimal("0.01"),  # small, so these scenarios aren't caught by the tie path
+        hysteresis_margin=Decimal("0.05"),
+    )
+
+
+def _hysteresis_snapshot() -> RegimeSnapshot:
+    # m1/m2 "match" (>= 1); m1b/m2b are present but fail their own "gte 1" condition (value 0) —
+    # available but non-matching, so confidence == the matching condition's own weight exactly
+    # (matched_weight / available_weight, with both conditions' weights summing to 1).
+    return snapshot(
+        {
+            "m1": reading("5"),
+            "m1b": reading("0"),
+            "m2": reading("5"),
+            "m2b": reading("0"),
+        }
+    )
+
+
+def test_hysteresis_keeps_the_previous_regime_when_the_challenger_barely_wins() -> None:
+    params = _hysteresis_params(a_confidence=Decimal("0.90"), b_confidence=Decimal("0.93"))
+    result = cl.classify(_hysteresis_snapshot(), params, previous_regime_id="a")
+    assert result.regime_id == "a"  # B's 0.03 lead does not clear the 0.05 hysteresis margin
+    assert result.held_by_hysteresis is True
+    assert result.confidence == Decimal("0.90")
+    assert "Held from the prior classification" in (result.reason or "")
+
+
+def test_hysteresis_yields_once_the_challenger_clears_the_margin() -> None:
+    params = _hysteresis_params(a_confidence=Decimal("0.80"), b_confidence=Decimal("0.93"))
+    result = cl.classify(_hysteresis_snapshot(), params, previous_regime_id="a")
+    assert result.regime_id == "b"  # B's 0.13 lead clears the 0.05 margin
+    assert result.held_by_hysteresis is False
+    assert result.confidence == Decimal("0.93")
+
+
+def test_hysteresis_is_a_no_op_with_zero_margin_regime_classifier_v1() -> None:
+    """cost_model_v1-style reproducibility: regime_classifier_v1's hysteresis_margin is 0, so the
+    highest-confidence regime always wins, exactly like before Phase 18."""
+    params = _hysteresis_params(a_confidence=Decimal("0.90"), b_confidence=Decimal("0.93"))
+    params_v1_style = rp.ParameterSet(
+        version="v1_style",
+        regimes=params.regimes,
+        min_available_weight=params.min_available_weight,
+        min_confidence_assign=params.min_confidence_assign,
+        tie_margin=params.tie_margin,
+        hysteresis_margin=Decimal("0"),
+    )
+    result = cl.classify(_hysteresis_snapshot(), params_v1_style, previous_regime_id="a")
+    assert result.regime_id == "b"
+    assert result.held_by_hysteresis is False
+
+
+def test_hysteresis_does_not_apply_without_a_previous_regime_id() -> None:
+    params = _hysteresis_params(a_confidence=Decimal("0.90"), b_confidence=Decimal("0.93"))
+    result = cl.classify(_hysteresis_snapshot(), params, previous_regime_id=None)
+    assert result.regime_id == "b"
+    assert result.held_by_hysteresis is False
+
+
+def test_hysteresis_does_not_hold_a_regime_that_no_longer_qualifies_at_all() -> None:
+    """If the previous regime's OWN confidence has fallen below min_confidence_assign, hysteresis
+    must not resurrect it — it no longer qualifies on its own merits, hysteresis or not."""
+    params = _hysteresis_params(a_confidence=Decimal("0.40"), b_confidence=Decimal("0.42"))
+    result = cl.classify(_hysteresis_snapshot(), params, previous_regime_id="a")
+    assert result.regime_id == cl.MIXED_UNCLEAR
+    assert result.held_by_hysteresis is False
+
+
+def test_default_classify_call_has_no_hysteresis_previous_regime_id_omitted() -> None:
+    """Reproducibility: calling classify() the old way (no previous_regime_id argument at all)
+    must behave exactly as before Phase 18."""
+    result = cl.classify(_accumulation_snapshot(), rp.parameters())
+    assert result.held_by_hysteresis is False

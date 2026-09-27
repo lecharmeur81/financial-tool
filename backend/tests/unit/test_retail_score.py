@@ -280,3 +280,22 @@ def test_clip_helper_bounds_are_exact() -> None:
     assert sc._clip(Decimal("1.5")) == Decimal(1)
     assert sc._clip(Decimal("-1.5")) == Decimal(-1)
     assert sc._clip(Decimal("0.5")) == Decimal("0.5")
+
+
+# --------------------------------------------------------------------------- shared-input notes
+
+
+def test_speculation_score_discloses_the_shared_funding_rate_input() -> None:
+    """RED_TEAM_REPORT.md finding #7 / ADR-0064: the overlap with Derivatives Health Score's
+    funding component must be runtime-visible, not just documented in a docstring."""
+    result = full_speculation_score()
+    assert result.shared_input_note is not None
+    assert "Derivatives Health" in result.shared_input_note
+    assert "funding" in result.shared_input_note.lower()
+
+
+def test_activity_score_carries_no_shared_input_note() -> None:
+    """The shared-input overlap is specific to the Speculation score's funding component; the
+    Activity score has no such overlap and must not carry a fabricated one."""
+    result = full_activity_score()
+    assert result.shared_input_note is None

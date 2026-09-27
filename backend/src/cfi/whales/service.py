@@ -10,7 +10,7 @@ recommendation.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -195,6 +195,15 @@ def to_snapshots(
         )
         for t, balances in sorted(grouped.items())
     ]
+
+
+def _balances_as_of(snapshots: Sequence[ws.Snapshot], at: datetime) -> Mapping[str, Decimal]:
+    """The balance map from the LATEST snapshot at or before ``at`` (``snapshots`` sorted
+    ascending by ``to_snapshots``) — never a later one (RED_TEAM_REPORT.md finding #13). ``{}``
+    when ``at`` predates every stored snapshot: no balance is knowable for it, not a borrowed
+    future one."""
+    candidates = [s for s in snapshots if s.time <= at]
+    return candidates[-1].balances if candidates else {}
 
 
 @dataclass
@@ -623,23 +632,30 @@ class WhaleService:
             knowledge_time=knowledge_time,
             min_value=LARGE_TRANSFER_MIN[asset],
         )
-        # Addresses in the latest top-100 snapshot are classified with that balance (size rule);
-        # other addresses have no known balance and are only classified by labels.
+        # Each transfer is classified with the balance snapshot nearest to (at or before) ITS OWN
+        # event_time — never the latest snapshot regardless of when the transfer happened
+        # (RED_TEAM_REPORT.md finding #13, ADR-0064): an address that only grew large AFTER a
+        # given historical transfer must not be retroactively classified as a large holder for
+        # that earlier transfer using today's balance, and the reverse (an address that has since
+        # drawn down) must not lose a classification it held at the time. A transfer that predates
+        # every stored snapshot gets no balance (size rule can't apply) rather than borrowing a
+        # LATER one, which would be a different, worse form of look-ahead. Addresses with no known
+        # balance at any point are still classified by labels alone.
         snapshots, _ = await self._snapshots(asset, ctx)
-        latest_balances = snapshots[-1].balances if snapshots else {}
         items: list[dict[str, Any]] = []
         summary: dict[str, Decimal] = defaultdict(Decimal)
         counts: dict[str, int] = defaultdict(int)
         for r in rows:
+            balances_then = _balances_as_of(snapshots, r["event_time"])
             sender = self._classify(
-                ctx, chain, r["sender"], r["event_time"], latest_balances.get(r["sender"] or "")
+                ctx, chain, r["sender"], r["event_time"], balances_then.get(r["sender"] or "")
             )
             recipient = self._classify(
                 ctx,
                 chain,
                 r["recipient"],
                 r["event_time"],
-                latest_balances.get(r["recipient"] or ""),
+                balances_then.get(r["recipient"] or ""),
             )
             value: Decimal = r["value_native"]
             to_ex = recipient is not None and recipient.actor_class == "exchange"

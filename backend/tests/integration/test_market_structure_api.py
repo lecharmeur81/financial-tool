@@ -8,17 +8,21 @@ components); the underlying formulas are exercised at the unit level
 
 from __future__ import annotations
 
+from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import insert
 
 from cfi.api.app import create_app
 from cfi.core.config import Settings
+from cfi.db import tables as t
 from cfi.market.jobs import backfill_step, ingest_latest
 from cfi.market.sources import ADAPTERS as MARKET_ADAPTERS
 from cfi.market.universe import ASSET_SYMBOLS, MARKET_CAP_USD, ohlcv_dataset
-from cfi.market_structure.universe import TOTAL_MARKET_CAP_USD
+from cfi.market_structure.universe import GLOBAL_SUBJECT, TOTAL_MARKET_CAP_USD
 from tests.integration.conftest import requires_services
 from tests.integration.market_structure_support import MarketStructureHarness
 from tests.integration.market_support import MarketHarness
@@ -143,3 +147,100 @@ async def test_history_rejects_unknown_series(
         as_of=as_of.isoformat(),
     )
     assert status == 404
+
+
+async def test_history_omitting_knowledge_time_does_not_leak_a_later_revision(
+    market_structure: MarketStructureHarness,
+    test_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RED_TEAM_REPORT.md finding #1 (CRITICAL) / ADR-0060 (Phase 18).
+
+    Before the fix, omitting ``knowledge_time`` made it default to ``utc_now()`` independently of
+    ``as_of`` — so ``ingested_at <= knowledge_time`` was a no-op for any as-of-a-past-date query,
+    and a later revision (stored after ``as_of`` but with an ``available_at`` that still reads as
+    before it) would leak into the historical read. This seeds exactly that scenario directly in
+    the database (bypassing the ingestion pipeline, matching the Phase 16 backtest leakage-test
+    pattern) and asserts only the revision knowable *as of* the query date is ever returned,
+    however far in the future the wall clock actually is when the query runs.
+    """
+    event_time = market_structure.wall.current
+    as_of = event_time
+
+    async with market_structure.db.begin() as conn:
+        series_id = (
+            await conn.execute(
+                insert(t.series)
+                .values(
+                    dataset_id=TOTAL_MARKET_CAP_USD.dataset_id,
+                    metric=TOTAL_MARKET_CAP_USD.metric,
+                    asset=GLOBAL_SUBJECT,
+                    subject_ref=GLOBAL_SUBJECT,
+                    venue=None,
+                    period=TOTAL_MARKET_CAP_USD.period,
+                    unit=TOTAL_MARKET_CAP_USD.unit,
+                    created_at=event_time,
+                )
+                .returning(t.series.c.series_id)
+            )
+        ).scalar_one()
+
+        common = {
+            "series_id": series_id,
+            "event_time": event_time,
+            "source_provider": "coingecko",
+            "original_source": "coingecko",
+            "raw_ref": None,
+            "pit_reliability": "native",
+            "quality_status": "ok",
+            "quality_note": None,
+            "confidence": None,
+            "transformations": [],
+            "available_at": event_time,
+            "available_at_estimated": False,
+        }
+        # Revision 0: the original, first-published figure, known at (and before) as_of.
+        await conn.execute(
+            insert(t.observation),
+            {**common, "ingested_at": event_time, "value": Decimal("1000000000000"), "revision": 0},
+        )
+        # Revision 1: a correction ingested well AFTER as_of — must never be visible to an
+        # as-of-that-date query unless knowledge_time is explicitly moved forward past it.
+        await conn.execute(
+            insert(t.observation),
+            {
+                **common,
+                "ingested_at": event_time + timedelta(days=5),
+                "value": Decimal("2000000000000"),
+                "revision": 1,
+            },
+        )
+
+    # Simulate the wall clock actually being much later than either revision when the query
+    # runs (the ordinary case: querying history well after the fact) — this is exactly the
+    # condition under which the old "knowledge_time defaults to now()" bug would leak revision 1.
+    monkeypatch.setattr("cfi.api.params.utc_now", lambda: event_time + timedelta(days=30))
+
+    status, body = get(
+        test_settings,
+        "/api/v1/market-structure/history",
+        series="total_market_cap",
+        days=1,
+        as_of=as_of.isoformat(),
+        # knowledge_time deliberately omitted
+    )
+    assert status == 200
+    assert len(body["points"]) == 1
+    assert body["points"][0]["value"] == format(Decimal("1000000000000"), "f")
+
+    # Sanity check: an explicit, later knowledge_time still legitimately surfaces the revision.
+    status, body = get(
+        test_settings,
+        "/api/v1/market-structure/history",
+        series="total_market_cap",
+        days=1,
+        as_of=as_of.isoformat(),
+        knowledge_time=(event_time + timedelta(days=30)).isoformat(),
+    )
+    assert status == 200
+    assert body["points"][0]["value"] == format(Decimal("2000000000000"), "f")

@@ -131,6 +131,30 @@ SEMANTIC_NOTE = (
     "market direction."
 )
 
+#: RED_TEAM_REPORT.md finding #9 / ADR-0064: unlike the funding-rate component, which correctly
+#: OI-weights across every venue with available data, the liquidation-stress component reads OKX
+#: exclusively — a single venue's outage or an idiosyncratic liquidation cascade fully determines
+#: this 20%-weighted component with no cross-venue smoothing. Flagged at read time on every "ok"
+#: reading (not silently treated as equally reliable as the multi-venue components beside it),
+#: rather than down-weighted, since down-weighting would itself need a documented, versioned
+#: magnitude — a bigger change than this phase's scope; see DECISIONS.md ADR-0064.
+SINGLE_VENUE_CAVEAT = (
+    "Liquidation totals are sourced from OKX only (single-venue), unlike funding, which is "
+    "OI-weighted across every venue with available data — treat this component's reading with "
+    "lower confidence than the others, especially around an OKX-specific outage or cascade."
+)
+
+#: RED_TEAM_REPORT.md finding #7 / ADR-0064: cfi.retail's Retail Speculation Score derives 0.40 of
+#: its own weight (funding_rate_bias) from this same underlying Binance funding-rate data (25% of
+#: this score). A "retail vs. derivatives" divergence is not fully independent for that shared
+#: portion.
+DERIVATIVES_SHARED_INPUT_NOTE = (
+    "25% of this score (the funding component) is sourced from the same underlying Binance "
+    "funding-rate data that also drives 40% of the Retail Speculation Score's weight. A divergence "
+    "comparison between Retail Speculation and this score is not fully independent for that "
+    "shared portion."
+)
+
 
 @dataclass(slots=True)
 class ComponentResult:
@@ -164,6 +188,7 @@ class ScoreResult:
     #: Wall-clock time this result was computed (distinct from ``as_of``, the point-in-time
     #: market snapshot the inputs describe).
     calculated_at: datetime = field(default_factory=utc_now)
+    shared_input_note: str = DERIVATIVES_SHARED_INPUT_NOTE
 
 
 def _clip01(x: Decimal) -> Decimal:
@@ -290,8 +315,10 @@ def liquidation_component(
     if liq.long_share is not None:
         r.context = (
             f"{liq.long_share * 100:.0f} % of liquidated size was long positions, "
-            f"{(1 - liq.long_share) * 100:.0f} % short positions"
+            f"{(1 - liq.long_share) * 100:.0f} % short positions. {SINGLE_VENUE_CAVEAT}"
         )
+    else:
+        r.context = SINGLE_VENUE_CAVEAT
     r.calculation = (
         f"{liq.total_24h} liquidated ÷ {liq.open_interest} open interest = "
         f"{value * 100:.4f} %; stress = clip({value * 100:.4f} ÷ "

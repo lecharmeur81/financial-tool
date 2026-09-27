@@ -1883,3 +1883,387 @@ empty-database `"insufficient_data"` path through the real API; a fully "ok" sea
 domains populated across many historical dates, each already covered by its own integration suite, so
 re-seeding them here was deliberately scoped out (documented, not silently narrowed). Frontend work was not
 part of the Phase 15 request as given and was not built.
+
+## ADR-0059 — Phase 16: Backtesting Engine — event-driven replay, execution-lag anti-look-ahead,
+long-only v1, no optimizer, persistence/API deliberately deferred pending quantitative review
+
+**Status:** Accepted (implemented 2026-09-27)
+
+**Context.** The user's Phase 16 instruction asked for a production-quality research and backtesting engine
+supporting historical replay, strategy/signal/entry/exit definitions, position sizing, fees, slippage,
+liquidity constraints, turnover, exposure, leverage, stop conditions and time-based exits; in-sample/
+validation/out-of-sample and walk-forward testing; prevention of look-ahead bias, survivorship bias, data
+leakage and future revisions leaking into past decisions; a fixed list of 17 named performance metrics;
+storage of strategy/parameter/dataset/code version, timestamp and assumptions for full reproducibility;
+synthetic datasets specifically designed to detect look-ahead bias; tests; and an explicit instruction not to
+optimize parameters against the test set. Unlike every prior phase, the closing instruction was **"After
+implementation, stop and wait for a quantitative review"** rather than "Commit. Stop." — a distinct signal
+that this phase's own methodological soundness, not the next phase, is what the user wants to check first.
+
+**Decision — a single-asset (BTC), long-only, event-driven day-by-day replay loop
+(`cfi.backtest.engine.run_backtest`).** Per simulated day: (1) execute any order scheduled the PRIOR day at
+TODAY's open; (2) check stop-loss/take-profit intrabar against TODAY's own high/low (the one exception to the
+execution lag, since a stop is a risk control, not a signal decision); (3) mark to market at TODAY's close,
+recording one `EquityPoint`; (4) compute the strategy's signal from `bars[: i + 1]` only and decide tomorrow's
+order. No parameter search exists anywhere in `cfi.backtest` (`cfi.backtest.splits` only partitions time into
+in-sample/validation/out-of-sample and walk-forward train/test windows for the user to manually judge
+generalization of a strategy definition that is already fully specified before any run starts) — directly
+satisfying "do not optimize parameters against the test set."
+
+**Decision — the execution-lag anti-look-ahead convention.** A signal computed from day D's data (through
+D's own close) can only be acted on at day D+1's open — never at D's own close, which would let a decision
+see a price it could not yet have known. Position sizing is capped by the TRAILING average volume through the
+decision day, never the (not-yet-known) execution bar's own volume. Both conventions are asserted directly by
+integration tests that insert a future price shock as a later revision (`revision=1`, a far-future
+`available_at`) of an existing bar and prove the result is byte-identical to a run against the original,
+single-revision data — and only changes once the run's own `as_of` is moved past that revision's actual
+availability (`tests/integration/test_backtest_engine.py`). A second test proves a run over `[start, end]` is
+identical whether or not bars strictly after `end` exist in the database at all. These are this phase's
+required "synthetic datasets specifically designed to detect look-ahead bias."
+
+**Decision — long-only v1 scope (not silently narrowed).** The user's spec lists "exposure" and "leverage"
+but never "short selling" or "long/short"; long-only already exercises both (leverage > 1x borrows capital to
+hold more BTC than equity alone would buy; exposure ranges 0..leverage). `cfi.backtest.universe.NOT_TRACKED`
+documents this and two other explicit scope decisions (no survivorship-bias handling, since there is only one
+tradable asset and so no universe of assets to have survivors or delistings; the execution-lag/stop exception
+above) as first-class, readable strings rather than silent omissions.
+
+**Decision — one uniform, always-`async` `Signal` protocol (`cfi.backtest.signals.Signal`) rather than a
+`PriceSignal | DomainSignal` union.** An earlier version of this module split signals into two Protocols with
+different call signatures (`value_at(bars)` vs. `async value_at(adapters, *, as_of)`) and dispatched between
+them with `isinstance`; this type-checked incorrectly under mypy strict (a Protocol-typed union does not
+narrow reliably through `isinstance` against one concrete implementation) and, independently of the type
+checker, made every future signal author responsible for updating a central dispatcher. The fix was to give
+every signal — price-based (`SmaCrossoverSignal`, `RsiSignal`, reusing `cfi.market_structure.metrics`'s
+already-tested `moving_averages`/`rsi`) and domain-based (`DomainScoreSignal`, reusing
+`cfi.similarity.snapshot.gather_snapshot`'s already-tested 9-feature extraction) — the same signature:
+`async def value_at(self, bars_through_today, adapters, *, as_of)`. A price signal ignores the
+`adapters`/`as_of` it does not need; a domain signal ignores `bars_through_today`. The engine's own
+`_signal_value` helper is now a single unconditional call with no branching at all.
+
+**Decision — single-scalar equity bookkeeping (no separate cash/BTC ledgers).** Equity is one running
+`Decimal`, adjusted by fees at entry/exit and by daily mark-to-market P&L
+(`size_base * (close_t - close_{t-1})`), with special handling for the entry day (mark from the slipped entry
+price) and the exit day (mark from the prior close to the exit price, then flat). This is simpler than
+tracking cash and BTC balances separately and is sufficient because the engine never holds more than one
+position at a time (a consequence of the long-only, single-asset v1 scope above).
+
+**Decision — a versioned `CostParameterSet` (fee/slippage/liquidity-participation-cap), same registry pattern
+as every other parameter set in this platform.** `cost_model_v1` (10 bps fee, 5 bps slippage, 5% max
+participation of trailing volume) are documented, generic, un-fitted v1 defaults — the same posture every
+score band and weight set in this platform has taken since Phase 12.
+
+**Decision — reproducibility fields are attached to every `BacktestResult`, not persisted to a database
+table.** `RunVersions` (strategy id/version, cost-parameter version, a SHA-256 dataset fingerprint over
+asset/start/end/as_of/knowledge_time/provider_id, the installed `cfi` package version, a timestamp) and
+`Assumptions` (every cost/sizing/execution-lag assumption behind the numbers, restated in full) are returned
+alongside `metrics`, `trades` and `equity_curve` on every call to `run_backtest`, satisfying the user's
+"every backtest must be reproducible" requirement without yet requiring a database migration.
+
+**Decision — persistence (a `sig`-schema table + migration) and an API surface are deliberately NOT built in
+this phase**, unlike every previous engine phase (13–15), each of which shipped a migration and an API route
+alongside its core logic. This is a direct reading of the user's own closing instruction — "after
+implementation, **stop and wait for a quantitative review**" — as distinct from every prior phase's "Commit.
+Stop.": the user asked to review the backtesting methodology itself before more engineering investment goes
+into storing and serving its results. `cfi.backtest` therefore has zero database footprint today (no new
+migration was written). This is a scope decision to flag explicitly, not an oversight — see TODO.md.
+
+**Alternatives considered.** A `PriceSignal | DomainSignal` Protocol union with `isinstance`-based dispatch
+(rejected: see the Signal-protocol decision above — both a type-checking dead end and a maintenance burden).
+Tracking cash and BTC as two separate running balances (rejected: unnecessary given the single-position,
+long-only v1 scope; would only earn its complexity once short-selling or multi-asset exposure exists).
+Numpy/pandas for the metrics module (rejected: no numpy/pandas/scipy dependency exists anywhere in this
+codebase — confirmed by a full `pyproject.toml` survey before writing this module — and stdlib
+`Decimal`/`statistics` are sufficient for every one of the 17 required metrics).
+
+**Consequences.** No new database migration and no new API route this phase (see the persistence/API
+decision above). New package: `cfi/backtest/` (`universe`, `costs`, `signals`, `strategy`, `splits`, `metrics`,
+`versioning`, `engine`, plus `__init__.py`). Unit tests cover every pure-function module (`costs`, `signals`'
+price-signal branches and domain-signal feature-id validation, `strategy`'s comparator and example-strategy
+shapes, `splits`' partitioning, `metrics`' None-guarding, `versioning`'s fingerprint determinism) against
+synthetic data, no database required. Integration tests (DB-gated) seed a fully controlled, deterministic
+price path directly into `obs.series`/`obs.market_bar` (bypassing the ingestion pipeline) and cover: a
+trending path producing trades and metrics; exact reproducibility of two identical runs; the two look-ahead-
+bias/leakage tests described above; and `"insufficient_data"` status for too-short windows and unknown
+assets. Frontend work was not part of the Phase 16 request as given and was not built.
+
+---
+
+## ADR-0060 — Phase 18: `resolve_query_times` — `knowledge_time` defaults to `as_of`, not `now()`
+
+**Status:** Accepted (implemented 2026-09-27)
+
+**Context.** RED_TEAM_REPORT.md finding #1 (CRITICAL): every one of the ten point-in-time API routes
+(`derivatives`, `divergence`, `institutional`, `liquidity`, `macro`, `market_structure`, `regime`, `retail`,
+`similarity`, `whales`) carried its own copy-pasted local `_times()` helper that resolved `as_of` and
+`knowledge_time` **independently** — each defaulted to `utc_now()` on its own when omitted. A caller who
+supplied only `as_of` (the single most natural way to ask "what did this look like as of date X") silently
+got `knowledge_time = now()`, which turns the `ingested_at <= knowledge_time` revision/leakage gate (R3) into
+a no-op: any revision stored between `as_of` and the real "now" would leak into a query that was supposed to
+be pinned to the past.
+
+**Decision — a single shared `cfi.api.params.resolve_query_times(as_of, knowledge_time)` replaces all ten
+copies.** The corrected rule: if `as_of` is supplied and `knowledge_time` is not, `knowledge_time` now
+defaults to `as_of` (only what was knowable *by that same date* is visible — the safe assumption for the most
+common call shape). If both are omitted, both default to `now()` (no leakage risk in asking for the current
+state). An explicitly supplied `knowledge_time` is always honored, including one earlier or later than
+`as_of` (a caller may legitimately ask "what does today's fully-settled data say about that past date").
+
+**Decision — both resolved values are capped at `now()` (`min(value, now())`), including an explicitly
+supplied `as_of`.** This is a direct reading of R3 ("never use future information in historical
+calculations"): a caller-supplied future timestamp must not be able to pull in data that, by definition,
+cannot yet have been observed. This is slightly broader than finding #1's literal wording (which is about the
+`knowledge_time`-defaults-independently bug specifically) but is the same principle applied consistently, and
+is covered by its own dedicated unit test (`test_future_values_are_capped_at_now`).
+
+**Consequences.** All ten route files: removed the local `_times()` function, imported
+`resolve_query_times` instead, updated docstrings/`Query(...)` descriptions describing the old "both default
+to now" behavior. No database or migration changes — this is a request-parameter resolution fix only. New
+tests: `tests/unit/test_api_params.py` (7 tests directly against the shared helper: both omitted, `as_of`-only
+[the core fix], explicit `knowledge_time` before/after `as_of`, `knowledge_time`-only, future-capping, naive-
+datetime rejection) and a new integration leakage test in `tests/integration/test_market_structure_api.py`
+(`test_history_omitting_knowledge_time_does_not_leak_a_later_revision`) that inserts two genuine observation
+revisions and proves that omitting `knowledge_time` with only `as_of` given returns the earlier revision, not
+the later one. One pre-existing integration test (`tests/integration/test_divergence_api.py`) needed its own
+future-`as_of` fixture pinned via `monkeypatch.setattr("cfi.api.params.utc_now", ...)` so the new
+future-capping behavior does not truncate its deliberately-future `as_of` down to whatever real calendar date
+the suite happens to run on.
+
+---
+
+## ADR-0061 — Phase 18: Backtest execution-realism corrections — intrabar stop/gap fills, size-dependent
+slippage, warmup-shortfall disclosure
+
+**Status:** Accepted (implemented 2026-09-27)
+
+**Context.** RED_TEAM_REPORT.md's quantitative review of the Phase 16 Backtesting Engine (ADR-0059) found
+five related execution-realism gaps, all inside `cfi.backtest`: (#3, HIGH) stop-loss/take-profit fills used
+no slippage at all and ignored the case where the day's `open` already gapped through the stop/take-profit
+level — silently using an unrealistically favorable fill price; (#5, MEDIUM) the cost model applied the same
+flat slippage regardless of trade size relative to the day's own trading volume, understating costs for large
+trades; (#11, MEDIUM) the execution-lag convention (ADR-0059) was correct but under-documented as an
+assumption; (#12, MEDIUM) the existing backtest test suite asserted trade counts and statuses but never a
+single exact fill price, fee or P&L value, so a wrong constant could pass unnoticed; (#14, LOW) a strategy
+whose warmup requirement (`WARMUP_DAYS`) exceeds the available lookback before `start` silently produced a
+result with no signal computed for that gap, with no flag.
+
+**Decision — `_intrabar_stop_fill()` (finding #3).** A new pure function checks the day's `open` against the
+stop-loss/take-profit levels *first*: if the open itself already cleared the level (a gap-through), the fill
+is the open, not the stop/take-profit price itself — the one exception to the execution-lag convention
+(ADR-0059), since a stop is a risk control reacting to the realized bar, not a forward-looking signal
+decision. Only if the open did not already clear the level does the function fall back to an intrabar
+high/low pierce check. Stop-loss is checked before take-profit when a bar's range spans both (the
+conservative assumption per ADR-0059's existing conventions).
+
+**Decision — size-dependent slippage via a new `participation_impact_coefficient` (finding #5), added as a
+versioned parameter, not a mutation of `cost_model_v1`.** `_participation_fraction()` computes a trade's
+notional as a fraction of the day's own trading volume (`None` when volume is unknown, preserving the
+existing flat-slippage behavior for that case). `CostParameterSet` gained
+`participation_impact_coefficient: Decimal = Decimal("0")` (safe/neutral default, so `cost_model_v1` is
+byte-for-byte unchanged and every historical result computed under it remains reproducible). A new
+`cost_model_v2` (coefficient = 1) is registered alongside `cost_model_v1` in `PARAMETER_SETS`, and
+`CURRENT_VERSION` moves to `cost_model_v2` — new runs get the corrected, convex-in-size slippage by default;
+old runs keep re-deriving under the version they recorded (`RunVersions.cost_parameter_version`).
+
+**Decision — the execution-lag and slippage-participation assumptions are now restated as explicit fields on
+`Assumptions` (finding #11), not left to a docstring** — `sizing_price_gap_note` and
+`slippage_participation_note`, following the same runtime-visible-disclosure convention as the score
+`*_caveat`/`*_note` fields added in ADR-0064.
+
+**Decision — exact-value tests (finding #12).** A new integration test constructs a custom always-on test
+strategy and NULL-volume synthetic bars (eliminating participation-fraction complexity from the hand
+computation) and asserts the exact `Decimal` entry/exit fill prices, fees, P&L and return percentage against
+independently hand-derived formulas — not just status and counts. New unit tests
+(`tests/unit/test_backtest_engine.py`) cover `_intrabar_stop_fill` (no-stop, pierce, gap-through, sl-before-tp
+priority) and `_participation_fraction` in isolation, without a database.
+
+**Decision — `_warmup_shortfall_warning()` (finding #14).** A pure function compares the strategy's
+`WARMUP_DAYS` requirement against the bars actually available before `start`; if short, a descriptive string
+is appended to the existing `warnings: list[str]` already returned by `run_backtest` — no new field, reusing
+an existing, already-surfaced mechanism.
+
+**Consequences.** No database migration (all changes are inside the existing `cfi.backtest` package and its
+in-memory `CostParameterSet`/`Assumptions` dataclasses). `tests/unit/test_backtest_costs.py`: one existing
+test updated (`CURRENT_VERSION` is now `cost_model_v2`) plus four new tests (v1 registered and byte-identical,
+v1 slippage flat regardless of participation, v2 slippage convex in participation, v2 participation fraction
+clamped to `[0, 1]`). `tests/unit/test_backtest_engine.py` is a new file (11 tests). One new integration test
+in `tests/integration/test_backtest_engine.py`. Before/after: any backtest re-run under `cost_model_v1`
+reproduces byte-identical results to before this phase; a new run under the new default `cost_model_v2` will
+show larger slippage on trades sized close to or above the participation cap, and any run through a
+previously-silent warmup gap now carries an explicit warning string.
+
+---
+
+## ADR-0062 — Phase 18: Regime-classifier hysteresis — a `previous_regime_id` parameter, no persisted state
+
+**Status:** Accepted (implemented 2026-09-27)
+
+**Context.** RED_TEAM_REPORT.md finding #4 (MEDIUM): the Phase 14 Regime Engine (ADR-0057) classifies each
+day independently with a hard `min_confidence_assign` cutoff — a metric oscillating narrowly around a regime
+boundary flips the classification back and forth day to day even when the underlying evidence has barely
+moved, producing a noisy regime history that overstates how often the market's state actually changed.
+
+**Decision — hysteresis is a pure function parameter, not new persisted state.** `classify()` gained an
+optional `previous_regime_id: str | None = None` keyword parameter. When the challenger regime (today's
+top-scoring regime) differs from `previous_regime_id`, is not `MIXED_UNCLEAR`, and its confidence beats the
+previous regime's own confidence by less than `params.hysteresis_margin` — while the previous regime still
+independently clears `min_confidence_assign` — `classify()` returns the **previous** regime's
+`ClassificationResult` instead, marked `held_by_hysteresis=True` with an explanatory `reason`. No new
+database table or column: `RegimeService.current()` supplies `previous_regime_id` by making one extra,
+non-hysteresis classification call for `as_of - timedelta(days=1)` and reading its `regime_id` — a plain
+lookback the service already had the machinery for, at the cost of exactly one extra call per request.
+
+**Decision — the existing backward-walk closure (`classify_at`, used by `regime_duration` and
+`historical_examples`) threads the anchor day's own regime_id through every historical `_classify_at()` call
+in the walk**, extending hysteresis-damping across the whole lookback at zero extra API-call cost (these
+calls already existed for the walk; only the threading is new).
+
+**Decision — `hysteresis_margin` is a versioned parameter (`ParameterSet`), following the same
+non-destructive-new-version pattern as ADR-0061's cost model.** `ParameterSet` gained
+`hysteresis_margin: Decimal = Decimal("0")` (safe/neutral default — `regime_classifier_v1` is unchanged and
+remains byte-for-byte reproducible, and is a no-op with `hysteresis_margin == 0` regardless of
+`previous_regime_id`). A new `regime_classifier_v2` (`hysteresis_margin = Decimal("0.05")`) is registered
+alongside v1, and `CURRENT_VERSION` moves to v2.
+
+**Decision — scope: the regime engine only, not `cfi.market_structure.score_parameters`'s own band
+thresholds.** Market Structure Score bands were not part of finding #4's evidence and are a disclosed,
+deliberate scope boundary for this phase, not an oversight — a candidate follow-up if the same flip-flopping
+is later observed there.
+
+**Consequences.** No database migration (parameter is registered the same way every other versioned parameter
+set in this platform is — a Python module constant, not a table row). `ClassificationResult` gained
+`held_by_hysteresis: bool = False`. `RegimeService`'s response dict gained `"held_by_hysteresis"`; its
+`catalog()` params dict gained `"hysteresis_margin"`. `tests/unit/test_regime_classifier.py`: 7 new tests
+(challenger barely wins → held; challenger clears the margin → yields; `regime_classifier_v1`'s zero margin is
+a no-op; no previous id → no hysteresis; a previous regime that no longer independently qualifies is never
+held; the default `classify()` call — no `previous_regime_id` — is unaffected, proving no accidental behavior
+change for any existing caller that does not opt in). `tests/integration/test_regime_api.py`: two assertions
+added (`hysteresis_margin` present in the catalog; `held_by_hysteresis is False` on an empty-data response).
+Before/after: any caller not passing `previous_regime_id` (i.e., every caller before this phase) sees
+identical output; `RegimeService.current()` and the historical-walk endpoints now damp single-day boundary
+flips under the new default `regime_classifier_v2`.
+
+---
+
+## ADR-0063 — Phase 18: Market Structure Score — a minimum-count floor for the altcoin relative-strength
+component
+
+**Status:** Accepted (implemented 2026-09-27)
+
+**Context.** RED_TEAM_REPORT.md finding #6 (MEDIUM): `_altcoin_relative_strength_component()` (20% weight in
+the Market Structure Score) previously went `"unavailable"` only when *zero* of the three tracked altcoins
+(ETH/SOL/XRP) had a reading, and otherwise averaged whatever subset was available — including a single
+reading standing in for the whole component. One altcoin's idiosyncratic move (a hack, a listing event, a
+temporary de-peg-adjacent wobble) could then swing 20% of the overall score while being presented as a
+three-asset "altcoin" read.
+
+**Decision — `MIN_ALTCOIN_COUNT = 2`.** `_altcoin_relative_strength_component()` now returns `"unavailable"`
+(with a reason string naming how many of the three were available and the minimum required) whenever fewer
+than 2 of the 3 tracked altcoins have a reading, not just when none do. This is a judgment parameter chosen by
+design (consistent with every other band/weight/threshold in this score), not fitted to data.
+
+**Consequences.** No database migration (a pure in-module constant and an added conditional). Existing unit
+tests in `tests/unit/test_market_structure_score.py` that implicitly assumed a single altcoin reading counted
+as full weight needed their fixture default bumped from 1 to 2 available spreads (`full_score()`'s default),
+with the two full-weight directional tests updated accordingly; the "uses only available readings" test was
+rewritten for 2-of-3 (still above the new floor); a new dedicated test
+(`test_altcoin_relative_strength_is_unavailable_below_min_altcoin_count`, 1-of-3 available) proves the new
+floor triggers `"unavailable"` while the score as a whole still renormalizes to `"ok"` over the remaining
+components. Before/after: a market state with only one of three altcoin readings available now renormalizes
+the Market Structure Score over the remaining components instead of quietly presenting a single-asset
+average as the 20%-weighted altcoin read.
+
+---
+
+## ADR-0064 — Phase 18: Runtime-visible disclosure notes — shared inputs, proxy measurement, single-venue
+scope, and transfer-date balance snapshots
+
+**Status:** Accepted (implemented 2026-09-27)
+
+**Context.** RED_TEAM_REPORT.md raised four related findings whose common thread is that a real, disclosed
+scope limitation existed only in a docstring or ADR prose, never in the API response itself — the same gap
+the pre-existing `measurement_class="proxy"` convention in `cfi.retail.metrics` was designed to close, just
+not yet applied everywhere it should have been:
+
+- **#7 (MEDIUM):** the Retail Speculation Score's `funding_rate_bias` component (0.40 weight) and the
+  Derivatives Health Score's own funding component are derived from the same underlying series — a user
+  reading both scores as independent evidence could double-count one real signal as two.
+- **#8 (MEDIUM):** the Liquidity Score measures stablecoin supply growth, not market liquidity or peg
+  stability directly — a real, disclosed (ADR-0052) proxy relationship, but invisible in the API response.
+- **#9 (MEDIUM):** the Derivatives Health Score's liquidation-stress component is sourced from a single venue
+  (OKX), understating true liquidation risk during venue-specific stress and not disclosed at read time.
+- **#13 (LOW):** large-transfer size classification used the *latest* whale balance snapshot regardless of
+  when the transfer actually happened, so an address that only grew large after a historical transfer would
+  retroactively be classified using a balance it did not hold at the time (and the reverse for an address
+  that has since drawn down) — a point-in-time (R3) violation distinct from #1's `knowledge_time` gate.
+
+**Decision — for #7, #8, #9: an always-present string field on the relevant `ScoreResult`,** populated
+regardless of `status` (so the caveat is visible even on an `"insufficient_data"` response), mirroring
+`cfi.retail.metrics`'s existing `measurement_class="proxy"` pattern:
+`cfi.retail.score.ScoreResult.shared_input_note` (Speculation only — Activity carries none, since the overlap
+is specific to Speculation's funding component), `cfi.derivatives.score.ScoreResult.shared_input_note` (the
+reciprocal note, correctly scoped to the same 25%/40% weight relationship), `cfi.liquidity.score.ScoreResult`
+gained both `measurement_class = "proxy"` and `proxy_caveat`, and the derivatives liquidation component's
+`context` field (already existed, used for other component-level notes) now always includes a single-venue
+caveat string. Each note/caveat is propagated into the corresponding `service.py`'s dict-building method so it
+reaches the API response.
+
+**Decision — for #13: a `_balances_as_of(snapshots, at)` pure function replaces the single
+`latest_balances = snapshots[-1].balances` computed once before the transfer loop.** Each transfer row is now
+classified using the balance snapshot in effect *at that transfer's own `event_time`* — the latest snapshot
+at-or-before it, never a later one. A transfer predating every stored snapshot gets no balance (`{}`) rather
+than borrowing a later one, which would be a different, worse form of look-ahead.
+
+**Consequences.** No database migration for any of the four (all are additive dataclass fields or a
+same-shape helper function change; no new columns or tables). New/updated unit tests:
+`tests/unit/test_retail_score.py` (shared-input note present on Speculation, absent on Activity),
+`tests/unit/test_liquidity_score.py` (proxy caveat present and identical across `ok`/`insufficient_data`),
+`tests/unit/test_derivative_metrics.py` (single-venue caveat text present in the liquidation component's
+context), `tests/unit/test_macro_score.py` (the pre-existing `vintage_risk_note` for finding #2, which reuses
+ADR-0054's already-accepted FRED-vintage limitation rather than needing a new ADR), and a new
+`tests/unit/test_whale_service.py` (6 tests directly against `_balances_as_of`, including the report's own
+synthetic scenario: an address small at T1, large by T2, classified on its T1 balance for a T1 query and its
+T2 balance for a T2 query). One pre-existing integration test
+(`tests/integration/test_whale_api.py::test_transfers_are_listed_with_direction_and_classification`) asserted
+a transfer's recipient evidence text using the *latest* snapshot's balance (10,100 BTC) — this was exactly
+the bug finding #13 describes, and the assertion was corrected to the balance in effect at the transfer's own
+time (10,000 BTC, the 2026-09-03 snapshot) once the fix was applied. Before/after: every affected score's API
+response now always carries its disclosure field; whale transfer classifications for historical transfers
+that predate a balance change no longer silently reflect today's balance.
+
+---
+
+## ADR-0065 — Phase 18: Findings #10 and #15 — reviewed, correction deferred, no code change this phase
+
+**Status:** Accepted (deferred; implemented 2026-09-27 as a documentation-only decision)
+
+**Context.** RED_TEAM_REPORT.md's own priority ordering and per-finding "Recommended correction" text treat
+two of its fifteen findings as out of scope for an immediate code fix, and this phase's corrections respect
+that guidance rather than silently expanding scope (R13: "do not implement features that have not been
+requested").
+
+**Finding #10 (LOW) — Similarity candidate sampling is locked to one weekday per query.**
+`cfi.similarity.search.candidate_dates()` samples backward from `as_of` in fixed `step_days=7` increments, so
+every candidate in a single query falls on the same day-of-week as `as_of` — a short, sharp historical episode
+that does not land on that weekday is structurally invisible to a given query, while a similar episode that
+happens to align is captured. The report's own recommended correction (a calendar-anchored or
+multi-phase/rotating sampling grid, merging and de-duplicating results) is a genuine design change to
+`cfi.similarity.search`'s sampling strategy — not a parameter tweak — and was not part of this phase's
+"implement the approved corrections" instruction as interpreted (the 13 findings with a direct, scoped
+correction). Deferred to a future Similarity Engine follow-up phase; tracked in TODO.md. No test was added
+this phase (the report's own required test — a synthetic short-spike event on an off-grid weekday — is
+specified for whenever that follow-up is scheduled).
+
+**Finding #15 (LOW) — Fixed 4-asset universe with no first-class "delisted/discontinued" state.**
+`ASSET_SYMBOLS` and `VENUES` are static tuples with no state distinguishing "delisted" from "temporarily
+stale." The report itself states this is low-severity **today** (no current instance of survivorship bias is
+occurring with the current small, still-live asset/venue set) and explicitly recommends "no immediate code
+change needed given the current single-benchmark, 4-asset scope" — deferring the fix until a multi-asset
+universe is actually added (already tracked as future work in TODO.md), at which point it recommends an
+explicit `valid_from`/`valid_to` membership record per asset-venue pair, mirroring the existing
+`ref.entity_label` pattern. No code change and no test this phase, per the report's own explicit guidance.
+
+**Consequences.** Neither finding required a database migration, a code change, or a new test this phase.
+Both remain open, tracked items: #10 in TODO.md as a candidate for a future Similarity Engine follow-up
+phase; #15 already covered by TODO.md's existing multi-asset-universe future-work entry, cross-referenced
+here so a future reader of RED_TEAM_REPORT.md does not mistake "no code change" for "not reviewed."

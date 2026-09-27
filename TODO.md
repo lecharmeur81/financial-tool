@@ -476,6 +476,21 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 - [ ] **Frontend page** — not built this phase (not requested; see PROGRESS.md). A natural next step once the
       user asks for it.
 
+## Phase 18 — Fix Quant Issues (built 2026-09-27; see PROGRESS.md, DECISIONS.md ADR-0060–0065)
+
+- [x] 13 of RED_TEAM_REPORT.md's 15 findings corrected: #1 (ADR-0060), #3/#5/#11/#12/#14 (ADR-0061), #4
+      (ADR-0062), #6 (ADR-0063), #2/#7/#8/#9/#13 (ADR-0064). Full unit + integration regression run green
+      (694 unit, 172 integration), ruff and mypy strict clean across the whole backend.
+- [ ] **Finding #10 (deferred, ADR-0065):** Similarity candidate sampling (`cfi.similarity.search`) is locked
+      to one weekday per query (`step_days=7` from `as_of`), a calendar-alignment selection-bias artifact
+      distinct from the already-documented weekly-sampling cost/precision trade-off (ADR-0058). Recommended
+      correction (not yet built): a calendar-anchored or multi-phase/rotating sampling grid, merging and
+      de-duplicating candidates, preserving call-count parity if cost parity matters. Required test (not yet
+      written): a synthetic short spike event on an off-grid weekday, confirmed absent from today's results
+      and present once the fix lands.
+- [x] **Finding #15:** no code change — already covered by the existing multi-asset-universe entry below
+      (the report's own recommendation is to defer until that universe exists).
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.
@@ -516,6 +531,13 @@ against official documentation before any adapter is written.
 - [x] **Phase 15/16:** build a deliberate look-ahead leak into a test fixture and prove the leakage tests catch
       it — done in Phase 15, see `test_similarity_outcomes.py`.
 - [ ] **Phase 15/16:** record the number of strategy/signal variants tried per backtest (multiple-testing control).
+- [ ] **Phase 16 (deferred pending the user's quantitative review, ADR-0059):** a `sig`-schema persistence table +
+      migration for `BacktestResult` (versions/assumptions/metrics/trades/equity curve) and an
+      `/api/v1/backtest/*` route, matching every other engine phase (13–15). Not built yet — the user's own
+      closing instruction was to stop and review the engine/methodology first.
+- [ ] **Phase 16 (deferred):** short-selling / long-short strategies and a multi-asset universe (with the
+      point-in-time universe-membership work that would then be needed for survivorship-bias handling) — out
+      of scope for the long-only v1 the user's spec described (ADR-0059).
 - [ ] **Phase 13/14/15:** regime and similarity models must be evaluated on periods not used to design them.
 - [ ] **Phase 19:** AI validator must reject any number not present in the snapshot; add adversarial tests (prompted to invent data).
 - [ ] **Phase 21:** alerts fire on signals/regimes, never on AI text alone.

@@ -302,7 +302,12 @@ in-process until workers share them via Redis. Mock providers for tests only: `c
   (and coverage), `sources` (provider + original source), `definition_version`, and a `lineage` link. The UI cannot
   render a value without knowing what kind of value it is (R2).
 - **Point-in-time parameter:** every read endpoint accepts `as_of` (default: now) so any dashboard can be viewed
-  "as it would have looked" at a past time.
+  "as it would have looked" at a past time. **Phase 18 correction (ADR-0060):** `knowledge_time` now defaults to
+  `as_of` — not independently to `now()` — whenever `as_of` is supplied and `knowledge_time` is not, closing a
+  revision/leakage gap (`ingested_at <= knowledge_time`) that a caller supplying only `as_of` used to defeat
+  silently. Both values are capped at the real `now()`, including an explicitly supplied one (R3). All ten
+  point-in-time routes now share this single resolution function (`cfi.api.params.resolve_query_times`)
+  instead of each carrying its own copy.
 - **Read-only for L0–L5.** Writes only for user-layer objects (journal, paper trading, alert rules, settings) and admin operations.
   Recomputations and AI analyses are **requested** via the API and executed by workers (returns a job ID).
 - **Live updates:** Server-Sent Events first (one-way, simple, works through proxies); WebSockets only if two-way need appears.

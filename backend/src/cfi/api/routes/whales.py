@@ -6,7 +6,9 @@ decimal **strings**; every classification carries evidence, source and confidenc
 
 Point-in-time parameters (ADR-0018): ``as_of`` limits data to what was publicly knowable
 (``available_at``), ``knowledge_time`` to what this system had stored (``ingested_at``). Both
-default to now. No recommendations are produced here.
+default to now when both are omitted; if only ``as_of`` is given, ``knowledge_time``
+defaults to ``as_of`` (ADR-0060) rather than now. Neither ever looks beyond now. No
+recommendations are produced here.
 """
 
 from __future__ import annotations
@@ -16,10 +18,9 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Request
 
-from cfi.api.params import aware
+from cfi.api.params import aware, resolve_query_times
 from cfi.core.config import Settings
 from cfi.core.errors import ServiceUnavailableError
-from cfi.core.time import utc_now
 from cfi.institutional.queries import InstitutionalQueries
 from cfi.institutional.service import InstitutionalService
 from cfi.whales.queries import WhaleQueries
@@ -33,7 +34,10 @@ AsOf = Annotated[
 ]
 KnowledgeTime = Annotated[
     datetime | None,
-    Query(description="Only data this system had stored by then (timezone-aware; default now)"),
+    Query(
+        description="Only data this system had stored by then (timezone-aware); "
+        "defaults to as_of if as_of is given, else now (ADR-0060)"
+    ),
 ]
 Asset = Annotated[str, Query(description="Canonical asset symbol: BTC or ETH")]
 StartDate = Annotated[date | None, Query(description="First date (inclusive)")]
@@ -55,13 +59,6 @@ def _service(request: Request) -> WhaleService:
     )
 
 
-def _times(as_of: datetime | None, knowledge_time: datetime | None) -> tuple[datetime, datetime]:
-    now = utc_now()
-    a = aware(as_of, "as_of")
-    k = aware(knowledge_time, "knowledge_time")
-    return (now if a is None else min(a, now)), (now if k is None else min(k, now))
-
-
 @router.get("/catalog")
 async def catalog(request: Request) -> dict[str, Any]:
     """Datasets, providers, schedule, thresholds, classification rules, the score definition and
@@ -73,7 +70,7 @@ async def catalog(request: Request) -> dict[str, Any]:
 async def overview(
     request: Request, as_of: AsOf = None, knowledge_time: KnowledgeTime = None
 ) -> dict[str, Any]:
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).overview(as_of=a, knowledge_time=k)
 
 
@@ -87,7 +84,7 @@ async def flows(
     knowledge_time: KnowledgeTime = None,
 ) -> dict[str, Any]:
     """Daily exchange flows and supply, network supply and issuance, and (BTC) coin-age data."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).flows(
         asset=asset.upper(), start=start, end=end, as_of=a, knowledge_time=k
     )
@@ -98,7 +95,7 @@ async def holders(
     request: Request, asset: Asset, as_of: AsOf = None, knowledge_time: KnowledgeTime = None
 ) -> dict[str, Any]:
     """Latest top-100 snapshot with each address's classification and 7-day change."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).holders(asset=asset.upper(), as_of=a, knowledge_time=k)
 
 
@@ -113,7 +110,7 @@ async def transfers(
     knowledge_time: KnowledgeTime = None,
 ) -> dict[str, Any]:
     """Large transfers (newest first) with sender / recipient classification."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).transfers(
         asset=asset.upper(),
         start=aware(start, "start"),
@@ -133,7 +130,7 @@ async def address(
     knowledge_time: KnowledgeTime = None,
 ) -> dict[str, Any]:
     """Classification of one address with every stored label, its evidence and source."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).address(
         chain=chain.lower(), address=address, as_of=a, knowledge_time=k
     )
@@ -144,7 +141,7 @@ async def entities(
     request: Request, as_of: AsOf = None, knowledge_time: KnowledgeTime = None
 ) -> dict[str, Any]:
     """Known entities and the labelled addresses that count at ``as_of``."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).entities(as_of=a, knowledge_time=k)
 
 
@@ -153,5 +150,5 @@ async def score(
     request: Request, asset: Asset, as_of: AsOf = None, knowledge_time: KnowledgeTime = None
 ) -> dict[str, Any]:
     """Whale Flow Score with every component, contradiction indicators and miner spending."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).score(asset=asset.upper(), as_of=a, knowledge_time=k)

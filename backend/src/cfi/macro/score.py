@@ -46,6 +46,17 @@ from cfi.macro.metrics import (
 SCORE_ID = "macro_environment_score"
 SCORE_VERSION = sp.CURRENT_VERSION
 
+VINTAGE_RISK_NOTE = (
+    "Every component here is sourced from FRED and reflects FRED's CURRENT, most-revised figure "
+    "for each historical date — not the value as it was first published. This platform does not "
+    "yet track FRED's own real-time ('ALFRED') vintages (ADR-0054, a documented, accepted "
+    "limitation; RED_TEAM_REPORT.md finding #2), so a historical reading of this score, and "
+    "anything built on it (regime classification, historical similarity, a domain-score-based "
+    "backtest), can reflect a later revision that would not actually have been knowable on that "
+    "date — most plausibly around initial-vs-final GDP/CPI prints or seasonal re-benchmarking of "
+    "the Fed's own balance-sheet series."
+)
+
 SEMANTIC_NOTE = (
     "Higher Macro Environment Score means a more accommodative macro backdrop by conventional "
     "measures (a steeper/normal yield curve, a lower real policy rate, calmer equity-market "
@@ -192,6 +203,7 @@ class ScoreResult:
     reason: str | None = None
     parameter_version: str = SCORE_VERSION
     calculated_at: datetime | None = None
+    vintage_risk_note: str = VINTAGE_RISK_NOTE
 
 
 def _scaled_component(

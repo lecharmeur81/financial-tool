@@ -188,3 +188,40 @@ def test_unavailable_component_carries_its_reason() -> None:
     assert oil_component.reason == "no reading"
     assert oil_component.value is None
     assert oil_component.sub_score is None
+
+
+# --------------------------------------------------------------------------- vintage risk (#2)
+
+
+def test_vintage_risk_note_is_always_present_ok_or_insufficient() -> None:
+    """RED_TEAM_REPORT.md finding #2 / ADR-0054: FRED data carries no point-in-time vintage, so
+    this caveat must be runtime-visible on every score result, not just documented in a docstring
+    or ADR, and regardless of whether the score itself could be computed."""
+    ok_result = sc.compute_score(
+        as_of=NOW,
+        calculated_at=NOW,
+        yield_curve=yc(),
+        real_policy_rate=real_rate(),
+        vix=vix(),
+        equity_trend=trend("sp500"),
+        dollar_trend=trend("dxy"),
+        net_liquidity_trend=trend("net_liquidity"),
+        oil_trend=trend("oil"),
+    )
+    assert ok_result.status == "ok"
+    assert "FRED" in ok_result.vintage_risk_note
+    assert "vintage" in ok_result.vintage_risk_note.lower()
+
+    insufficient_result = sc.compute_score(
+        as_of=NOW,
+        calculated_at=NOW,
+        yield_curve=yc(status="unavailable"),
+        real_policy_rate=real_rate(status="unavailable"),
+        vix=vix(status="unavailable"),
+        equity_trend=trend("sp500", status="unavailable"),
+        dollar_trend=trend("dxy", status="unavailable"),
+        net_liquidity_trend=trend("net_liquidity", status="unavailable"),
+        oil_trend=trend("oil", status="unavailable"),
+    )
+    assert insufficient_result.status == "insufficient_data"
+    assert insufficient_result.vintage_risk_note == ok_result.vintage_risk_note

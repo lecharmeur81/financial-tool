@@ -52,6 +52,7 @@ async def test_catalog_lists_seven_regimes_with_weights_summing_to_one(
         "mixed_unclear",
     }
     assert len(body["regimes"]) == 6  # mixed_unclear is the classifier's own fallback, not defined
+    assert "hysteresis_margin" in body["parameters"]  # ADR-0062, finding #4
     for regime in body["regimes"]:
         total = sum(Decimal(c["weight"]) for c in regime["conditions"])
         assert total == Decimal(1), f"{regime['regime_id']} weights sum to {total}"
@@ -74,3 +75,4 @@ async def test_current_is_mixed_unclear_when_nothing_is_loaded(test_settings: Se
     assert body["regime_duration_days"] == 0
     assert body["regime_start_date"] is None
     assert "confidence_semantic_note" in body
+    assert body["held_by_hysteresis"] is False

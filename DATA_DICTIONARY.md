@@ -67,6 +67,14 @@ Observed data is split between the **series** (what is being measured — consta
 
 Natural key (uniqueness): (`series_id`, `event_time`, `source_provider`, `revision`).
 
+**`as_of` / `knowledge_time` query-parameter resolution** (every point-in-time API route,
+`cfi.api.params.resolve_query_times`, Phase 18 ADR-0060): `available_at <= as_of` gates *what was publicly
+knowable*; `ingested_at <= knowledge_time` gates *what this system had stored*. When `as_of` is supplied and
+`knowledge_time` is not, `knowledge_time` now defaults to `as_of` (not independently to `now()`) — only what
+was knowable by that same date is visible unless a later `knowledge_time` is explicitly requested. When both
+are omitted, both default to `now()`. Both resolved values are capped at the real `now()` (R3), including an
+explicitly supplied `as_of`.
+
 ---
 
 ## 3. Enumerations
@@ -414,6 +422,15 @@ Metrics exchange supply (the days before the two snapshots). Direction threshold
 balance change ±0.5 %. Status: `contradiction` (opposite directions), `consistent`, `no_clear_direction`,
 `insufficient_data`.
 
+**Transfer-date balance snapshots** (Phase 18, RED_TEAM_REPORT.md finding #13 / ADR-0064,
+`cfi.whales.service._balances_as_of`): each large transfer's sender/recipient size-rule classification
+(`unknown_large_holder`) now uses the top-100 balance snapshot in effect **at that transfer's own
+`event_time`** — the latest snapshot at-or-before it — never the latest snapshot regardless of when the
+transfer happened. A transfer predating every stored snapshot gets no balance (classification by labels
+alone) rather than borrowing a later, unrelated one. Previously, an address that only grew large *after* a
+given historical transfer would be retroactively classified as a large holder for that transfer using
+today's balance (and the reverse for an address that has since drawn down).
+
 ## 5d. Derivatives datasets (implemented in Phase 8)
 
 `<a>` ∈ {btc, eth, sol, xrp} for perpetual data; {btc, eth} for Deribit. Perpetuals are the USDT-margined ones
@@ -490,7 +507,17 @@ semantic_note:    fixed API/UI text: "Higher Derivatives Health Score means lowe
 parameters_note:  v1 methodology / initial parameters, chosen by design and not fitted to data or empirically
                   validated — never described as "validated"; to be reviewed against stored history once
                   enough accumulates (Phases 15-16)
-owner_phase:      8 (addendum: 2026-09-26, parameter externalisation and reproducibility fields)
+shared_input_note: (Phase 18, RED_TEAM_REPORT.md finding #7 / ADR-0064) always-present string field:
+                  `liquidations_24h_pct_oi.v1` is sourced from a single venue (OKX), see single_venue_caveat
+                  below; separately, this score's own funding component and `cfi.retail`'s Retail Speculation
+                  Score's `funding_rate_bias` component (0.40 weight there) derive from the same underlying
+                  funding-rate series — disclosed here and reciprocally on that score, so neither reads as
+                  independent evidence of the other
+single_venue_caveat: (Phase 18, RED_TEAM_REPORT.md finding #9 / ADR-0064) the `liquidations_24h_pct_oi.v1`
+                  component's `context` field always includes a caveat that its liquidation data is OKX-only,
+                  understating true cross-venue liquidation stress during venue-specific events
+owner_phase:      8 (addendum: 2026-09-26, parameter externalisation and reproducibility fields);
+                  18 (2026-09-27, disclosure notes — no methodology change)
 status:           implemented
 ```
 
@@ -556,7 +583,13 @@ semantic_note:    fixed API/UI text: "Higher Liquidity Score means stronger meas
                   price increase and does not indicate market direction."
 parameters_note:  v1 methodology / initial parameters, chosen by design and not fitted to data or empirically
                   validated — never described as "validated"
-owner_phase:      9 (2026-09-26)
+measurement_class: (Phase 18, RED_TEAM_REPORT.md finding #8 / ADR-0064) always `"proxy"` — an always-present
+                  field, mirroring `cfi.retail.metrics`'s existing convention
+proxy_caveat:     (Phase 18, ADR-0064) always-present string field disclosing at read time (not just in this
+                  document) that this score measures stablecoin *supply growth*, not market liquidity or peg
+                  stability directly (the proxy relationship itself was already documented — ADR-0052 — but
+                  was not previously visible in the API response)
+owner_phase:      9 (2026-09-26); 18 (2026-09-27, proxy disclosure fields — no methodology change)
 status:           implemented
 ```
 
@@ -645,7 +678,12 @@ semantic_note:    fixed API text for both scores states plainly that every input
                   identified by its source as retail-only, and neither score is a probability or prediction
 parameters_note:  v1 methodology / initial parameters, chosen by design and not fitted to data or empirically
                   validated — never described as "validated"
-owner_phase:      10 (2026-09-26)
+shared_input_note: (Phase 18, RED_TEAM_REPORT.md finding #7 / ADR-0064) Speculation score only (Activity
+                  carries no such field — its `shared_input_note` is always `null`): an always-present string
+                  disclosing that `funding_rate_bias` (0.40 weight here) derives from the same underlying
+                  series as the Derivatives Health Score's own funding component, so the two scores must not
+                  be read as independent evidence of the same thing
+owner_phase:      10 (2026-09-26); 18 (2026-09-27, shared-input disclosure — no methodology change)
 status:           implemented
 ```
 
@@ -748,7 +786,14 @@ semantic_note:    fixed API text states plainly this score does not convert macr
                   crypto prediction
 parameters_note:  v1 methodology / initial parameters, chosen by design and not fitted to data or empirically
                   validated — never described as "validated"
-owner_phase:      11 (2026-09-27)
+vintage_risk_note: (Phase 18, RED_TEAM_REPORT.md finding #2 / already-accepted limitation, ADR-0054) an
+                  always-present string field (present on both `"ok"` and `"insufficient_data"` results,
+                  identical either way) disclosing that FRED series carry no point-in-time ("ALFRED") vintage
+                  in this platform — every historical reading uses the latest revision, so a past `as_of`
+                  query may reflect data that was not actually publicly known at that date. This does not
+                  introduce a new limitation; it makes the existing, already-documented ADR-0054 limitation
+                  visible at read time rather than only in this document.
+owner_phase:      11 (2026-09-27); 18 (2026-09-27, vintage-risk disclosure — no methodology change)
 status:           implemented
 ```
 
@@ -823,10 +868,15 @@ components:       sub-score = clip(value ÷ scale, −1, +1)
                                 than usual = more constructive)
 score:            100 × Σ(weight × sub-score) ÷ Σ(weights of available components), 1 decimal
 missing_policy:   component excluded when its underlying metric is "unavailable" (never filled with a
-                  default; altcoin_relative_strength averages whichever of ETH/SOL/XRP are available and is
-                  only unavailable when all three are), with automatic renormalisation over the remaining
+                  default; altcoin_relative_strength averages whichever of ETH/SOL/XRP are available, subject
+                  to `MIN_ALTCOIN_COUNT` below), with automatic renormalisation over the remaining
                   weight; "Insufficient data" below available weight 0.5 (min_available_weight, versioned
                   parameter)
+altcoin_floor:    (Phase 18, RED_TEAM_REPORT.md finding #6 / ADR-0063) `MIN_ALTCOIN_COUNT = 2` — the
+                  altcoin_relative_strength component is `"unavailable"` (not just averaged over fewer
+                  inputs) whenever fewer than 2 of the 3 tracked altcoins (ETH/SOL/XRP) have a reading, not
+                  only when all 3 are missing. A single idiosyncratic altcoin move can no longer stand in for
+                  the whole 20%-weighted component.
 bands:            ≥ 50 broadly constructive technical structure · ≥ 15 improving · ≥ −15 neutral/mixed · ≥ −50
                   deteriorating · below: broadly weak technical structure (versioned parameter)
 reproducibility:  every result records `parameter_version` and `calculated_at` alongside every component's
@@ -835,7 +885,7 @@ semantic_note:    fixed API text states plainly this score does not convert thes
                   trading recommendation
 parameters_note:  v1 methodology / initial parameters, chosen by design and not fitted to data or empirically
                   validated — never described as "validated"
-owner_phase:      12 (2026-09-27)
+owner_phase:      12 (2026-09-27); 18 (2026-09-27, altcoin-count floor — no other methodology change)
 status:           implemented
 ```
 
@@ -988,12 +1038,23 @@ decision:         the highest-confidence regime is assigned outright when its co
 missing_policy:   a regime with too little available data is skipped entirely (never scored as if its
                   missing conditions failed); if every regime is skipped, the result is "mixed_unclear"
                   with status "insufficient_data"
-reproducibility:  every classification records its parameter version (regime_classifier_v1) and the full
-                  set of every regime's own candidate score, for transparency
+reproducibility:  every classification records its parameter version (regime_classifier_v1 or v2 — see
+                  hysteresis below) and the full set of every regime's own candidate score, for transparency
+hysteresis:       (Phase 18, RED_TEAM_REPORT.md finding #4 / ADR-0062) `classify()` takes an optional
+                  `previous_regime_id`; when the challenger regime's confidence beats the previous regime's
+                  own confidence by less than `hysteresis_margin` — while the previous regime still
+                  independently clears `min_confidence_assign` — the PREVIOUS regime's result is returned
+                  instead, marked `held_by_hysteresis: true` with an explanatory `reason`. Damps single-day
+                  boundary flip-flopping without persisting any new state: `RegimeService.current()` supplies
+                  `previous_regime_id` via one extra lookback classification call
+                  (`as_of - timedelta(days=1)`), and the existing historical backward-walk
+                  (`regime_duration`/`historical_examples`) threads each anchor day's own regime_id through
+                  the walk at no extra query cost. `regime_classifier_v1`'s `hysteresis_margin = 0` is a
+                  no-op (byte-for-byte reproducible); `regime_classifier_v2` (current default) uses `0.05`.
 parameters_note:  v1 methodology / initial parameters, chosen by design and anchored to each domain
                   score's own already-published bands where possible — not fitted to data or
                   empirically validated (same posture as every score in this platform)
-owner_phase:      14 (2026-09-27)
+owner_phase:      14 (2026-09-27); 18 (2026-09-27, hysteresis — regime_classifier_v2)
 status:           implemented
 ```
 
@@ -1104,6 +1165,81 @@ no_prediction:    the API never produces a single expected/forecast return — o
                   MIN_DISTRIBUTION_SAMPLE (3) analogues rather than a range built from too few points
 owner_phase:      15 (2026-09-27)
 status:           implemented
+```
+
+---
+
+### Backtest performance metrics (`cfi/backtest/metrics.py::BacktestMetrics`, ADR-0059)
+
+```
+total_return_pct:          % change in equity from the first to the last EquityPoint
+annualized_return_pct:     total growth compounded to a 365-day year (TRADING_DAYS_PER_YEAR — crypto
+                           trades every calendar day, unlike equities' 252)
+volatility_annualized_pct: population stdev of daily equity returns, annualized (× sqrt(365) × 100)
+max_drawdown_pct:          largest peak-to-trough decline in the equity curve (negative, or 0 if the
+                           curve never fell below a prior peak)
+sharpe:                    (mean daily return − daily risk-free rate) / stdev of daily returns × sqrt(365)
+sortino:                   same, but the denominator uses only downside deviation (returns below the
+                           daily risk-free rate) — None below 2 downside observations
+win_rate_pct:              % of closed trades with pnl > 0
+expectancy:                win_rate × avg_win − loss_rate × avg_loss (currency units, not %)
+turnover:                  total traded notional (entry + exit) / average equity over the run
+avg_exposure_pct:          mean of each day's (position notional / equity × 100), 0 while flat
+num_trades:                count of closed trades (int, never None — 0 is a valid, real count)
+avg_trade_pct:             mean of each closed trade's own return_pct
+best_trade_pct / worst_trade_pct: max / min of each closed trade's own return_pct
+missing_policy:            every metric above is None, never a fabricated 0 or empty distribution, when
+                           there is not enough data to compute it honestly (R3) — e.g. total_return_pct
+                           needs >= 2 equity points, sharpe needs a nonzero return stdev, turnover needs
+                           both trades and an equity curve; num_trades alone is always a real int
+owner_phase:               16 (2026-09-27)
+status:                    implemented (in-memory result only — not yet persisted; see ADR-0059)
+```
+
+### Reproducibility record (`cfi/backtest/versioning.py::RunVersions` / `Assumptions`, ADR-0059)
+
+```
+strategy_version / parameter_version: the exact StrategyDefinition.version and CostParameterSet.version
+                                       used for the run (both from append-only, versioned registries)
+dataset_version:   SHA-256 fingerprint (first 16 hex chars) of asset|start|end|as_of|knowledge_time|
+                   provider_id — identical inputs always fingerprint identically, without re-storing bars
+code_version:      the installed cfi package version (importlib.metadata), the closest honest stand-in
+                   for a git commit hash available from inside the running process
+assumptions:       every cost/sizing/execution-lag assumption restated in full on every result (fee_bps,
+                   slippage_bps, max_participation_pct, risk_free_rate_annual, initial_capital, the
+                   execution-lag and liquidity-sizing conventions in plain English) — nothing implicit.
+                   (Phase 18, RED_TEAM_REPORT.md finding #11 / ADR-0061) two new always-present fields,
+                   `sizing_price_gap_note` and `slippage_participation_note`, restate the corrected
+                   intrabar-gap and size-dependent-slippage conventions below in the same plain-English style.
+owner_phase:       16 (2026-09-27); 18 (2026-09-27, assumption-disclosure fields — see cost model below)
+status:            implemented (in-memory result only — not yet persisted; see ADR-0059)
+```
+
+### Cost model corrections (Phase 18, RED_TEAM_REPORT.md findings #3/#5/#12/#14, ADR-0061)
+
+```
+version:           cost_model_v1 (unchanged, byte-for-byte reproducible — participation_impact_coefficient
+                   defaults to 0, so v1 slippage stays flat regardless of trade size) /
+                   cost_model_v2 (current default — participation_impact_coefficient = 1)
+intrabar_stops:    (finding #3) `_intrabar_stop_fill()` checks the day's own `open` against the stop-
+                   loss/take-profit level first: if the open already gapped through it, the fill is the
+                   open itself, not the stop/take-profit price — the sole exception to the execution-lag
+                   convention (ADR-0059), since a stop reacts to the realized bar rather than deciding a
+                   future one. Falls back to an intrabar high/low pierce check otherwise. Stop-loss is
+                   checked before take-profit when a bar's range spans both.
+participation_slippage: (finding #5) `_participation_fraction()` = trade notional ÷ that day's own traded
+                   volume (None, i.e. flat slippage, when volume is unknown). `slipped_price()` scales the
+                   base slippage bps by (1 + participation_impact_coefficient × clamped fraction) when both
+                   the coefficient and the fraction are available and nonzero.
+warmup_disclosure: (finding #14) `_warmup_shortfall_warning()` appends a descriptive string to the existing
+                   `warnings` list whenever a strategy's `WARMUP_DAYS` requirement exceeds the bars actually
+                   available before `start` — previously silent.
+exact_value_tests: (finding #12) a dedicated integration test now asserts exact Decimal fill prices, fees,
+                   P&L and return_pct against independently hand-derived formulas, using an always-on test
+                   strategy and NULL-volume synthetic bars (eliminating participation-fraction complexity
+                   from the hand computation) — not just trade counts and statuses as before.
+owner_phase:       18 (2026-09-27)
+status:            implemented
 ```
 
 ---

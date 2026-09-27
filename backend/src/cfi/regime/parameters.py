@@ -60,6 +60,12 @@ class ParameterSet:
     min_available_weight: Decimal
     min_confidence_assign: Decimal
     tie_margin: Decimal
+    # ADR-0062 (Phase 18, RED_TEAM_REPORT.md finding #4): a previously-assigned regime is only
+    # abandoned for a new top-scoring regime once the challenger beats it by MORE than this
+    # margin — a dead-zone/hysteresis band, not a strict "highest confidence always wins" rule.
+    # Zero (regime_classifier_v1's value) reproduces the original flip-on-any-margin behavior
+    # exactly. See ``cfi.regime.classifier.classify``'s ``previous_regime_id`` parameter.
+    hysteresis_margin: Decimal = Decimal("0")
 
 
 _ACCUMULATION = RegimeDefinition(
@@ -497,12 +503,29 @@ REGIME_CLASSIFIER_V1 = ParameterSet(
     min_available_weight=Decimal("0.5"),
     min_confidence_assign=Decimal("0.55"),
     tie_margin=Decimal("0.08"),
+    hysteresis_margin=Decimal("0"),  # preserved: v1 is deliberately flip-on-any-margin
+)
+
+REGIME_CLASSIFIER_V2 = ParameterSet(
+    version="regime_classifier_v2",
+    regimes=REGIME_CLASSIFIER_V1.regimes,
+    min_available_weight=REGIME_CLASSIFIER_V1.min_available_weight,
+    min_confidence_assign=REGIME_CLASSIFIER_V1.min_confidence_assign,
+    tie_margin=REGIME_CLASSIFIER_V1.tie_margin,
+    # A previously-assigned regime is kept unless a challenger beats it by more than 5
+    # confidence points — damps the "14.99 <-> 15.01" single-day threshold oscillation finding #4
+    # identified, without hiding a genuine, larger regime change. A documented judgment-call
+    # magnitude (same posture as every other band in this platform), not fitted to data.
+    hysteresis_margin=Decimal("0.05"),
 )
 
 #: Every parameter set ever published, keyed by version id. Append-only (see module docstring).
-PARAMETER_SETS: dict[str, ParameterSet] = {REGIME_CLASSIFIER_V1.version: REGIME_CLASSIFIER_V1}
+PARAMETER_SETS: dict[str, ParameterSet] = {
+    REGIME_CLASSIFIER_V1.version: REGIME_CLASSIFIER_V1,
+    REGIME_CLASSIFIER_V2.version: REGIME_CLASSIFIER_V2,
+}
 
-CURRENT_VERSION = REGIME_CLASSIFIER_V1.version
+CURRENT_VERSION = REGIME_CLASSIFIER_V2.version
 
 
 def parameters(version: str | None = None) -> ParameterSet:

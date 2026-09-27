@@ -145,7 +145,18 @@ async def test_macro_vs_market_structure_pair_is_ok_once_both_legs_are_loaded(
     market_structure: MarketStructureHarness,
     macro: MacroHarness,
     test_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # market_structure.load() ingests a single current-snapshot point (CoinGecko /global has no
+    # history), dated at the harness's own fixed "NOW" (market_structure_support.NOW). A 30-day
+    # window comparison needs a valued point at-or-before (as_of - 30 days) too, so as_of must sit
+    # at least 30 days after that harness's NOW — pre-existing test-fixture requirement, unrelated
+    # to any RED_TEAM_REPORT.md finding, found while running the Phase 18 full regression pass.
+    late_as_of = datetime(2026, 12, 1, tzinfo=UTC)
+    # ADR-0060 (Phase 18, finding #1): resolve_query_times now caps a future as_of at the real
+    # wall clock (R3 — never use future information). Pin it so this future as_of is never
+    # silently truncated to whatever day the suite happens to run on.
+    monkeypatch.setattr("cfi.api.params.utc_now", lambda: late_as_of)
     await _seed_bars(market)
     await market_structure.load(TOTAL_MARKET_CAP_USD.dataset_id)
     await _seed_macro(macro)
@@ -154,8 +165,8 @@ async def test_macro_vs_market_structure_pair_is_ok_once_both_legs_are_loaded(
         "/api/v1/divergence/pair",
         comparison_id="macro_vs_market_structure",
         window_days=30,
-        as_of=AS_OF.isoformat(),
-        knowledge_time=AS_OF.isoformat(),
+        as_of=late_as_of.isoformat(),
+        knowledge_time=late_as_of.isoformat(),
     )
     assert status == 200
     assert body["metric_a"]["status"] == "ok"

@@ -10,7 +10,10 @@ instruction).
 
 Point-in-time parameters (ADR-0018): ``as_of`` limits data to what was publicly knowable
 (``available_at``), ``knowledge_time`` to what this system had stored (``ingested_at``). Both
-default to now and never look beyond it.
+default to now when both are omitted; if only ``as_of`` is given, ``knowledge_time``
+defaults to ``as_of`` (ADR-0060) rather than now, so only what was knowable *by that same
+date* is used unless a later ``knowledge_time`` is explicitly requested. Neither ever looks
+beyond now.
 """
 
 from __future__ import annotations
@@ -20,9 +23,8 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Request
 
-from cfi.api.params import aware
+from cfi.api.params import resolve_query_times
 from cfi.core.errors import ServiceUnavailableError
-from cfi.core.time import utc_now
 from cfi.similarity.service import SimilarityService
 
 router = APIRouter(prefix="/api/v1/similarity", tags=["similarity"])
@@ -33,7 +35,10 @@ AsOf = Annotated[
 ]
 KnowledgeTime = Annotated[
     datetime | None,
-    Query(description="Only data this system had stored by then (timezone-aware; default now)"),
+    Query(
+        description="Only data this system had stored by then (timezone-aware); "
+        "defaults to as_of if as_of is given, else now (ADR-0060)"
+    ),
 ]
 
 
@@ -42,13 +47,6 @@ def _service(request: Request) -> SimilarityService:
     if engine is None:
         raise ServiceUnavailableError("Database connection is not available.")
     return SimilarityService(engine)
-
-
-def _times(as_of: datetime | None, knowledge_time: datetime | None) -> tuple[datetime, datetime]:
-    now = utc_now()
-    a = aware(as_of, "as_of")
-    k = aware(knowledge_time, "knowledge_time")
-    return (now if a is None else min(a, now)), (now if k is None else min(k, now))
 
 
 @router.get("/catalog")
@@ -63,5 +61,5 @@ async def current(
 ) -> dict[str, Any]:
     """The current historical-analogue search: similarity score, regime, forward returns, maximum
     drawdown and volatility per analogue, plus a distribution across analogues per horizon."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).current(as_of=a, knowledge_time=k)

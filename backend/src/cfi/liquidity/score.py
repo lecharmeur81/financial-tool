@@ -46,6 +46,22 @@ SEMANTIC_NOTE = (
     "increase and does not indicate market direction."
 )
 
+#: RED_TEAM_REPORT.md finding #8 / ADR-0064: unlike cfi.retail's proxy metrics, this score
+#: previously carried no runtime-visible caveat distinguishing "stablecoin supply growth" from
+#: "market liquidity" or "peg stability" — a large mint can happen for reasons unrelated to
+#: tradeable liquidity (reserve backstopping during a depeg event, an issuer's internal treasury
+#: operation, a mint later burned without ever reaching an exchange), and this platform tracks no
+#: stablecoin price/peg signal at all. Mirrors cfi.retail.metrics' measurement_class="proxy"
+#: convention: disclosed at the score level, not hidden in a docstring only.
+MEASUREMENT_CLASS = "proxy"
+PROXY_CAVEAT = (
+    "This score measures stablecoin SUPPLY growth, not market liquidity or peg stability. A large "
+    "mint can occur for reasons unrelated to tradeable liquidity (reserve backstopping during a "
+    "depeg event, an issuer's internal treasury operation, a mint later burned without ever "
+    "reaching an exchange) — this platform does not track any stablecoin price/peg signal, so a "
+    "depeg event would not be visible here at all."
+)
+
 ComponentStatus = Literal["ok", "unavailable"]
 
 
@@ -143,6 +159,8 @@ class ScoreResult:
     reason: str | None = None
     parameter_version: str = SCORE_VERSION
     calculated_at: datetime | None = None
+    measurement_class: str = MEASUREMENT_CLASS
+    proxy_caveat: str = PROXY_CAVEAT
 
 
 def _growth_component(definition: ComponentDef, growth: SupplyGrowth) -> ComponentResult:

@@ -220,18 +220,29 @@ def _breadth_component(definition: ComponentDef, r: BreadthReading) -> Component
     return _scaled_component(definition, value, r.status, r.reason, invert=False)
 
 
+#: RED_TEAM_REPORT.md finding #6: below this many available altcoin readings, the component is
+#: reported "unavailable" rather than silently averaging (and weighting at the full 0.20) whichever
+#: single asset happens to remain — matching the MIN_COVERAGE convention already used by
+#: cfi.whales.score / cfi.institutional.score for the identical "too little breadth to trust the
+#: average" concern.
+MIN_ALTCOIN_COUNT = 2
+
+
 def _altcoin_relative_strength_component(
     definition: ComponentDef, readings: list[RelativeStrengthReading]
 ) -> ComponentResult:
     """Average ``spread_pp`` across whichever of the supplied altcoin readings are available
-    (never a fabricated fill-in for a missing asset, R3) — unavailable only when none are."""
+    (never a fabricated fill-in for a missing asset, R3) — unavailable when fewer than
+    ``MIN_ALTCOIN_COUNT`` are (ADR-0063, finding #6), not just when all are."""
     available = [r.spread_pp for r in readings if r.status == "ok" and r.spread_pp is not None]
-    if not available:
+    if len(available) < MIN_ALTCOIN_COUNT:
         return _scaled_component(
             definition,
             None,
             "unavailable",
-            "no altcoin relative-strength reading available (ETH, SOL, XRP all unavailable)",
+            f"only {len(available)} of {len(readings)} altcoin relative-strength readings "
+            f"available (ETH/SOL/XRP), fewer than the minimum {MIN_ALTCOIN_COUNT} needed to "
+            "trust the average",
             invert=False,
         )
     value = sum(available, Decimal(0)) / len(available)

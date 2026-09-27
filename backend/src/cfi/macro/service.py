@@ -236,6 +236,7 @@ class MacroService:
             "score": num(s.score),
             "band": s.band,
             "semantic_note": sc.SEMANTIC_NOTE,
+            "vintage_risk_note": s.vintage_risk_note,
             "available_weight": num(s.available_weight),
             "reason": s.reason,
             "components": [

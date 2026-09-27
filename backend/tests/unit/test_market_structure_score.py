@@ -63,7 +63,9 @@ def full_score(
     altcoin_spreads: list[str] | None = None,
     vol_percentile: str | None = "50",
 ) -> sc.ScoreResult:
-    spreads = ["0.00"] if altcoin_spreads is None else altcoin_spreads
+    # Two readings by default: finding #6 (ADR-0063) requires at least MIN_ALTCOIN_COUNT (2)
+    # available altcoin readings before this component counts as "ok".
+    spreads = ["0.00", "0.00"] if altcoin_spreads is None else altcoin_spreads
     return sc.compute_score(
         as_of=NOW,
         calculated_at=NOW,
@@ -116,7 +118,7 @@ def test_constructive_inputs_produce_a_positive_score() -> None:
         close="240",  # 20% above SMA200 -> +1 sub-score (scale 0.20)
         rsi_value="100",  # +50 from neutral -> +1 (scale 50)
         breadth_fraction="1.0",  # +0.5 from neutral -> +1 (scale 0.5)
-        altcoin_spreads=["0.15"],  # +1 (scale 0.15)
+        altcoin_spreads=["0.15", "0.15"],  # +1 (scale 0.15); 2 readings to clear MIN_ALTCOIN_COUNT
         vol_percentile="0",  # -50 from neutral, inverted -> +1 (scale 50)
     )
     assert result.status == "ok"
@@ -129,7 +131,7 @@ def test_deteriorated_inputs_produce_a_negative_score() -> None:
         close="160",  # 20% below SMA200 -> -1
         rsi_value="0",  # -50 from neutral -> -1
         breadth_fraction="0.0",  # -1
-        altcoin_spreads=["-0.15"],  # -1
+        altcoin_spreads=["-0.15", "-0.15"],  # -1; 2 readings to clear MIN_ALTCOIN_COUNT
         vol_percentile="100",  # +50 from neutral, inverted -> -1
     )
     assert result.status == "ok"
@@ -153,20 +155,52 @@ def test_altcoin_relative_strength_averages_available_readings() -> None:
 
 
 def test_altcoin_relative_strength_uses_only_available_readings() -> None:
+    """2 of 3 available (ETH/SOL ok, XRP unavailable) still clears MIN_ALTCOIN_COUNT (2)."""
     result = sc.compute_score(
         as_of=NOW,
         calculated_at=NOW,
         price_trend=ma(),
         momentum=rsi(),
         breadth=breadth(),
-        altcoin_relative_strength=[rs("0.15"), rs("0", status="unavailable")],
+        altcoin_relative_strength=[rs("0.15"), rs("0.05"), rs("0", status="unavailable")],
         volatility_regime=vol(),
     )
     component = next(
         c for c in result.components if c.definition.component_id == "altcoin_relative_strength"
     )
     assert component.status == "ok"
-    assert component.value == Decimal("0.15").quantize(Decimal("0.000001"))
+    assert component.value == Decimal("0.10").quantize(Decimal("0.000001"))
+
+
+def test_altcoin_relative_strength_is_unavailable_below_min_altcoin_count() -> None:
+    """RED_TEAM_REPORT.md finding #6 / ADR-0063: only 1 of 3 altcoins available must NOT be
+    silently averaged and reported "ok" at the full 0.20 weight from a single asset."""
+    result = sc.compute_score(
+        as_of=NOW,
+        calculated_at=NOW,
+        price_trend=ma(),
+        momentum=rsi(),
+        breadth=breadth(),
+        altcoin_relative_strength=[
+            rs("0.15"),
+            rs("0", status="unavailable"),
+            rs("0", status="unavailable"),
+        ],
+        volatility_regime=vol(),
+    )
+    component = next(
+        c for c in result.components if c.definition.component_id == "altcoin_relative_strength"
+    )
+    assert component.status == "unavailable"
+    assert component.value is None
+    assert "1 of 3" in (component.reason or "")
+    # The score renormalizes over the remaining 0.80 weight, exactly like any other missing
+    # component (breadth, volatility, ...) rather than treating this one specially.
+    assert result.status == "ok"
+    assert (
+        result.available_weight
+        == Decimal("1.00") - sp.parameters().weight_altcoin_relative_strength
+    )
 
 
 # --------------------------------------------------------------------------- renormalisation

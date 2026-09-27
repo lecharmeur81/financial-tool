@@ -7,7 +7,10 @@ percent. No reading is labelled bullish or bearish, and no recommendation is pro
 
 Point-in-time parameters (ADR-0018): ``as_of`` limits data to what was publicly knowable
 (``available_at``), ``knowledge_time`` to what this system had stored (``ingested_at``). Both
-default to now and never look beyond it.
+default to now when both are omitted; if only ``as_of`` is given, ``knowledge_time``
+defaults to ``as_of`` (ADR-0060) rather than now, so only what was knowable *by that same
+date* is used unless a later ``knowledge_time`` is explicitly requested. Neither ever looks
+beyond now.
 """
 
 from __future__ import annotations
@@ -17,10 +20,9 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Request
 
-from cfi.api.params import aware
+from cfi.api.params import resolve_query_times
 from cfi.core.config import Settings
 from cfi.core.errors import ServiceUnavailableError
-from cfi.core.time import utc_now
 from cfi.liquidity.queries import LiquidityQueries
 from cfi.liquidity.service import LiquidityService
 
@@ -35,7 +37,10 @@ AsOf = Annotated[
 ]
 KnowledgeTime = Annotated[
     datetime | None,
-    Query(description="Only data this system had stored by then (timezone-aware; default now)"),
+    Query(
+        description="Only data this system had stored by then (timezone-aware); "
+        "defaults to as_of if as_of is given, else now (ADR-0060)"
+    ),
 ]
 Subject = Annotated[str, Query(description="Tracked subject: USDT, USDC or TOTAL")]
 Days = Annotated[
@@ -51,13 +56,6 @@ def _service(request: Request) -> LiquidityService:
     return LiquidityService(LiquidityQueries(engine), settings.liquidity_provider_ids)
 
 
-def _times(as_of: datetime | None, knowledge_time: datetime | None) -> tuple[datetime, datetime]:
-    now = utc_now()
-    a = aware(as_of, "as_of")
-    k = aware(knowledge_time, "knowledge_time")
-    return (now if a is None else min(a, now)), (now if k is None else min(k, now))
-
-
 @router.get("/catalog")
 async def catalog(request: Request) -> dict[str, Any]:
     """Datasets, providers, schedule, thresholds, the score definition and what is not tracked."""
@@ -70,7 +68,7 @@ async def overview(
 ) -> dict[str, Any]:
     """The Liquidity Score, per-subject supply growth, market share, growth acceleration and the
     (always unavailable) exchange liquidity change."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).overview(as_of=a, knowledge_time=k)
 
 
@@ -83,6 +81,6 @@ async def history(
     knowledge_time: KnowledgeTime = None,
 ) -> dict[str, Any]:
     """Daily circulating-supply history for one subject (USDT, USDC or TOTAL)."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     subject = subject.upper()
     return await _service(request).history(subject=subject, days=days, as_of=a, knowledge_time=k)

@@ -317,6 +317,7 @@ class DerivativesService:
             "band": s.band,
             "band_note": sc.BAND_NOTE,
             "semantic_note": sc.SEMANTIC_NOTE,
+            "shared_input_note": s.shared_input_note,
             "available_weight": num(s.available_weight),
             "reason": s.reason,
             "components": [

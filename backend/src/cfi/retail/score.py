@@ -54,6 +54,25 @@ SPECULATION_SEMANTIC_NOTE = (
     "by its source as retail-only (R1, R5)."
 )
 
+#: RED_TEAM_REPORT.md finding #7 / ADR-0064: this score's funding_rate_bias component (0.40
+#: weight) is the SAME underlying Binance funding-rate series that also drives 0.25 of the
+#: Derivatives Health Score (cfi.derivatives.score) — not merely a similar concept, the identical
+#: number. (account_ratio_skew, this score's other 0.40 directional component, is a different
+#: series — Binance's long/short account ratio — not used by Derivatives Health at all, so it does
+#: not add to this particular overlap; it is still disclosed platform-wide as "not retail-exclusive"
+#: via measurement_class="proxy".) A "retail is over-leveraged while derivatives health looks fine"
+#: divergence narrative could be comparing a metric against a rescaled version of itself rather
+#: than two independent signals for that 0.40-weighted portion — disclosed here at the score level
+#: (not just in each module's own docstring) so a consumer, including the Divergence Engine, can
+#: see it without reading the source.
+SPECULATION_SHARED_INPUT_NOTE = (
+    "This score's funding_rate_bias component (0.40 weight) is sourced from the same underlying "
+    "Binance funding-rate data that also drives 25% of the Derivatives Health Score. A divergence "
+    "comparison between this score and Derivatives Health is not fully independent for that "
+    "shared portion (account_ratio_skew, this score's other directional component, is a separate "
+    "series and does not overlap)."
+)
+
 ComponentStatus = Literal["ok", "unavailable"]
 
 
@@ -103,6 +122,7 @@ class ScoreResult:
     reason: str | None = None
     parameter_version: str = ""
     calculated_at: datetime | None = None
+    shared_input_note: str | None = None
 
 
 def _combine(
@@ -348,7 +368,7 @@ def compute_speculation_score(
         _ratio_component(defs["account_ratio_skew"], derivatives, params.account_ratio_skew_scale),
         _meme_component(defs["meme_trending"], meme_activity, params.meme_trending_scale),
     ]
-    return _combine(
+    result = _combine(
         SPECULATION_SCORE_ID,
         as_of,
         calculated_at,
@@ -358,3 +378,5 @@ def compute_speculation_score(
         params.bands,
         scale=Decimal(100),
     )
+    result.shared_input_note = SPECULATION_SHARED_INPUT_NOTE
+    return result

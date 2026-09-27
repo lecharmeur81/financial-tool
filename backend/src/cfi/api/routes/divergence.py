@@ -9,7 +9,10 @@ evidence, and states plainly when data is insufficient (this phase's explicit in
 
 Point-in-time parameters (ADR-0018): ``as_of`` limits data to what was publicly knowable
 (``available_at``), ``knowledge_time`` to what this system had stored (``ingested_at``). Both
-default to now and never look beyond it.
+default to now when both are omitted; if only ``as_of`` is given, ``knowledge_time``
+defaults to ``as_of`` (ADR-0060) rather than now, so only what was knowable *by that same
+date* is used unless a later ``knowledge_time`` is explicitly requested. Neither ever looks
+beyond now.
 """
 
 from __future__ import annotations
@@ -19,9 +22,8 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Request
 
-from cfi.api.params import aware
+from cfi.api.params import resolve_query_times
 from cfi.core.errors import ServiceUnavailableError
-from cfi.core.time import utc_now
 from cfi.divergence.service import DivergenceService
 from cfi.divergence.universe import WINDOW_DAYS_DEFAULT, WINDOW_DAYS_MAX, WINDOW_DAYS_MIN
 
@@ -33,7 +35,10 @@ AsOf = Annotated[
 ]
 KnowledgeTime = Annotated[
     datetime | None,
-    Query(description="Only data this system had stored by then (timezone-aware; default now)"),
+    Query(
+        description="Only data this system had stored by then (timezone-aware); "
+        "defaults to as_of if as_of is given, else now (ADR-0060)"
+    ),
 ]
 ComparisonId = Annotated[
     str, Query(description="One of the 10 standardized comparison ids (see /catalog)")
@@ -59,13 +64,6 @@ def _service(request: Request) -> DivergenceService:
     return DivergenceService(engine)
 
 
-def _times(as_of: datetime | None, knowledge_time: datetime | None) -> tuple[datetime, datetime]:
-    now = utc_now()
-    a = aware(as_of, "as_of")
-    k = aware(knowledge_time, "knowledge_time")
-    return (now if a is None else min(a, now)), (now if k is None else min(k, now))
-
-
 @router.get("/catalog")
 async def catalog(request: Request) -> dict[str, Any]:
     """The 10 standardized comparisons, the Capital Flow Map's nodes, and every parameter used."""
@@ -83,7 +81,7 @@ async def pair(
 ) -> dict[str, Any]:
     """One comparison's full detail: observed quadrant, magnitude, historical percentile,
     duration, historical examples, and supporting/contradicting evidence."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).pair(
         comparison_id=comparison_id, asset=asset, window_days=window_days, as_of=a, knowledge_time=k
     )
@@ -98,7 +96,7 @@ async def matrix(
 ) -> dict[str, Any]:
     """All 10 standardized comparisons at once (each asset defaulted to its comparison's first
     tracked asset — call ``/pair`` directly to choose a different one)."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).matrix(window_days=window_days, as_of=a, knowledge_time=k)
 
 
@@ -112,7 +110,7 @@ async def capital_flow_map(
     """The Institutions → Whales → Liquidity → BTC → ETH → SOL → Large Caps → Mid Caps → DeFi →
     AI-related assets → Meme assets → Retail chain: each node's own observed reading, and hedged
     'inferred rotation' hypotheses between adjacent nodes (never a claim that money moved)."""
-    a, k = _times(as_of, knowledge_time)
+    a, k = resolve_query_times(as_of, knowledge_time)
     return await _service(request).capital_flow_map(
         window_days=window_days, as_of=a, knowledge_time=k
     )

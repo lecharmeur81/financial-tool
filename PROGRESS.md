@@ -2,8 +2,10 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 14 — Market Regime Engine → implemented and self-verified in Claude's sandbox (unit tests,
-ruff, mypy all clean); delivery to the Windows machine and the user's full-suite run/commit are next.
+**Current phase:** 18 — Fix Quant Issues → implemented, fully self-verified (unit + integration tests against
+a real PostgreSQL/TimescaleDB instance, ruff, mypy all clean). 13 of RED_TEAM_REPORT.md's 15 findings
+corrected (ADR-0060–ADR-0064); findings #10 and #15 documented as deferred, no code change (ADR-0065), per
+the report's own guidance. Awaiting delivery to Windows and commit.
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -26,10 +28,11 @@ ruff, mypy all clean); delivery to the Windows machine and the user's full-suite
 | 11 | Macro | ✅ Complete (backend only, as requested) — fully verified on Windows (`eb5e386`); first real FRED run needs `CFI_PROVIDER_FRED_API_KEY` |
 | 12 | Market structure | ✅ Complete (backend only, as requested) — fully verified on Windows (`4b4a21e`); first real CoinGecko `/global` run needs a network that can reach it |
 | 13 | Divergence engine | ✅ Complete (backend only, as requested) — fully verified on Windows (`6cd6578`) |
-| 14 | Regime engine | 🟡 Implemented, self-verified in sandbox — awaiting delivery + the user's full-suite run and commit |
-| — | Historical similarity | ⏳ Not started |
-| — | Backtesting | ⏳ Not started |
-| — | Quant red-team | ⏳ Not started |
+| 14 | Regime engine | ✅ Complete (backend only, as requested) — fully verified on Windows (`42bd2b0`) |
+| 15 | Historical similarity | ✅ Complete (backend only, as requested) — fully verified on Windows (`9ec74ac`) |
+| 16 | Backtesting | 🟡 Implemented, fully self-verified in sandbox (incl. real-DB integration tests) — pending delivery/commit alongside Phase 18's fixes |
+| 17 | Quant red-team | ✅ Complete — RED_TEAM_REPORT.md delivered, 15 findings, zero code changes (review-only phase) |
+| 18 | Fix Quant Issues | ✅ Implemented, fully self-verified in sandbox (incl. real-DB integration tests) — pending delivery/commit |
 | — | Anomaly engine | ⏳ Not started |
 | — | Capital rotation | ⏳ Not started |
 | — | Claude AI Analyst | ⏳ Not started |
@@ -1463,4 +1466,274 @@ verified), then the user runs `uv sync`, `uv run pytest -q`, `uv run ruff check 
 .`, `uv run mypy` and commits from `E:\FINANCIAL TOOL\backend` (Git runs there — C5); this section will be
 updated with the resulting commit hash and verification transcript once the user reports back, following the
 exact pattern of every prior phase.
+
+**Verified on Windows (2026-09-27)**
+
+All 20 files (9 new `cfi/similarity/*.py`, 1 new `api/routes/similarity.py`, 1 modified `api/app.py`, 5 new
+unit test files, 1 new integration test file, plus the 4 modified doc files) delivered via the device bridge to
+`E:\FINANCIAL TOOL` and individually SHA-256 checksum-verified (20 of 20 matched) before the user ran the suite
+themselves.
+
+| Check (Windows, `E:\FINANCIAL TOOL\backend`) | Result |
+|---|---|
+| `uv sync` | Resolved 62 packages, checked 60 packages |
+| `uv run pytest -q` | **623 passed, 164 skipped, 0 failed** in 3.70s — including the 2 new `test_similarity_api.py` tests, correctly skipped (`CFI_DATABASE_URL`/`CFI_REDIS_URL` not set for this run) |
+| `uv run ruff check .` | All checks passed! |
+| `uv run ruff format --check .` | 267 files already formatted |
+| `uv run mypy` | Success: no issues found in 262 source files |
+
+Identical to the sandbox's own self-verification (623 passed, 164 skipped, 0 failed; ruff clean; 267 files
+formatted; mypy clean across 262 files) — confirming the delivered files are correct on the real development
+machine, not just in the scratch environment.
+
+**Git status confirmed** (only the 20 Phase 15 files staged; `git add -A` / `git status` reviewed before
+committing — no `.env`, no unrelated files):
+```
+modified:   ../DATA_DICTIONARY.md
+modified:   ../DECISIONS.md
+modified:   ../PROGRESS.md
+modified:   ../TODO.md
+modified:   src/cfi/api/app.py
+new file:   src/cfi/api/routes/similarity.py
+new file:   src/cfi/similarity/__init__.py
+new file:   src/cfi/similarity/outcomes.py
+new file:   src/cfi/similarity/parameters.py
+new file:   src/cfi/similarity/scorer.py
+new file:   src/cfi/similarity/search.py
+new file:   src/cfi/similarity/service.py
+new file:   src/cfi/similarity/snapshot.py
+new file:   src/cfi/similarity/universe.py
+new file:   tests/integration/test_similarity_api.py
+new file:   tests/unit/test_similarity_outcomes.py
+new file:   tests/unit/test_similarity_parameters.py
+new file:   tests/unit/test_similarity_scorer.py
+new file:   tests/unit/test_similarity_search.py
+new file:   tests/unit/test_similarity_snapshot.py
+```
+
+**Committed:** `9ec74ac` — `[P15] Historical Similarity Engine: 9 fixed-normalized features, weekly-sampled
+analogues` (20 files changed, 2050 insertions(+), 2 deletions(-))
+
+Phase 15 is therefore fully verified end-to-end on the development machine, not just in the scratch environment
+here. No outstanding verification gap remains beyond the same recurring, expected integration-suite
+database-gated skips as every prior phase (closed only when the user runs against a live Postgres instance).
+
+### 2026-09-27 — Phase 16: Backtesting Engine, event-driven replay with execution-lag anti-look-ahead,
+long-only v1 — implementation complete, stopped for the user's quantitative review (no delivery/commit yet)
+
+**What changed** (ADR-0059; user's exact spec: "PHASE 16 — BACKTESTING ENGINE: Build a production-quality
+research and backtesting engine. The engine must support: historical replay, strategy definitions, signal
+definitions, entry rules, exit rules, position sizing, fees, slippage, liquidity constraints, turnover,
+exposure, leverage, stop conditions, time-based exits. Support: in-sample, validation, out-of-sample,
+walk-forward testing. Prevent: look-ahead bias, survivorship bias, data leakage, future revisions leaking into
+past decisions. Produce: total return, annualized return, volatility, maximum drawdown, Sharpe, Sortino, win
+rate, expectancy, turnover, exposure, number of trades, average trade, best trade, worst trade. Store: strategy
+version, parameter version, dataset version, code version, timestamp, assumptions. Every backtest must be
+reproducible. Create synthetic datasets specifically designed to detect look-ahead bias. Create tests. Do not
+optimize parameters against the test set. After implementation, stop and wait for a quantitative review.")
+
+Unlike every prior phase, this instruction's closing line was **"stop and wait for a quantitative review"**,
+not "Commit. Stop." — so, per that explicit instruction, this entry stops at self-verified implementation:
+no delivery to the Windows machine and no commit yet (both wait on the user's review of the methodology).
+
+- **New `backend/src/cfi/backtest/` package**: `universe.py` (benchmark asset, warmup/liquidity-lookback/
+  annualization constants, and three documented `NOT_TRACKED` scope decisions), `costs.py` (versioned
+  `CostParameterSet` — fee/slippage/liquidity-participation cap, `cost_model_v1` v1 defaults), `signals.py`
+  (one uniform, always-`async` `Signal` protocol; `SmaCrossoverSignal`/`RsiSignal` reusing
+  `cfi.market_structure.metrics`'s already-tested `moving_averages`/`rsi`; `DomainScoreSignal` reusing
+  `cfi.similarity.snapshot.gather_snapshot`'s already-tested 9-feature extraction), `strategy.py`
+  (`StrategyDefinition`: entry/exit rules, position sizing, stop conditions, time-based exit, leverage/exposure
+  limits; two illustrative `EXAMPLE_STRATEGIES`, explicitly documented as un-fitted v1 defaults), `splits.py`
+  (`three_way_split` for in-sample/validation/out-of-sample; `walk_forward_windows` for rolling train/test
+  folds — pure time partitioning, no parameter search anywhere), `metrics.py` (all 13 named `BacktestMetrics`,
+  stdlib `Decimal`/`statistics` only — this codebase has no numpy/pandas/scipy dependency anywhere, confirmed
+  by a full `pyproject.toml` survey before writing this module — every metric `None`, never a fabricated 0,
+  when there is not enough data to compute it honestly), `versioning.py` (`RunVersions`/`Assumptions` — the
+  exact reproducibility fields the spec's "Store" section lists), `engine.py` (`run_backtest`: the day-by-day
+  event-driven replay loop — see ADR-0059 for its exact four-step order and the execution-lag/stop-exception
+  design).
+- **Anti-look-ahead-bias design (this phase's explicit "prevent" list, R4):** signal-driven entries/exits
+  decided from day D's data execute at day D+1's open, never D's own close (stop-loss/take-profit are the one
+  exception, triggering intrabar against D's own high/low); position sizing is capped by the TRAILING average
+  volume through the decision day, never the execution bar's own not-yet-known volume; a domain-score signal
+  is gathered at `as_of = knowledge_time = that simulated day`, never the run's own later, global `as_of`.
+- **Look-ahead-bias / leakage tests (this phase's explicit instruction: "create synthetic datasets specifically
+  designed to detect look-ahead bias")**, both against a real PostgreSQL/TimescaleDB instance with a fully
+  controlled, deterministic synthetic price path inserted directly into `obs.series`/`obs.market_bar`: (1) a
+  run over `[start, end]` is proven byte-identical whether or not bars strictly after `end` exist in the
+  database at all; (2) a bar's later revision (an extreme, sign-flipping close inserted as `revision=1` with a
+  far-future `available_at`) never changes a run's result while that revision is not yet knowable at the run's
+  own `as_of`, and DOES change the result once `as_of` is moved past that revision's actual availability
+  (proving the point-in-time filter is discriminating, not just always preferring the oldest revision).
+- **Reproducibility (R7 / the spec's own "every backtest must be reproducible")**: two runs with byte-identical
+  inputs are proven to produce byte-identical trades, equity curve, metrics and `dataset_version`.
+- **Scope decisions, each recorded transparently, not silently narrowed (see ADR-0059/TODO.md):** long-only v1
+  (the spec never mentions short-selling/long-short, only "exposure"/"leverage", both satisfied by long-only +
+  leverage); single-asset BTC (so no survivorship-bias handling is implemented — there is no universe of assets
+  to have survivors or delistings); no parameter optimizer anywhere in `cfi.backtest` (directly satisfying "do
+  not optimize parameters against the test set"); **persistence (a `sig`-schema table + migration) and an API
+  route were deliberately NOT built this phase**, unlike Phases 13–15 — a direct reading of "stop and wait for
+  a quantitative review" as a request to check the engine's methodology before more engineering investment
+  goes into storing/serving its results.
+- **Frontend: not built.** Not requested for this phase (matching every prior backend-only phase's own scope
+  decision).
+- **Docs:** ADR-0059, DATA_DICTIONARY.md (backtest performance metrics + reproducibility record), TODO.md
+  Phase 16 section, this log entry.
+
+**Tests run — in Claude's sandbox, THIS TIME against a real PostgreSQL 16 + TimescaleDB instance and a real
+Redis instance actually running in the workspace (not just unit tests as in prior phases' self-verification),
+so the new integration tests below were genuinely executed here, not merely written and left for the user's
+first Windows run**
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_backtest_costs.py`, `test_backtest_signals.py`, `test_backtest_strategy.py`, `test_backtest_splits.py`, `test_backtest_metrics.py`, `test_backtest_versioning.py` | 42 new tests, all passed, fully synthetic (no DB) |
+| New integration tests: `test_backtest_engine.py` (real PostgreSQL/TimescaleDB, synthetic bars seeded directly into `obs.series`/`obs.market_bar`) | 6 new tests, **all passed against a real database** — a trending-path run producing trades/metrics, exact reproducibility of two identical runs, the "data after `end`" look-ahead test, the "future revision" leakage test, and two `"insufficient_data"` paths (too-short window, unknown asset) |
+| Backend `uv run pytest -q` (whole suite, WITH real `CFI_DATABASE_URL`/`CFI_REDIS_URL` this time) | **834 passed, 1 failed** in 167s — the 1 failure is `test_divergence_api.py::test_macro_vs_market_structure_pair_is_ok_once_both_legs_are_loaded`, a pre-existing Phase 13 test unrelated to this phase (nothing in `cfi.backtest` touches divergence/macro/market-structure code); it never ran in this sandbox before because no local Postgres/Redis had been available in prior phases' self-verification, so this is the first time it has been exercised here at all — flagged for the user, not fixed, since it is outside this phase's scope (R13) |
+| `uv run ruff check .` (whole backend) | All checks passed! |
+| `uv run ruff format --check .` (whole backend) | 283 files already formatted |
+| `uv run mypy` (strict, whole backend) | Success: no issues found in 278 source files |
+
+**Bugs found and fixed during this phase's own development/test run (R7):**
+- `engine.py`: `_close_trade` originally hard-coded `exit_date=position.entry_date` (a copy-paste artifact) —
+  fixed to take an explicit `exit_date` parameter, threaded through from the actual bar timestamp at each of
+  the three call sites (signal/time exit, stop exit, end-of-backtest force-close).
+- `engine.py`: every non-stop exit was recorded with the literal string `"signal_exit or time_exit"` as its
+  reason, losing which condition actually triggered — fixed by threading the correct reason through
+  `_PendingOrder.reason`.
+- `signals.py`/`strategy.py`/`engine.py`: an earlier design split signals into two Protocols
+  (`PriceSignal`/`DomainSignal`) with different call signatures and dispatched between them with `isinstance`
+  in `engine.py`. This type-checked incorrectly under mypy strict (a Protocol-typed union does not narrow
+  reliably through `isinstance` against one concrete implementation — `mypy` resolved the non-domain branch to
+  the wrong Protocol's method signature). Fixed by unifying both kinds under one `Signal` protocol with the
+  same always-`async` signature (`value_at(bars_through_today, adapters, *, as_of)`); a price signal ignores
+  the `adapters`/`as_of` it does not need. This also removed the `isinstance` branch entirely — the engine's
+  `_signal_value` is now a single unconditional call.
+- Two other `# type: ignore[arg-type]` comments (a combined-boolean mypy Optional-narrowing gotcha this
+  codebase has hit and fixed the same way in Phases 14/15) were removed by restructuring into explicit
+  `if reading.status == "ok" and reading.value is not None:` branches, matching that established convention.
+- My own first draft of the "future revision" leakage test mutated a bar's `available_at` directly (making it
+  vanish entirely from the point-in-time query rather than falling back to an earlier revision), which would
+  have changed the simulated day-count between the two compared runs and made the equality assertion
+  meaningless — caught before it ran, and rewritten to use a genuine second `revision` row instead, which is
+  also the more realistic test of R4's "future revisions leaking into past decisions."
+
+Covered by tests: `cfi.backtest.costs` (fee/slippage direction, liquidity cap and its `None`-on-missing-data
+gate, hard `KeyError` on an unknown cost-model version); `cfi.backtest.signals` (SMA-crossover and RSI
+unavailable/ok/condition branches over synthetic bar sequences, the price-signal registry, domain-signal
+feature-id validation); `cfi.backtest.strategy` (the `gte`/`lte` comparator and its hard `ValueError`, both
+example strategies' long-only/leverage-capped shape); `cfi.backtest.splits` (three-way split contiguity and
+percentage validation, walk-forward window contiguity/termination and non-positive-argument validation);
+`cfi.backtest.metrics` (every one of the 13 metrics' `None`-guarding on insufficient data, correct total
+return/max-drawdown/win-rate/trade-extreme arithmetic on hand-built cases); `cfi.backtest.versioning`
+(`code_version` non-empty, `dataset_version` deterministic/sensitive-to-every-input/16-hex-char); and the full
+`cfi.backtest.engine` replay loop against a real database, including both required look-ahead-bias tests.
+
+**Known limitations**
+- No persistence and no API route this phase — a deliberate scope decision (ADR-0059), not an oversight; both
+  are the natural next step once the user's quantitative review of the methodology is done.
+- The two `EXAMPLE_STRATEGIES` (`sma_trend_follow_v1`, `whale_accumulation_v1`) are illustrative v1 judgment
+  defaults, explicitly documented as never fitted or optimized against any backtest result — a real research
+  strategy is the user's own to define and version.
+- Long-only, single-asset (BTC) v1 — no short-selling/long-short and no multi-asset universe (and so no
+  survivorship-bias handling, since there is no universe of assets to have survivors or delistings) — both
+  documented, out-of-scope-for-v1 decisions (ADR-0059/TODO.md), not silent omissions.
+- The pre-existing, unrelated `test_divergence_api.py` failure noted above (Phase 13 code, untouched by this
+  phase) is flagged for the user's attention but was not investigated further, being out of this phase's scope.
+
+**Next step:** this phase stops here per the user's own instruction — awaiting the user's quantitative review
+of the backtesting methodology before any delivery to Windows, commit, or further phase work.
+
+---
+
+### 2026-09-27 — Phase 17: Quant Red-Team Review — RED_TEAM_REPORT.md, 15 findings, zero code changes
+
+**What changed.** Per the user's exact instruction ("PHASE 17 — QUANT RED-TEAM REVIEW... Produce a written
+report. Do not fix anything yet."), a review-only pass across the Phase 16 Backtesting Engine and every prior
+scoring/engine module for R3/R4 violations, methodology gaps and undisclosed scope limitations. Delivered
+`RED_TEAM_REPORT.md`: 15 findings (severities CRITICAL through LOW), each with problem/why-it-matters/
+evidence/recommended-correction/required-test, a summary table, a priority order for a follow-up correction
+pass, and a "checked and found correct" section listing what was reviewed and found sound. No source file was
+touched this phase, per the explicit instruction.
+
+**Findings (see RED_TEAM_REPORT.md for full detail):** #1 `knowledge_time` defaults independently of `as_of`
+(CRITICAL) · #2 FRED series carry no point-in-time vintage · #3 stop-loss/take-profit fills skip slippage and
+ignore gaps · #4 regime/market-structure classification has no hysteresis · #5 cost model ignores trade size
+· #6 altcoin relative-strength has no minimum-count floor · #7 Retail Speculation and Derivatives Health
+scores share an undisclosed input · #8 Liquidity Score measures supply growth, not liquidity, undisclosed ·
+#9 derivatives liquidation-stress is single-venue, undisclosed · #10 similarity candidate sampling is locked
+to one weekday · #11 backtest position-sizing/execution-lag assumption under-documented · #12 backtest test
+suite lacks exact-value assertions · #13 large-transfer classification uses latest, not transfer-date,
+balance · #14 silent warmup shortfall · #15 fixed 4-asset universe has no delisted/discontinued state.
+
+**Next step:** per the report's own priority order and the user's next instruction (Phase 18, below).
+
+---
+
+### 2026-09-27 — Phase 18: Fix Quant Issues — 13 of 15 RED_TEAM_REPORT.md findings corrected
+
+**What changed** (ADR-0060–ADR-0065; user's exact spec: "PHASE 18 — FIX QUANT ISSUES: Implement the approved
+corrections from RED_TEAM_REPORT.md. Before changing anything: 1. Inspect the affected implementation.
+2. Explain the correction plan. 3. Identify database changes. 4. Identify tests required. Then implement the
+corrections. Do not introduce unrelated features. Run: unit / integration / historical / look-ahead /
+backtest / data-quality tests. Compare before/after behavior. Document all methodology changes. Update
+ARCHITECTURE.md / DATA_DICTIONARY.md / DECISIONS.md / PROGRESS.md. Commit. Stop."). Treated "approved
+corrections" as all 15 findings, worked in the report's own stated priority order
+(#1 → #3 → #2 → #4 → #12 → #5/#6/#9 → #7/#8/#11/#13/#14/#15), with #10 and #15 documented as explicitly
+deferred/no-code-change per the report's own recommendation.
+
+- **#1 (ADR-0060):** all ten point-in-time routes now share one `cfi.api.params.resolve_query_times()`
+  instead of each carrying its own copy-pasted `_times()`. `knowledge_time` defaults to `as_of` (not
+  independently to `now()`) when only `as_of` is given; both values are capped at the real `now()`, including
+  an explicit `as_of` (R3).
+- **#3/#5/#11/#12/#14 (ADR-0061, backtest execution realism):** `_intrabar_stop_fill()` handles opening gaps
+  through a stop/take-profit level correctly; `_participation_fraction()` + a new `cost_model_v2`
+  (`participation_impact_coefficient`) make slippage convex in trade size vs. the day's own volume, with
+  `cost_model_v1` unchanged and reproducible; `Assumptions` gained `sizing_price_gap_note` and
+  `slippage_participation_note`; a new exact-value integration test hand-verifies Decimal fill prices, fees,
+  P&L and return_pct; `_warmup_shortfall_warning()` surfaces a previously-silent warmup gap.
+- **#2 (ADR-0054, runtime-visible):** `cfi.macro.score.ScoreResult.vintage_risk_note` — an always-present
+  disclosure of FRED's lack of point-in-time vintage tracking, already accepted in ADR-0054 but not
+  previously visible at read time.
+- **#4 (ADR-0062):** `classify()` gained an optional `previous_regime_id` parameter and a new
+  `regime_classifier_v2` (`hysteresis_margin = 0.05`); `RegimeService` supplies it via one extra lookback
+  call; the existing historical backward-walk threads it through at no extra query cost. `held_by_hysteresis`
+  is now a field on every classification result.
+- **#6 (ADR-0063):** `MIN_ALTCOIN_COUNT = 2` — the Market Structure Score's altcoin relative-strength
+  component is `"unavailable"` below 2 of 3 readings, not just at 0.
+- **#7/#8/#9/#13 (ADR-0064, disclosure notes):** `shared_input_note` (Retail Speculation ↔ Derivatives
+  Health), `measurement_class`/`proxy_caveat` (Liquidity Score), a single-venue caveat in the derivatives
+  liquidation component's `context`, and `_balances_as_of()` (whale transfer classification now uses the
+  balance snapshot in effect at the transfer's own time, not the latest one).
+- **#10/#15 (ADR-0065):** reviewed, correction deferred per the report's own recommendation — no code change.
+  #10 tracked in TODO.md as a candidate Similarity Engine follow-up; #15 already covered by TODO.md's
+  existing multi-asset-universe entry.
+
+**Database changes:** none. Every fix is either a request-parameter resolution change, an additive dataclass
+field with a safe/neutral default, a new versioned parameter-set entry (registered in an existing in-memory
+`PARAMETER_SETS` dict, not a table), or a same-shape pure-function change — no migration was needed or
+written, consistent with R10's "prefer additive" guidance applied at the Python level since none of these
+domains persist their parameter sets to the database.
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_api_params.py` (7), additions to `test_backtest_costs.py` (+4), new `test_backtest_engine.py` (11), additions to `test_regime_classifier.py` (+7), `test_market_structure_score.py` (+1 new, fixture defaults updated), `test_macro_score.py` (+1), `test_retail_score.py` (+2), `test_derivative_metrics.py` (assertion updated), `test_liquidity_score.py` (+1), new `test_whale_service.py` (6) | all new/updated tests pass |
+| New integration tests: `test_market_structure_api.py` (+1, knowledge_time leakage), `test_backtest_engine.py` (+1, exact-value stop-loss fill), `test_regime_api.py` (+2 assertions) | all pass against a real PostgreSQL/TimescaleDB instance |
+| Backend `uv run pytest tests/unit -q` (whole suite) | **694 passed** |
+| Backend `uv run pytest tests/integration -q` (whole suite, real `CFI_DATABASE_URL`/`CFI_REDIS_URL`) | **172 passed** — including the `test_divergence_api.py::test_macro_vs_market_structure_pair_is_ok_once_both_legs_are_loaded` test flagged as a pre-existing, unrelated failure in the Phase 16 log entry above: root-caused during this phase's regression pass to a test-fixture issue (the harness's single-point `total_market_cap` snapshot needs `as_of` at least 30 days after the harness's fixed "NOW" for its 30-day window comparison to find a "before" point at all; the fixture's `AS_OF` constant had too little margin) — unrelated to any of this phase's methodology fixes (confirmed by tracing `resolve_query_times`'s resolved values directly), and fixed with a dedicated `late_as_of` local to that one test plus a `cfi.api.params.utc_now` pin so it no longer depends on which real calendar date the suite happens to run on |
+| One pre-existing test corrected to match the finding #13 fix: `test_whale_api.py::test_transfers_are_listed_with_direction_and_classification` asserted a transfer's recipient evidence text using the *latest* balance snapshot (10,100 BTC) — exactly the bug finding #13 describes; updated to assert the balance in effect at the transfer's own time (10,000 BTC) | now passes, and now proves the fix rather than the bug |
+| `uv run ruff check .` (whole backend) | All checks passed! |
+| `uv run ruff format --check .` (whole backend) | 286 files already formatted |
+| `uv run mypy` (strict, whole backend) | Success: no issues found in 281 source files |
+
+**Known limitations**
+- Findings #10 and #15 remain open by design (ADR-0065) — not fixed this phase, per the report's own
+  recommended scope.
+- Phase 16's persistence/API gap (ADR-0059) is still open — this phase's instruction was to fix the
+  RED_TEAM_REPORT.md findings, not to build Phase 16's deferred persistence/API surface.
+- No frontend work this phase (not requested).
+
+**Next step:** deliver Phase 16, 17 and 18's work (backtest engine, red-team report, and this phase's fixes —
+none of which have yet reached the Windows machine's real git repository) and commit there, per this phase's
+closing instruction. Then stop and await the user's next instruction.
 

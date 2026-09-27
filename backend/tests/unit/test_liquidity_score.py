@@ -205,3 +205,21 @@ def test_clip_helper_bounds_are_exact() -> None:
     assert sc._clip(Decimal("1.5")) == Decimal(1)
     assert sc._clip(Decimal("-1.5")) == Decimal(-1)
     assert sc._clip(Decimal("0.5")) == Decimal("0.5")
+
+
+# --------------------------------------------------------------------------- proxy caveat (#8)
+
+
+def test_liquidity_score_always_carries_the_supply_growth_proxy_caveat() -> None:
+    """RED_TEAM_REPORT.md finding #8 / ADR-0064: unlike cfi.retail's proxy metrics, this score
+    previously had no runtime-visible caveat distinguishing 'stablecoin supply growth' from
+    'market liquidity' or 'peg stability' — it must now be present regardless of status."""
+    ok_result = full_score()
+    assert ok_result.status == "ok"
+    assert ok_result.measurement_class == "proxy"
+    assert "supply" in ok_result.proxy_caveat.lower()
+    assert "peg" in ok_result.proxy_caveat.lower()
+
+    insufficient_result = full_score(usdt=None, usdc=None, total=None, accel=None)
+    assert insufficient_result.status == "insufficient_data"
+    assert insufficient_result.proxy_caveat == ok_result.proxy_caveat

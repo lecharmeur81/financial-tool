@@ -356,6 +356,7 @@ class RetailService:
             "score": num(s.score),
             "band": s.band,
             "semantic_note": semantic_note,
+            "shared_input_note": s.shared_input_note,
             "available_weight": num(s.available_weight),
             "reason": s.reason,
             "components": [
