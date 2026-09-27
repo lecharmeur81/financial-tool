@@ -364,6 +364,45 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 - [ ] **Terms of use** of CoinGecko's public API for `/global` not separately reviewed beyond the existing
       adapter's attribution requirement (already tracked from Phase 5/6/10).
 
+## Phase 13 — Capital Flow Divergence Engine (built 2026-09-27; see PROGRESS.md)
+
+- [x] No new ingestion; pure computation over Phases 5–12's already-ingested/already-calculated data via each
+      domain's own already-tested service methods. 10 standardized comparisons (institutional vs. retail,
+      institutional vs. price, whale vs. retail, whale vs. price, liquidity vs. price, open interest vs. price,
+      funding vs. price, stablecoin supply vs. price, leverage vs. price, macro vs. market structure), the
+      4-cell quadrant matrix (with the two explicit whale/retail cross-cells), duration/historical-episode
+      scanning (new methodology), deterministic rule-based evidence text, and the 12-node Capital Flow Map with
+      hedged OBSERVED FLOW vs. INFERRED ROTATION edges. API: `/api/v1/divergence/{catalog,pair,matrix,
+      capital-flow-map}`. See DATA_DICTIONARY.md §5i, DECISIONS.md ADR-0056.
+- [ ] **User:** run the full test/lint/mypy suite and `docker compose up --build` on Windows — see PROGRESS.md
+      for the exact commands and expected counts. The integration suite (`test_divergence_api.py`) needs
+      `CFI_DATABASE_URL`/`CFI_REDIS_URL`, unavailable in Claude's own sandbox; only the unit suite (fully
+      synthetic, no DB) has been run and verified in this environment.
+
+### Decisions needed from the user (Phase 13)
+
+- [ ] **Comparison #5 (liquidity vs. price) uses combined USDT+USDC supply; #8 (stablecoin supply vs. price)
+      uses USDT alone.** These look similar but are deliberately distinct metrics (a broad dry-powder proxy vs.
+      a single-issuer view) — accept as scoped, or ask for a different pairing.
+- [ ] **Comparison #6 (open interest vs. price) uses the raw OI level; #9 (leverage vs. price) uses a
+      leverage-skew proxy** (mean `|long/short account ratio − 1|` across venues — a directional-crowding
+      measure, not a level). Accept as scoped, or ask for a different leverage definition.
+- [ ] **Comparison #10 (macro vs. market structure) substitutes TOTAL crypto market cap for the Market
+      Structure Score**, because the score has no ranged/historical series in this platform (a Phase 12 gap).
+      Accept this substitution, or ask for the score to gain a persisted history in a later phase so #10 can
+      use it directly.
+- [ ] **Capital Flow Map: Mid Caps, DeFi and AI-related asset categories are marked `unavailable`** — no
+      asset-category taxonomy exists anywhere in the platform yet. "Large Caps" uses XRP as a proxy; "Meme
+      assets" uses retail's meme-trending-count as an explicitly-labelled attention proxy, never an observed
+      flow. Accept these gaps as documented, or specify which additional assets/categories to track so real
+      data can populate these nodes in a later phase.
+- [ ] **Percentile/duration/episode thresholds (judgment parameters, not fitted to data):**
+      `MIN_PERCENTILE_SAMPLE=20`, `EPISODE_PERCENTILE_THRESHOLD=70`, `MAX_DURATION_LOOKBACK_DAYS=180`,
+      `MAX_HISTORICAL_EXAMPLES=3`, default `window_days=30` (range 3–180). See `cfi/divergence/universe.py`.
+      Chosen by design — send different values if the user wants a different sensitivity.
+- [ ] **Frontend page** — not built this phase (not requested; see PROGRESS.md). A natural next step once the
+      user asks for it.
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.

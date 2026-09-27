@@ -13,6 +13,7 @@ from cfi.api.errors import register_exception_handlers
 from cfi.api.middleware import REQUEST_ID_HEADER, request_context_middleware
 from cfi.api.routes import (
     derivatives,
+    divergence,
     health,
     ingestion,
     institutional,
@@ -102,4 +103,5 @@ def create_app(
     app.include_router(retail.router)
     app.include_router(macro.router)
     app.include_router(market_structure.router)
+    app.include_router(divergence.router)
     return app

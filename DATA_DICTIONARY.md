@@ -839,6 +839,104 @@ owner_phase:      12 (2026-09-27)
 status:           implemented
 ```
 
+## 5i. Capital Flow Divergence Engine (implemented in Phase 13)
+
+**No datasets ingested.** `cfi/divergence/` reads nothing from any provider and writes nothing new to the
+database — it is pure computation, at read time, over data Phases 5–12 already ingested or already calculate
+(reused via each domain's own already-tested public service methods, never raw queries, except macro's
+net-liquidity recompute and price bars — see ADR-0056). Every value it produces is either a Calculated Metric
+(L2) or a Statistical Signal (L3); it never classifies a Regime (L4) and it is not an AI Interpretation (L5) —
+`evidence_note` on every response states this plainly.
+
+### "As-of style" window reading (`cfi/divergence/metrics.py::window_reading`)
+
+```
+method:           direction/magnitude = (latest known value at-or-before as_of) minus (latest known value
+                  at-or-before as_of − window_days) — carries the last known reading forward for series that
+                  update less than daily (e.g. weekly macro releases); never an invented interpolation
+window_days:      3–180, default 30 (cfi.divergence.universe)
+direction:        up / down / flat (delta == 0) / unavailable (missing endpoint)
+status:           ok · insufficient_data (with a reason: no point at-or-before as_of, or none before the
+                  window start)
+```
+
+### Historical percentile (reused, not reimplemented)
+
+`cfi.divergence.metrics.magnitude_and_percentile` reuses `cfi.retail.metrics.percentile_rank` unchanged
+(nearest-rank, tie-tolerant, 0–100; `status = insufficient_history` below `MIN_PERCENTILE_SAMPLE = 20` rolling
+daily deltas over a 400-day load span).
+
+### Duration and historical examples (new methodology — genuine gap, no prior helper existed)
+
+```
+duration:           backward walk counting consecutive days sharing today's (direction_a, direction_b)
+                    combination; capped at MAX_DURATION_LOOKBACK_DAYS = 180 (flagged capped=true)
+historical_examples: scans the loaded lookback (excluding the current streak) for prior runs sharing today's
+                    direction combination; ranks each by the peak historical percentile of |delta_a| reached
+                    during that run; reports only runs at EPISODE_PERCENTILE_THRESHOLD = 70 or above, most
+                    recent first, capped at MAX_HISTORICAL_EXAMPLES = 3
+```
+
+### Deterministic evidence rules (`cfi.divergence.metrics.evidence`)
+
+Rule-based, not AI-generated — every bullet cites a number already computed elsewhere in the same response
+(an L3 Statistical Signal fact, never an L5 AI Interpretation): percentile ≥ 80 → top-quintile supporting;
+percentile 40–60 → near-median contradicting; `insufficient_history` → contradicting; duration ≥ `window_days`
+→ supporting; duration ≤ 1 day → contradicting; both legs' data quality `ok` → supporting, otherwise
+contradicting per leg.
+
+### The 10 standardized comparisons (`cfi/divergence/comparisons.py`)
+
+| # | `comparison_id` | Leg A | Leg B | Scope note |
+|---|---|---|---|---|
+| 1 | `institutional_vs_retail` | Institutional net flow (ETF) | Retail small-tx count | shared asset |
+| 2 | `institutional_vs_price` | Institutional net flow (ETF) | Price close | leg A asset-scoped |
+| 3 | `whale_vs_retail` | Whale net flow | Retail small-tx count | shared asset |
+| 4 | `whale_vs_price` | Whale net flow | Price close | shared asset |
+| 5 | `liquidity_vs_price` | Combined USDT+USDC supply (TOTAL) | Price close | no asset scope on leg A |
+| 6 | `open_interest_vs_price` | Raw OI aggregate level | Price close | shared asset |
+| 7 | `funding_vs_price` | Funding rate | Price close | shared asset |
+| 8 | `stablecoin_supply_vs_price` | USDT supply alone (single-issuer) | Price close | distinct from #5 by design |
+| 9 | `leverage_vs_price` | Leverage-skew proxy: mean \|long/short account ratio − 1\| across venues | Price close | distinct from #6 by design |
+| 10 | `macro_vs_market_structure` | US net liquidity (recomputed) | TOTAL crypto market cap | substitutes for the Market Structure Score, which has no ranged history (Phase 12 gap, `NOT_TRACKED`) |
+
+Comparisons #5/#8 and #6/#9 look redundant at a glance; each pair is deliberately built from a genuinely
+distinct underlying metric (documented in each `ComparisonDef.notes`) rather than merged, so neither is
+silently narrowed.
+
+`standard_matrix(short_a, short_b)` always emits the same 4 named cells in the user's specified order
+(`↑/↑`, `↑/↓`, `↓/↑`, `↓/↓`); `whale_vs_retail`'s matrix — built from the same generic function — naturally
+includes the two explicitly requested cross-cells (`Whale ↑ / Retail ↓`, `Whale ↓ / Retail ↑`).
+`is_divergent()` is `true` only for a strict opposite up/down pair, never for flat/unavailable legs.
+
+### The Capital Flow Map (`cfi/divergence/capital_flow_map.py`)
+
+A versioned 12-node chain, in the user's specified order:
+
+```
+institutions → whales → liquidity → btc → eth → sol → large_caps → mid_caps → defi → ai_related
+→ meme_assets → retail
+```
+
+| Node | `measurement_class` | Note |
+|---|---|---|
+| institutions, whales, liquidity, btc, eth, sol, retail | `observed` | directly computed from tracked data |
+| large_caps | `proxy` | XRP price stands in for "large caps" — the only additional tracked large-cap asset beyond BTC/ETH/SOL |
+| mid_caps, defi, ai_related | `unavailable` | `fetch_key=None` — no asset-category taxonomy for these exists anywhere in the platform; honestly marked rather than populated with fabricated or loosely-related data |
+| meme_assets | `proxy` | retail's meme-trending-count — an explicitly-labelled retail **attention** proxy, NOT an observed capital flow |
+
+**OBSERVED FLOW vs. INFERRED ROTATION (`classify_edge`, R1/R3):** an edge between two adjacent nodes only ever
+emits a `possible_rotation` hypothesis, `evidence_class = "inferred"`, when the two nodes move in strictly
+opposite directions over the same window — worded as "consistent with (but not proof of) ...; no transfer
+between these nodes is directly observed." Same-direction pairs get `no_rotation_signal`; any node with an
+unknown or unavailable direction gets `status = "unavailable"` and no hypothesis is emitted at all. The engine
+never states that money moved between assets.
+
+```
+owner_phase:      13 (2026-09-27)
+status:           implemented
+```
+
 ---
 
 ## 6. Metric definition template (L2)
@@ -888,7 +986,7 @@ exact inputs depend on verified provider data.
 | Stablecoin exchange ratio | Stablecoins on exchanges ÷ relevant crypto market cap (dry-powder proxy) | 8 |
 | Market depth | Sum of resting bid/ask size within ±x% of mid | 8 |
 | Retail attention index | Composite of normalised search/app/social inputs (weights documented) | 9 |
-| Institutional–retail divergence | Difference between standardised institutional and retail composites | 12 |
+| Institutional–retail divergence | Windowed direction/magnitude comparison, percentile-ranked, never a standardised composite difference — **implemented (Phase 13, see §5i)** | 13 |
 | Dominance | Asset market cap ÷ total market cap | 11 |
 | Realized volatility | Annualised std. dev. of log returns over window | 11 |
 | Rolling correlation | Correlation of returns (e.g. BTC vs. equity index) over window | 10/11 |

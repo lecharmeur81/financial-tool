@@ -2,8 +2,9 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 12 — Market Structure → ✅ backend complete (as requested); tests/lint/mypy passing in Claude's
-scratch environment; pending delivery to the user's Windows machine and commit
+**Current phase:** 13 — Capital Flow Divergence Engine → implemented and self-verified in Claude's sandbox
+(unit tests, ruff, mypy all clean); delivered to the Windows machine, awaiting the user's `docker compose`/full
+test run and commit.
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -24,8 +25,8 @@ scratch environment; pending delivery to the user's Windows machine and commit
 | 9 | Liquidity | ✅ Complete (backend only, as requested) — fully verified on Windows (`f1b8f6a`); first real DefiLlama run to be checked |
 | 10 | Retail | ✅ Complete (backend only, as requested) — fully verified on Windows (`2fae0e6`); first real CoinGecko/Blockchair runs to be checked |
 | 11 | Macro | ✅ Complete (backend only, as requested) — fully verified on Windows (`eb5e386`); first real FRED run needs `CFI_PROVIDER_FRED_API_KEY` |
-| 12 | Market structure | ✅ Backend complete (as requested) — tests/lint/mypy passing in scratch environment; pending delivery + Windows verification |
-| — | Divergence engine | ⏳ Not started |
+| 12 | Market structure | ✅ Complete (backend only, as requested) — fully verified on Windows (`4b4a21e`); first real CoinGecko `/global` run needs a network that can reach it |
+| 13 | Divergence engine | 🟡 Implemented, self-verified in sandbox, delivered to Windows — awaiting the user's full-suite run and commit |
 | — | Regime engine | ⏳ Not started |
 | — | Historical similarity | ⏳ Not started |
 | — | Backtesting | ⏳ Not started |
@@ -42,7 +43,7 @@ scratch environment; pending delivery to the user's Windows machine and commit
 | — | Production | ⏳ Not started |
 | — | Real-time intelligence | ⏳ Not started |
 
-Phases 0–12 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
+Phases 0–13 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
 
 ---
 
@@ -1042,6 +1043,140 @@ loaded.
 - No frontend page — out of scope for this phase as instructed.
 
 **Next step:** deliver the changed/new files to the user's Windows machine via the device bridge (checksum-
+verified), then the user runs `uv sync && uv run pytest -q && uv run ruff check . && uv run ruff format --check
+. && uv run mypy` and commits from `E:\FINANCIAL TOOL\backend` (Git runs there — C5); this section will be
+updated with the resulting commit hash and verification transcript once the user reports back, following the
+exact pattern of every prior phase.
+
+**Verified on Windows (2026-09-27)**
+
+All 29 files (18 new, 11 modified) delivered via the device bridge to `E:\FINANCIAL TOOL` and checksum-verified
+byte-for-byte (SHA-256, 0 mismatches) before the user ran anything.
+
+- `uv sync` — resolved 62 packages, installed `cfi==0.1.0` cleanly.
+- `uv run pytest -q` — **538 passed, 153 skipped, 0 failed** in 3.51s. All skips are integration tests
+  (`CFI_DATABASE_URL` / `CFI_REDIS_URL` not set — no local Postgres/Redis running on the dev machine at the time
+  of this run, including the 7 new `test_market_structure_ingestion.py`/`test_market_structure_api.py` tests),
+  the same expected pattern as every prior phase's first Windows verification; not a failure.
+- `uv run ruff check .` — all checks passed.
+- `uv run ruff format --check .` — 227 files already formatted.
+- `uv run mypy` — success, no issues found in 222 source files.
+- `git add -A && git commit` — commit `4b4a21e`, "[P12] Market Structure Engine: technical indicators,
+  dominance/TOTAL family, Market Structure Score", 29 files changed, 3530 insertions(+), 27 deletions(-).
+
+Phase 12 is therefore fully verified end-to-end on the development machine, not just in the scratch environment
+here. No outstanding verification gap remains (the integration-suite database-gated skips are the same
+recurring, expected gap as every prior phase, closed only when the user runs against a live Postgres/TimescaleDB
+instance).
+
+### 2026-09-27 — Phase 13: Capital Flow Divergence Engine, 10 comparisons, Capital Flow Map
+
+**What changed** (ADR-0056; user's exact spec: "PHASE 13 — THE MOST IMPORTANT FEATURE: Build the Capital Flow
+Divergence Engine. ... Compare: 1. Institutional flow vs retail activity 2. Institutional flow vs price 3. Whale
+flow vs retail activity 4. Whale flow vs price 5. Liquidity vs price 6. Open interest vs price 7. Funding vs
+price 8. Stablecoin supply vs price 9. Derivatives leverage vs price 10. Macro conditions vs crypto market
+structure. Create a standardized matrix ... The system must NOT automatically call these situations bullish or
+bearish. Instead display: Observed divergence, Magnitude, Historical percentile, Duration, Supporting evidence,
+Contradicting evidence, Historical examples, Data quality. Create the Capital Flow Map: Institutions → Whales →
+Liquidity → BTC → ETH → SOL → Large Caps → Mid Caps → DeFi → AI-related assets → Meme assets → Retail. Clearly
+distinguish: OBSERVED FLOW from INFERRED ROTATION. Do not claim money moved between assets unless the data
+supports the claim. Build tests. Commit. Stop.")
+
+- **Research first** (delegated subagent survey + direct verification reads/greps across all 8 existing domain
+  modules — R3/R7, never assume a method exists without opening it): confirmed exact service-method signatures
+  for every domain the engine reads from, confirmed `cfi.retail.metrics.percentile_rank` is a genuinely reusable
+  pure function, confirmed a genuine gap (no asset-category taxonomy, no streak/duration helper existed anywhere
+  before this phase).
+- **New `backend/src/cfi/divergence/` package — ingests nothing of its own** (no `sources.py`, no `jobs.py`, no
+  worker/schedule changes, no new provider settings): `universe.py` (window/percentile/duration parameters,
+  `NOT_TRACKED`), `metrics.py` (the "as-of style" window-reading methodology, rolling series, magnitude +
+  percentile via the reused `percentile_rank`, duration/streak, historical-episode scanning, deterministic
+  rule-based evidence generation, quality summary), `adapters.py` (fetches every leg through each domain's own
+  already-tested public service methods — `InstitutionalService.etf_flows()`, `WhaleService.flows()`,
+  `RetailService.history()`, `LiquidityService.history()`, `DerivativesService.history()`,
+  `MarketStructureService.history()` — plus price bars and a recomputed macro net-liquidity series, the two
+  documented exceptions), `comparisons.py` (the 10 `ComparisonDef`s, the standardized 4-cell quadrant matrix,
+  `is_divergent()`), `capital_flow_map.py` (the 12-node registry, `classify_edge()`), `service.py`
+  (`DivergenceService`: `catalog()`, `pair()`, `matrix()`, `capital_flow_map()`).
+- **API:** new router `backend/src/cfi/api/routes/divergence.py` —
+  `/api/v1/divergence/{catalog,pair,matrix,capital-flow-map}`, registered in `api/app.py`, mirroring every other
+  domain router's `_service(request)`/`_times()` pattern exactly.
+- **Scope decisions, each recorded transparently, not silently narrowed (see ADR-0056/TODO.md for the full
+  reasoning):** comparisons #5/#8 (liquidity vs. price / stablecoin supply vs. price) use genuinely distinct
+  metrics (combined TOTAL supply vs. USDT alone), as do #6/#9 (raw OI level vs. a leverage-skew proxy);
+  comparison #10 substitutes TOTAL crypto market cap for the Market Structure Score, which has no ranged history
+  in this platform; the Capital Flow Map marks Mid Caps/DeFi/AI-related `unavailable` rather than fabricating
+  data for them, and labels Large Caps (XRP) and Meme assets (retail attention) as explicit proxies.
+- **Never claims a transfer:** `classify_edge()` only emits a hedged `possible_rotation` hypothesis for
+  strictly-opposite-direction adjacent nodes, with fixed wording ("consistent with (but not proof of) ...; no
+  transfer ... is directly observed") — verified by a dedicated unit test.
+- **Frontend: not built.** Not requested for this phase (matching every prior backend-only phase's own scope
+  decision).
+- **Docs:** ADR-0056, DATA_DICTIONARY.md §5i, TODO.md Phase 13 section, this log entry, CLAUDE.md's existing
+  phase table already listed "Divergence engine" at #13 (ADR-0012 Amendment 4, Phase 12) — no renumbering
+  needed this time.
+
+**Tests run (Claude's scratch environment: Python 3.12, no local PostgreSQL/Redis — see below)**
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_divergence_metrics.py`, `test_divergence_comparisons.py`, `test_divergence_capital_flow_map.py` | ~55 new tests, all passed, fully synthetic (no DB) |
+| New integration tests: `test_divergence_api.py` (written against a real PostgreSQL harness, same pattern as every prior phase; deliberately seeds only `market`/`market_structure`/`macro` fixtures — documented scope decision in the file's own module docstring) | 7 new tests — not executed here (no local `CFI_DATABASE_URL`/`CFI_REDIS_URL` in this workspace; will run on the user's Windows machine) |
+| Backend `uv run pytest -q` (whole suite, unit-only in this workspace) | **569 passed, 160 skipped, 0 failed** in 2.32s |
+| `uv run ruff check .` | all checks passed |
+| `uv run ruff format --check .` | 239 files already formatted |
+| `uv run mypy` (strict, whole backend) | Success: no issues found in 234 source files |
+
+**Bugs found and fixed during this phase's own test run** (first time any of this code executed — R7):
+- `adapters.py`'s two venue-averaging helpers (`_leverage_skew_from_history`, one other) used a bare
+  `sum(vals) / len(vals)` on a `list[Decimal]`, producing the same `Decimal | float` union ambiguity bug already
+  seen and fixed in Phase 12's `market_structure/metrics.py`. Fixed with an explicit `Decimal(0)` start value.
+- `metrics.py::_asof()` filtered points with `[p for p in points if p.value is not None and p.time <= at]` but
+  `mypy` could not narrow `p.value` past that filter on subsequent access (the same Optional-narrowing-after-
+  filter pattern from Phase 12's `rolling_vwap`). Fixed by extracting a properly-typed `_ValuedPoint` (non-
+  Optional `value: Decimal`) at filter time, with an `assert ... # noqa: S101` narrowing comment matching the
+  existing codebase convention (`market/service.py`).
+- `PercentileResult`, imported from `cfi.retail.metrics` into `metrics.py` and re-referenced from `service.py`
+  as `m.PercentileResult`, tripped strict mypy's no-implicit-reexport rule. Fixed via the explicit `from
+  cfi.retail.metrics import PercentileResult as PercentileResult` re-export idiom.
+- Several test-file-only mypy errors: `list[Decimal | None]` literals built via `+`-concatenation
+  (`[Decimal(1)] * 25 + [Decimal(100)]`) failed list-invariance checks under an explicit annotation — fixed by
+  building the list with `.extend()`/`.append()` calls instead (list concatenation's inferred type does not
+  propagate the target annotation the way plain `*`-repetition or `.extend()` do). The identical fix was applied
+  to three `list[str]`-vs-`list[Direction]` (a `Literal[...]`) mismatches, and to a `str | None` unused-without-
+  narrowing check in `test_classify_edge_down_up_is_a_hedged_possible_rotation`. No production code was affected
+  by any of these — test-only fixes.
+- Several `E501` (line too long) violations across all 6 new source files, the new router and 3 new test files,
+  and a missing `pyproject.toml` per-file `RUF001`/`RUF002`/`RUF003` ignore for `src/cfi/divergence/**` (real
+  math/arrow symbols in docstrings — the same precedent as every prior phase). All fixed; no production behavior
+  changed by any of these.
+
+Covered by tests: every metrics.py function and its edge cases (window reading ok/insufficient in both
+directions/carry-forward, rolling series and its too-short-history path, magnitude+percentile ranking including
+insufficient-history and current-missing, duration counting/capping/empty-input, historical-episode scanning
+above and below threshold, quality summary ok/degraded/missing, every evidence rule); comparisons.py (quadrant
+label rendering, the exact 4-cell matrix including the whale/retail cross-cells, `is_divergent()`'s truth table,
+registry completeness and asset-scope validity for all 10 comparisons); capital_flow_map.py (node order matches
+the spec chain exactly, unavailable/proxy marking, every `classify_edge()` branch including the never-claims-a-
+transfer guarantee); the integration suite (catalog shape, insufficient-data with nothing loaded, the
+capital-flow-map's unavailable-node reporting, a price-only partial-availability pair, BTC/ETH/SOL/large-caps
+populating once bars load with a resolved edge, a fully "ok" macro-vs-market-structure pair, and the full
+10-comparison matrix) collects cleanly and is ready for the user's database-backed run.
+
+**Known limitations**
+- The new integration tests (`test_divergence_api.py`) were written and confirmed to collect cleanly, but have
+  not been executed against a real PostgreSQL instance in this workspace (none is running here) — the user's run
+  on Windows is the real verification, same pattern as every prior phase's first Windows run.
+- Comparisons #5/#8, #6/#9 and #10's Market-Structure-Score substitution are documented scope decisions awaiting
+  the user's explicit sign-off (TODO.md), not yet reviewed.
+- The Capital Flow Map's Mid Caps/DeFi/AI-related nodes are `unavailable` (no asset-category taxonomy exists in
+  the platform); Large Caps and Meme assets are explicitly-labelled proxies, not observed flows.
+- Judgment parameters (`MIN_PERCENTILE_SAMPLE`, `EPISODE_PERCENTILE_THRESHOLD`, `MAX_DURATION_LOOKBACK_DAYS`,
+  `MAX_HISTORICAL_EXAMPLES`, default `window_days`) are v1 choices by design, not fitted to data — awaiting the
+  user's review, same posture as every score/parameter set in this platform.
+- No frontend page — out of scope for this phase as instructed.
+
+**Next step:** deliver the new/modified files to the user's Windows machine via the device bridge (checksum-
 verified), then the user runs `uv sync && uv run pytest -q && uv run ruff check . && uv run ruff format --check
 . && uv run mypy` and commits from `E:\FINANCIAL TOOL\backend` (Git runs there — C5); this section will be
 updated with the resulting commit hash and verification transcript once the user reports back, following the

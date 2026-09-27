@@ -1576,3 +1576,115 @@ no-duplication-on-repeated-recent-window) and for the API (catalog shape, an "ok
 loaded, "insufficient_data"/"unavailable" with nothing loaded, history endpoint). Frontend work was not part
 of the Phase 12 request as given and was not built. Publishing a v2 parameter set for the score follows the
 same append-only pattern as ADR-0051/ADR-0052/ADR-0053/ADR-0054.
+
+---
+
+## ADR-0056 — Phase 13: Capital Flow Divergence Engine — 10 comparisons, the Capital Flow Map, hedged rotation
+
+**Status:** Accepted (implemented 2026-09-27)
+
+**Context.** The user's Phase 13 instruction — quoted verbatim in `PROGRESS.md`'s Phase 13 log entry — asked for
+the platform's central feature: a standardized divergence matrix across 10 named comparisons (institutional vs.
+retail, institutional vs. price, whale vs. retail, whale vs. price, liquidity vs. price, open interest vs.
+price, funding vs. price, stablecoin supply vs. price, derivatives leverage vs. price, macro vs. market
+structure), each reporting observed divergence, magnitude, historical percentile, duration, supporting and
+contradicting evidence, historical examples and data quality — explicitly never auto-labelled bullish/bearish —
+plus a Capital Flow Map (institutions → whales → liquidity → BTC → ETH → SOL → large caps → mid caps → DeFi →
+AI-related → meme → retail) that clearly distinguishes OBSERVED FLOW from INFERRED ROTATION and never claims
+money moved between assets unless the data supports the claim.
+
+**Decision — a pure computation module, no ingestion of its own.** `cfi/divergence/` follows the same
+"no-ingestion" posture as `market_structure` (which ingests exactly one dataset): the Divergence Engine ingests
+literally nothing. Every input is read through each already-tested domain's own public service methods
+(`InstitutionalService.etf_flows()`, `WhaleService.flows()`, `RetailService.history()`,
+`LiquidityService.history()`, `DerivativesService.history()`, `MarketStructureService.history()`), never raw
+queries, so the Divergence Engine inherits each domain's own point-in-time discipline (`available_at <= as_of`,
+latest revision wins — ADR-0018) for free rather than re-implementing it. The two documented exceptions are
+price bars (read via `MarketQueries.series_id` + `.bars()`, mirroring `market_structure/service.py`'s own
+`_asset_bars` helper) and macro net liquidity, which is recomputed daily from raw `MacroQueries.observations()`
+through `cfi.macro.metrics.us_net_liquidity()` because no domain service currently exposes a ranged net-liquidity
+history endpoint. There is no `sources.py`, no `jobs.py`, no worker/schedule change, and no new provider
+configuration for this phase.
+
+**Decision — an "as-of style" window-reading methodology, new to this phase, documented transparently.**
+Direction and magnitude for every comparison leg are computed as (latest known value at-or-before `as_of`)
+minus (latest known value at-or-before `as_of − window_days`) — the last known reading is carried forward for
+series that update less than daily (e.g. weekly/monthly macro releases), consistent with the point-in-time
+philosophy used everywhere else in the platform, and explicitly never an invented interpolation between two
+known points. `window_reading()`'s own module docstring states this plainly so a reader does not mistake it for
+a naive same-day-only diff.
+
+**Decision — reuse `percentile_rank`, build `duration`/`historical_examples` new.** A research pass across every
+domain module (delegated to a subagent, cross-checked directly) confirmed `cfi.retail.metrics.percentile_rank`
+is a genuinely generic, pure, directly-reusable nearest-rank percentile function — imported unchanged rather
+than reimplemented a sixth time (contrast ADR-0055, which deliberately did *not* import it across an unrelated
+business domain for a few lines of logic; here the function is imported as-is with no modification, which is a
+materially different and lower-coupling case). By contrast, no streak/duration or historical-episode-scanning
+helper existed anywhere in the codebase before this phase — `duration()` (a capped backward walk over matching
+direction pairs) and `historical_examples()` (a percentile-ranked scan of prior matching runs, threshold ≥ 70th
+percentile, most recent first, capped at 3) are new, purpose-built for this engine, and documented in
+`DATA_DICTIONARY.md` §5i as new methodology rather than an established platform-wide pattern.
+
+**Decision — deterministic, rule-based evidence text, never AI-generated.** Per R2/R6 (Claude interprets, it
+does not compute), every supporting/contradicting bullet in `evidence()` cites a number already computed
+elsewhere in the same response (percentile thresholds, duration vs. window length, per-leg data quality) — an L3
+Statistical Signal fact, not an L5 AI Interpretation. No language model is invoked anywhere in this module.
+
+**Decision — resolve the apparent redundancy between comparisons #5/#8 and #6/#9 with genuinely distinct
+metrics, rather than merging them or fabricating a difference.** #5 "liquidity vs. price" uses the *combined*
+USDT+USDC TOTAL stablecoin supply (a broad dry-powder proxy); #8 "stablecoin supply vs. price" uses USDT *alone*
+(a single-issuer view) — genuinely different aggregations of genuinely tracked data, both documented in each
+`ComparisonDef.notes`. #6 "open interest vs. price" uses the raw OI aggregate level; #9 "derivatives leverage vs.
+price" uses a leverage-skew proxy (mean `|long/short account ratio − 1|` across venues — a directional-crowding
+measure, not a level) — again genuinely distinct, not a cosmetic renaming of the same input.
+
+**Decision — comparison #10 substitutes TOTAL crypto market cap for the Market Structure Score.** The Market
+Structure Score (ADR-0055) has no ranged/historical time series in this platform — it is computed fresh at read
+time with no persisted history — so it cannot supply a windowed direction/magnitude reading. Rather than
+fabricate a historical score series, #10 "macro vs. market structure" is built from TOTAL crypto market cap
+(already a Phase 12 calculated metric with real historical bars behind it), and this substitution is documented
+in `cfi/divergence/universe.py::NOT_TRACKED` and `TODO.md`, not silently narrowed (R3).
+
+**Decision — the Capital Flow Map is an explicit, versioned 12-node registry; untracked categories are marked
+`unavailable`, not populated.** An exhaustive grep (via the same research subagent) confirmed no asset-category
+taxonomy (large-cap/mid-cap/DeFi/AI/meme) exists anywhere in the codebase — this is new, `cfi/divergence/
+capital_flow_map.py::NODES`. Mid Caps, DeFi and AI-related assets are honestly marked `measurement_class =
+"unavailable"`, `fetch_key = None` (recorded in `NOT_TRACKED`) rather than backfilled with loosely-related or
+fabricated data. "Large Caps" uses XRP price as a documented proxy — the only additional large-cap asset this
+platform tracks beyond BTC/ETH/SOL. "Meme assets" uses retail's meme-trending-count, explicitly labelled a
+retail-**attention** proxy in its `scope_note`, never presented as an observed capital flow — R1's "never present
+uncertain inference as fact" applies as much to a node label as to a sentence of prose.
+
+**Decision — `classify_edge()` only ever hedges; it never asserts a transfer.** Directly implementing the user's
+explicit "do not claim money moved between assets unless the data supports the claim": an edge only emits a
+`possible_rotation` hypothesis (`evidence_class = "inferred"`) when its two adjacent nodes move in strictly
+opposite directions over the same window, and the hypothesis text is fixed, hedged wording — "consistent with
+(but not proof of) ...; no transfer between these nodes is directly observed" — never a bare directional claim.
+Same-direction pairs get `no_rotation_signal`; any node with an unknown/unavailable direction gets `status =
+"unavailable"` and no hypothesis text at all. A dedicated unit test
+(`test_classify_edge_never_claims_money_moved`) asserts the hedging phrases are always present.
+
+**Alternatives considered.** Computing all 10 comparisons' data directly from each domain's raw ORM queries
+(rejected: would duplicate each domain's own point-in-time filtering logic and risk drifting out of sync with
+it — R13, DRY). Reimplementing `percentile_rank` locally as ADR-0055 chose for market_structure (rejected here:
+that decision was about avoiding coupling two business domains for a few lines of near-identical logic; here the
+function is imported completely unchanged, which is direct, low-risk reuse rather than domain coupling).
+Silently dropping comparisons #8 and #9 as "duplicates" of #5 and #6 (rejected: each pair measures a genuinely
+different quantity — R3 forbids silently narrowing scope without saying so). Fabricating a historical Market
+Structure Score series for comparison #10 (rejected outright: R3, never invent missing values). Populating Mid
+Caps/DeFi/AI-related with loosely related tracked assets to avoid empty map nodes (rejected: R3 and R5 — that
+would misrepresent proxy data as an observed category).
+
+**Consequences.** No new database migration (the engine has zero storage of its own). New API surface:
+`/api/v1/divergence/{catalog,pair,matrix,capital-flow-map}`, registered in `cfi/api/app.py` alongside every
+other domain router. New ruff per-file-ignore (`RUF001/RUF002/RUF003`) for `src/cfi/divergence/**`, matching the
+precedent already set for every prior phase that legitimately uses arrow/minus-sign characters in docstrings.
+Unit tests cover `metrics.py` (window reading, rolling series, percentile, duration, historical examples,
+quality summary, evidence rules), `comparisons.py` (matrix shape, registry completeness, asset-scope validity)
+and `capital_flow_map.py` (node order, unavailable/proxy marking, edge classification, the never-claims-a-
+transfer guarantee) against fully synthetic data — no database required. Integration tests (DB-gated) cover the
+full API against real price bars, TOTAL market cap and macro FRED series (the lightest harnesses already proven
+in Phases 11/12); they deliberately do not additionally re-seed institutional/whale/retail/liquidity/derivatives
+fixtures, since those domains' own integration suites already cover ingestion and every divergence adapter
+reading them is unit-tested against synthetic series — a documented scope decision, not an oversight. Frontend
+work was not part of the Phase 13 request as given and was not built.
