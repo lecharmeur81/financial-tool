@@ -7,8 +7,8 @@ against a real PostgreSQL/TimescaleDB instance, ruff, mypy all clean). Market An
 requested categories (ETF/institutional/whale/exchange flows, funding, OI, liquidations, stablecoin supply,
 retail/social activity, volume, volatility, market structure), percentile-band detection (never a raw fixed
 threshold), MAD-based magnitude, day-by-day-recomputed duration, and a fixed non-AI interpretation registry
-that structurally bans bullish/bearish/buy/sell language (ADR-0066). See the Phase 19 log entry below for
-delivery status.
+that structurally bans bullish/bearish/buy/sell language (ADR-0066). Delivered to Windows and committed as
+`737e223` — see the Phase 19 log entry below.
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -36,7 +36,7 @@ delivery status.
 | 16 | Backtesting | ✅ Complete — verified on Windows (`5333434`, delivered alongside Phases 17/18) |
 | 17 | Quant red-team | ✅ Complete — RED_TEAM_REPORT.md delivered, 15 findings, zero code changes; verified on Windows (`5333434`) |
 | 18 | Fix Quant Issues | ✅ Complete — verified on Windows (`5333434`) |
-| 19 | Anomaly engine | ✅ Complete — see Phase 19 log entry for delivery status |
+| 19 | Anomaly engine | ✅ Complete — verified on Windows (`737e223`) |
 | — | Capital rotation | ⏳ Not started |
 | — | Claude AI Analyst | ⏳ Not started |
 | — | Daily intelligence | ⏳ Not started |
@@ -1797,7 +1797,9 @@ same posture as `divergence`/`regime`/`similarity` (Phases 13–15).
 - Liquidations and volume are single-venue (OKX / Coinbase respectively) — not whole-market totals.
 - No frontend work this phase (not requested).
 
-**Delivery:** pending — see the follow-up note below once copied to the Windows machine and committed.
+**Delivery:** all 15 changed/new files copied to the Windows machine via the device bridge and read back
+byte-for-byte (sha256) to confirm an exact match before staging. Committed as `737e223` on `main`
+("[P19] Market Anomaly Engine: 13 categories, percentile bands, non-AI interpretations").
 
 **Next step:** this phase stops here per the user's own closing instruction ("Commit. Stop.") — awaiting the
 user's next instruction.
