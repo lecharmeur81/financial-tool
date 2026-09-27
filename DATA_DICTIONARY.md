@@ -937,6 +937,87 @@ owner_phase:      13 (2026-09-27)
 status:           implemented
 ```
 
+## 5j. Market Regime Engine (implemented in Phase 14)
+
+**No datasets ingested.** `cfi/regime/` reads nothing from any provider — pure computation, the same posture as
+`cfi/divergence/` (Phase 13). Every underlying value is a Calculated Metric or Statistical Signal already
+published by its own domain module (institutional, whale, retail, liquidity, derivatives, macro, market
+structure); the regime label and confidence produced here are this platform's first **Regime Classification
+(L4)**: "a labelled market state produced by a versioned model, with confidence" (R2). It is never an AI
+Interpretation (L5) and never a price forecast.
+
+**Confidence semantics (the user's explicit instruction, restated everywhere this value appears):** confidence
+measures how well *current, already-observed conditions* satisfy a regime's own definition. It is **NOT** a
+probability that price will rise or fall, and it is not a trading recommendation.
+
+### The seven regimes (`cfi/regime/parameters.py`)
+
+| Regime | Definition (summary) |
+|---|---|
+| Accumulation | Smart money (whale/institutional) building positions quietly while price is flat/declining and retail is disinterested |
+| Recovery | An early uptrend forming, confirmed by whale and institutional flow, retail still modest |
+| Expansion | A broad-based uptrend: price, breadth and institutional flow all confirming, leverage building but healthy |
+| Euphoria | Parabolic price action, retail chasing, speculative leverage extreme, structure overheated |
+| Distribution | Smart money exiting while retail remains enthusiastic, momentum quietly weakening |
+| Capitulation | Sharp forced selling: extreme derivatives stress, elevated volatility, confirmed downtrend, risk-off macro |
+| Mixed / Unclear | The classifier's own fallback — never itself a defined regime (see below) |
+
+### Classification method (`cfi/regime/classifier.py`)
+
+```
+inputs:           institutional_score, whale_score, retail_activity_score, retail_speculation_score,
+                  liquidity_score, derivatives_health, macro_score, market_structure_score, btc_trend,
+                  btc_rsi, btc_volatility_percentile, market_breadth, derivatives_liquidation_event —
+                  each read via the owning domain's own already-tested public service method
+                  (InstitutionalService.score(), WhaleService.score(), RetailService.overview(),
+                  LiquidityService.overview(), DerivativesService.asset(), MacroService.overview(),
+                  MarketStructureService.overview()) — never a raw query
+benchmark_asset:  BTC (cfi.regime.universe.BENCHMARK_ASSET) — the same "one benchmark" convention as
+                  Phases 12/13; a regime describes BTC's own conditions, not necessarily every altcoin's
+condition:        one single-metric test (comparator: gte / lte / between / categorical) with a weight;
+                  weights within one regime sum to 1; thresholds are anchored, wherever sensible, to the
+                  same numeric bands each underlying domain score already publishes (e.g. the +-15/+-50
+                  net-inflow bands, the 70/30 RSI levels, the 75%/25% breadth levels) — not fabricated
+per-regime score: confidence = matched weight / available weight, restricted to conditions whose
+                  underlying metric was "ok"; "insufficient_data" (no confidence) below
+                  min_available_weight (0.5, versioned parameter)
+decision:         the highest-confidence regime is assigned outright when its confidence is at or above
+                  min_confidence_assign (0.55) AND it leads the second-best regime by at least
+                  tie_margin (0.08); otherwise the result is "mixed_unclear", with the closest
+                  candidate(s) and the specific reason (below threshold, or a close tie) reported
+missing_policy:   a regime with too little available data is skipped entirely (never scored as if its
+                  missing conditions failed); if every regime is skipped, the result is "mixed_unclear"
+                  with status "insufficient_data"
+reproducibility:  every classification records its parameter version (regime_classifier_v1) and the full
+                  set of every regime's own candidate score, for transparency
+parameters_note:  v1 methodology / initial parameters, chosen by design and anchored to each domain
+                  score's own already-published bands where possible — not fitted to data or
+                  empirically validated (same posture as every score in this platform)
+owner_phase:      14 (2026-09-27)
+status:           implemented
+```
+
+### Regime start date, duration and historical examples (`cfi/regime/history.py`)
+
+No domain score has a persisted, ranged history of its own (the Market Structure Score gap already documented
+in Phase 12/13) — there is no stored regime-history table either. Both of the following work by **re-running
+the classifier** at past `as_of` values, two deliberately different, documented performance trade-offs:
+
+```
+regime_duration:      walks backward from as_of ONE DAY AT A TIME, re-classifying each day (knowledge_time
+                      pinned to that same day, deliberately excluding any later-ingested revision — R4),
+                      stopping as soon as the label changes or MAX_DURATION_LOOKBACK_DAYS (120) is reached
+historical_examples:  SAMPLES weekly (HISTORICAL_STEP_DAYS=7) further back than the current streak, over
+                      HISTORICAL_LOOKBACK_DAYS (365) — a coarser but far cheaper method than the daily
+                      duration walk; reports runs of the same regime spanning at least
+                      MIN_EPISODE_SAMPLES (2) consecutive weekly samples, most recent first, capped at
+                      MAX_HISTORICAL_EXAMPLES (3)
+performance_note:     when the current classification itself is "insufficient_data" (no regime could be
+                      evaluated at all), both of the above are skipped rather than repeating hundreds of
+                      redundant re-classifications on a known-empty result — duration is reported as 0 with
+                      no start date, examples as an empty list
+```
+
 ---
 
 ## 6. Metric definition template (L2)

@@ -403,6 +403,43 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
 - [ ] **Frontend page** — not built this phase (not requested; see PROGRESS.md). A natural next step once the
       user asks for it.
 
+## Phase 14 — Market Regime Engine (built 2026-09-27; see PROGRESS.md)
+
+- [x] No new ingestion; pure computation over the seven existing domain scores (institutional, whale, retail
+      activity/speculation, liquidity, derivatives health, macro, market structure) plus BTC trend/RSI/
+      volatility-percentile/market-breadth/liquidation-event readings, via `cfi.divergence.adapters.Adapters`
+      as a service factory. Seven regimes (Accumulation, Recovery, Expansion, Euphoria, Distribution,
+      Capitulation, Mixed/Unclear); confidence = matched/available condition weight, explicitly NOT a
+      price-direction probability; contributing/contradicting metrics; regime start date/duration (daily
+      backward walk) and historical examples (weekly sample). API: `/api/v1/regime/{catalog,current}`. See
+      DATA_DICTIONARY.md §5j, DECISIONS.md ADR-0057.
+- [ ] **User:** run the full test/lint/mypy suite and `docker compose up --build` on Windows — see PROGRESS.md
+      for the exact commands and expected counts. The integration suite (`test_regime_api.py`) needs
+      `CFI_DATABASE_URL`/`CFI_REDIS_URL`, unavailable in Claude's own sandbox; only the unit suite (fully
+      synthetic, no DB) has been run and verified in this environment.
+
+### Decisions needed from the user (Phase 14)
+
+- [ ] **The seven regime definitions (which conditions, which weights, which thresholds) are v1 judgment
+      parameters** — anchored to each domain score's own already-published bands where possible, but not
+      fitted to data or empirically validated. See `cfi/regime/parameters.py`, DATA_DICTIONARY.md §5j,
+      ADR-0057. Send different weights/thresholds, or a different condition set per regime, if these don't
+      match the user's own intuition for what each regime should require.
+- [ ] **Assignment thresholds** (`min_available_weight=0.5`, `min_confidence_assign=0.55`, `tie_margin=0.08`)
+      decide how readily the classifier commits to a regime vs. reporting "Mixed/Unclear." Accept these
+      defaults, or request a different sensitivity (e.g. a lower confidence floor for a more decisive but
+      less certain classifier).
+- [ ] **Regime duration walks daily (capped at 120 days); historical examples sample weekly (over 365 days)**
+      — two deliberately different, documented performance trade-offs (see ADR-0057), since re-running the
+      full seven-domain classification at every past day would be far more expensive over a long lookback.
+      Accept this approach, or ask for a persisted regime-history table in a later phase so both could work
+      from stored history instead of live re-classification.
+- [ ] **Regime conditions are evaluated only for BTC** (`cfi.regime.universe.BENCHMARK_ASSET`), the same
+      "one benchmark" convention as Phases 12/13. A regime here describes BTC's own conditions, not
+      necessarily every altcoin's. Accept this scope, or ask for a per-asset regime classification later.
+- [ ] **Frontend page** — not built this phase (not requested; see PROGRESS.md). A natural next step once the
+      user asks for it.
+
 ## Deferred (to the phase that needs them)
 
 - [x] Scheduling: Celery workers/beat (ADR-0023) — implemented in Phase 5. `dataset_updated` events still to do.

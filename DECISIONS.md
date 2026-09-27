@@ -1688,3 +1688,103 @@ in Phases 11/12); they deliberately do not additionally re-seed institutional/wh
 fixtures, since those domains' own integration suites already cover ingestion and every divergence adapter
 reading them is unit-tested against synthetic series — a documented scope decision, not an oversight. Frontend
 work was not part of the Phase 13 request as given and was not built.
+
+---
+
+## ADR-0057 — Phase 14: Market Regime Engine — seven rule-based regimes, confidence-as-definition-fit,
+duration by daily walk vs. historical examples by weekly sample
+
+**Status:** Accepted (implemented 2026-09-27)
+
+**Context.** The user's Phase 14 instruction asked for a Market Regime Engine classifying the market into one
+of seven regimes (Accumulation, Recovery, Expansion, Euphoria, Distribution, Capitulation, Mixed/Unclear) using
+measurable inputs from institutional flows, whale behaviour, retail activity, liquidity, derivatives, macro and
+market structure — explainable, with confidence, contributing metrics, contradicting metrics, historical
+examples, regime start date and regime duration. Confidence was explicitly defined by the user as "confidence
+that the market satisfies the regime definition," **not** a probability that price will rise or fall.
+
+**Decision — a pure computation module, no ingestion of its own, reusing `cfi.divergence.adapters.Adapters` as
+a cross-module service factory.** `cfi/regime/` follows the exact "no-ingestion" posture established by
+`market_structure` (Phase 12) and `divergence` (Phase 13): it ingests nothing. Rather than re-implementing each
+domain's `*Service(queries)` construction, `cfi.regime.snapshot.gather_snapshot` reuses
+`cfi.divergence.adapters.Adapters(engine)` as a plain service factory (`.institutional()`, `.whales()`,
+`.retail()`, `.liquidity()`, `.derivatives()`, `.market_structure()`), calling each domain's own already-tested
+public method (`score()`/`overview()`/`asset()`) exactly the way `cfi.whales.service._institutional` already
+calls `InstitutionalService.score()` and re-parses its string-encoded `"value"` field back into a `Decimal` —
+a pre-existing, direct precedent for this exact conversion, not a new pattern invented for this phase. Macro is
+the one exception: `Adapters.macro()` returns a raw `MacroQueries` object (divergence's own documented
+exception, since it recomputes net liquidity directly), so `cfi.regime.snapshot` constructs a `MacroService`
+directly from that same `MacroQueries` rather than misusing `Adapters.macro()` for something it was not built
+to provide.
+
+**Decision — confidence is (matched weight) / (available weight) among a regime's own conditions, never a
+price-direction probability.** Each of the six substantive regimes (`mixed_unclear` is the classifier's own
+fallback, never itself a defined regime — see below) is a named set of single-metric conditions
+(`cfi.regime.parameters.ConditionDef`): a comparator (`gte`/`lte`/`between`/`categorical`), a threshold, and a
+weight; weights within one regime sum to 1. A condition whose underlying metric is not `"ok"` is excluded from
+both the numerator and denominator (never scored as "failed") — a regime with too little available data across
+its own conditions (`available_weight < min_available_weight`, 0.5) is not scored at all
+(`status="insufficient_data"`), rather than being assigned a low but misleadingly precise confidence. Every
+response carries a fixed `confidence_semantic_note` restating the user's own definition verbatim, so no reader
+mistakes a high regime confidence for a bullish/bearish price call.
+
+**Decision — thresholds are anchored to each domain score's own already-published bands, not fabricated fresh
+numbers.** Where a regime condition tests a domain score (institutional/whale/liquidity/macro/market-structure
+±15/±50, retail activity 40/60/80, derivatives health 25/50/75), the exact same threshold that score's own
+`bands` tuple already uses is reused — e.g. "whale accumulating" tests `whale_score >= 15`, the identical
+number `whales/score.py`'s own band table calls "accumulation." This keeps the regime engine's judgment
+parameters consistent with, and traceable to, decisions the platform has already published and documented,
+rather than inventing a second, uncoordinated threshold for the same underlying concept. RSI 70/30 and market
+breadth 75%/25% are reused from `market_structure`'s own parameters the same way.
+
+**Decision — assignment requires both a confidence floor and a clear lead over the runner-up; anything short of
+that is "mixed_unclear," reported with the specific reason.** A regime is assigned outright only when its
+confidence is at or above `min_confidence_assign` (0.55) **and** it leads the second-best regime by at least
+`tie_margin` (0.08). Falling short of either produces `mixed_unclear` — never an arbitrary tie-break — with the
+top candidate(s) and a plain-language reason (a close tie between two named regimes, or the closest match's own
+confidence falling below the threshold) attached, so "mixed/unclear" is itself explainable rather than a silent
+failure mode. Every regime's own candidate score (not just the winner's) is returned for full transparency.
+
+**Decision — regime duration is a daily backward walk; historical examples are a coarser weekly sample — two
+deliberately different, documented performance trade-offs, not an oversight.** No domain score has a
+persisted, ranged history of its own (the Market Structure Score gap already documented in Phase 12/13; the
+same gap applies to every other domain score here), and there is no stored regime-history table. `regime
+duration` therefore walks backward from `as_of` one day at a time, re-classifying each day, until the label
+changes or a cap (`MAX_DURATION_LOOKBACK_DAYS`, 120) is reached — usually a short walk in practice, since most
+regimes do not persist anywhere near the cap, but capped conservatively because each day re-runs the full
+seven-domain classification. `historical_examples` instead samples weekly
+(`HISTORICAL_STEP_DAYS=7`) over a much longer lookback (`HISTORICAL_LOOKBACK_DAYS=365`) further back than the
+current streak — intentionally coarser and cheaper, since finding *a* prior similar episode does not need
+day-level precision the way "how long has this held" does. Each historical `as_of` is classified with
+`knowledge_time` pinned to that same instant, deliberately excluding any later-ingested data revision from
+leaking into a historical read (R4). As a further, documented performance short-circuit: when the *current*
+classification itself is `"insufficient_data"` (no regime could be evaluated at all — e.g. an empty database),
+both the duration walk and the historical sample are skipped outright, since they would only rediscover the
+same empty result at every prior point checked; duration is reported as 0 with no start date, and the examples
+list is empty.
+
+**Alternatives considered.** Building a weighted composite "regime score" the way every prior phase's score
+works (rejected: R2 explicitly defines a Regime Classification as a *label with confidence*, a different kind
+of output from a continuous −100…+100 score — the seven domain scores are themselves already that kind of
+value and are consumed as inputs here, not duplicated). Re-deriving each domain's own construction
+(`*Service(*Queries(engine))`) independently instead of reusing `cfi.divergence.adapters.Adapters` (rejected:
+would duplicate already-tested, already-reviewed construction code for no benefit — `Adapters` was designed as
+a generic per-domain service factory and this is a natural, low-risk second use of it). Walking every single
+day for `historical_examples` the same way `regime_duration` does (rejected: over a full year that is roughly
+7x more re-classification work for a feature that does not need day-level precision — a documented, deliberate
+trade-off, not a shortcut taken silently). Assigning a regime purely on "highest confidence, no threshold or
+tie check" (rejected: would produce a confident-sounding label even when nothing is clearly indicated, directly
+contradicting R1's "never present uncertain inference as fact").
+
+**Consequences.** No new database migration (the engine has zero storage of its own). New API surface:
+`/api/v1/regime/{catalog,current}`, registered in `cfi/api/app.py` alongside every other domain router. Unit
+tests cover `cfi.regime.parameters` (registry completeness, weights summing to 1, hard `KeyError` on an unknown
+version), `cfi.regime.classifier` (condition evaluation for every comparator, insufficient-data handling,
+regime selection, both mixed_unclear paths — a close tie and a below-threshold best candidate), `cfi.regime.
+history` (duration counting/capping, historical-example sampling) and `cfi.regime.snapshot`'s pure parsing
+helpers — all against fully synthetic data, no database required. Integration tests (DB-gated) cover the
+catalog's shape and the empty-database `"insufficient_data"`/`mixed_unclear` path through the real API; a fully
+"ok" classification needs all seven domains populated at once, each of which already has its own integration
+suite proving its own ingestion/scoring pipeline, so re-seeding all seven here was deliberately scoped out
+rather than duplicating that coverage (documented, not silently narrowed). Frontend work was not part of the
+Phase 14 request as given and was not built.

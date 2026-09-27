@@ -22,6 +22,7 @@ from cfi.api.routes import (
     market,
     market_structure,
     meta,
+    regime,
     retail,
     whales,
 )
@@ -104,4 +105,5 @@ def create_app(
     app.include_router(macro.router)
     app.include_router(market_structure.router)
     app.include_router(divergence.router)
+    app.include_router(regime.router)
     return app

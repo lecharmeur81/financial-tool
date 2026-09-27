@@ -2,7 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 13 — Capital Flow Divergence Engine → ✅ complete and verified on Windows (commit `6cd6578`)
+**Current phase:** 14 — Market Regime Engine → implemented and self-verified in Claude's sandbox (unit tests,
+ruff, mypy all clean); delivery to the Windows machine and the user's full-suite run/commit are next.
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -25,7 +26,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | 11 | Macro | ✅ Complete (backend only, as requested) — fully verified on Windows (`eb5e386`); first real FRED run needs `CFI_PROVIDER_FRED_API_KEY` |
 | 12 | Market structure | ✅ Complete (backend only, as requested) — fully verified on Windows (`4b4a21e`); first real CoinGecko `/global` run needs a network that can reach it |
 | 13 | Divergence engine | ✅ Complete (backend only, as requested) — fully verified on Windows (`6cd6578`) |
-| — | Regime engine | ⏳ Not started |
+| 14 | Regime engine | 🟡 Implemented, self-verified in sandbox — awaiting delivery + the user's full-suite run and commit |
 | — | Historical similarity | ⏳ Not started |
 | — | Backtesting | ⏳ Not started |
 | — | Quant red-team | ⏳ Not started |
@@ -41,7 +42,7 @@ Single source of truth for what has been done. Updated at the end of every task.
 | — | Production | ⏳ Not started |
 | — | Real-time intelligence | ⏳ Not started |
 
-Phases 0–13 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
+Phases 0–14 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
 
 ---
 
@@ -1200,4 +1201,111 @@ byte-for-byte (SHA-256, 0 mismatches) before the user ran anything.
 Phase 13 is therefore fully verified end-to-end on the development machine, not just in the scratch environment
 here. No outstanding verification gap remains (the integration-suite database-gated skips are the same
 recurring, expected gap as every prior phase, closed only when the user runs against a live Postgres instance).
+
+### 2026-09-27 — Phase 14: Market Regime Engine, seven rule-based regimes, explainable confidence
+
+**What changed** (ADR-0057; user's exact spec: "PHASE 14 — MARKET REGIME ENGINE: Build a Market Regime Engine.
+Possible regimes: Accumulation, Recovery, Expansion, Euphoria, Distribution, Capitulation, Mixed/Unclear. Use
+measurable inputs from: institutional flows, whale behavior, retail activity, liquidity, derivatives, macro,
+market structure. The classification must be explainable. For every regime output: current regime, confidence
+in classification, contributing metrics, contradicting metrics, historical examples, regime start date, regime
+duration. Important: Confidence means confidence that the market satisfies the regime definition. It does NOT
+mean probability that price will rise or fall. Create historical regime detection tests. Commit. Stop.")
+
+- **Research first** (delegated subagent survey across all 8 existing domain modules — R3/R7): confirmed exact
+  method signatures for every domain's score/overview endpoint, confirmed no "regime" classifier existed
+  anywhere in the codebase yet (a clean-slate build), confirmed the established versioned-parameter-set pattern
+  (`*/score_parameters.py`) to follow, and confirmed `cfi.divergence.adapters.Adapters` already provides a
+  ready-made per-domain service factory directly reusable here.
+- **New `backend/src/cfi/regime/` package — ingests nothing of its own** (no `sources.py`, no `jobs.py`, no
+  worker/schedule changes, no new provider settings): `universe.py` (benchmark asset, assignment/duration/
+  historical-sampling parameters, `NOT_TRACKED`), `parameters.py` (the versioned `regime_classifier_v1`
+  parameter set: six `RegimeDefinition`s, each a set of single-metric `ConditionDef`s with a comparator,
+  threshold and weight — weights within one regime sum to 1, and thresholds are anchored to each domain
+  score's own already-published bands for consistency), `snapshot.py` (`gather_snapshot`: fetches every input
+  via each domain's own already-tested public service method, reusing `cfi.divergence.adapters.Adapters` as a
+  service factory), `classifier.py` (condition evaluation, per-regime confidence = matched/available weight,
+  the assignment-threshold-and-tie-margin decision, the `mixed_unclear` fallback with its own explicit reason),
+  `history.py` (`regime_duration`: a daily backward walk; `historical_examples`: a weekly sample over a longer
+  lookback — two deliberately different, documented performance trade-offs), `service.py` (`RegimeService`:
+  `catalog()`, `current()`).
+- **API:** new router `backend/src/cfi/api/routes/regime.py` — `/api/v1/regime/{catalog,current}`, registered
+  in `api/app.py`, mirroring every other domain router's `_service(request)`/`_times()` pattern exactly.
+- **Confidence semantics, restated everywhere (the user's explicit instruction):** every response carrying a
+  confidence value also carries a fixed `confidence_semantic_note` stating plainly that confidence measures how
+  well current conditions satisfy the regime's own definition — never a probability that price will rise or
+  fall, never a trading recommendation.
+- **Scope decisions, each recorded transparently, not silently narrowed (see ADR-0057/TODO.md):** regime
+  conditions are evaluated only for BTC (the same "one benchmark" convention as Phases 12/13); the seven regime
+  definitions are v1 judgment parameters, not fitted to data; regime duration walks daily (capped at 120 days)
+  while historical examples sample weekly (over 365 days) — two intentionally different costs for two
+  genuinely different questions; when the current classification is itself `"insufficient_data"`, the duration
+  walk and historical sample are both skipped as a documented performance short-circuit rather than repeating a
+  known-empty result hundreds of times.
+- **Frontend: not built.** Not requested for this phase (matching every prior backend-only phase's own scope
+  decision).
+- **Docs:** ADR-0057, DATA_DICTIONARY.md §5j, TODO.md Phase 14 section, this log entry.
+
+**Tests run (Claude's scratch environment: Python 3.12, no local PostgreSQL/Redis — see below)**
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_regime_parameters.py`, `test_regime_classifier.py`, `test_regime_history.py`, `test_regime_snapshot.py` | 22 new tests, all passed, fully synthetic (no DB) |
+| New integration tests: `test_regime_api.py` (written against a real PostgreSQL harness, same pattern as every prior phase; deliberately scoped to the catalog's shape and the empty-database path — a fully "ok" classification needs all seven domains populated at once, each already covered by its own phase's integration suite) | 2 new tests — not executed here (no local `CFI_DATABASE_URL`/`CFI_REDIS_URL` in this workspace; will run on the user's Windows machine) |
+| Backend `uv run pytest -q` (whole suite, unit-only in this workspace) | **591 passed, 162 skipped, 0 failed** in 2.17s |
+| `uv run ruff check .` | all checks passed |
+| `uv run ruff format --check .` | 252 files already formatted |
+| `uv run mypy` (strict, whole backend) | Success: no issues found in 247 source files |
+
+**Bugs found and fixed during this phase's own test run** (first time any of this code executed — R7):
+- `snapshot.py`'s volatility-percentile extraction originally computed an `unavailable`-vs-`ok` boolean in a
+  separate variable, then branched on it in a ternary — `mypy` could not narrow the underlying `dict`-typed
+  `volatility` value to non-`None` across that indirection (the same class of Optional-narrowing gap seen in
+  Phase 12/13's own `rolling_vwap`/`_asof` fixes). Fixed by splitting into an explicit `if`/`elif`/`else`
+  statement (which mypy does narrow correctly), with a `# noqa: SIM114` and an inline comment explaining why the
+  two "unavailable" branches are deliberately not merged.
+- A `mypy` "Item 'None' of 'Any | None' has no attribute 'get'" error on the same field, for the same root
+  cause, resolved by the same fix.
+- Several `E501` (line too long) violations across `snapshot.py`, `classifier.py` and the new test files, and
+  one `PT018` (compound assertion) in a test — all fixed; no production behavior changed by any of these except
+  the two real narrowing-related code-shape fixes above (no behavioral change, purely how mypy could verify it).
+
+Covered by tests: `cfi.regime.parameters` (exactly six substantive regimes defined, `mixed_unclear` is never
+itself one of them, every regime's condition weights sum to exactly 1, every condition has a valid threshold or
+expected set for its comparator, hard `KeyError` on an unknown parameter version); `cfi.regime.classifier`
+(every comparator — gte/lte/between/categorical — matches and fails correctly, unavailable-metric handling,
+`insufficient_data` below the minimum available weight, confidence = matched/available weight, a full
+end-to-end classification correctly picking "accumulation" from a synthetic snapshot built to satisfy exactly
+its own six conditions, `mixed_unclear` on a close tie between two candidates, `mixed_unclear` when the best
+candidate falls below the assignment threshold, `mixed_unclear` with `insufficient_data` when nothing is
+available at all); `cfi.regime.history` (duration counting consecutive matching days, capping at the max
+lookback, being exactly 1 when the very next day already differs, historical-example sampling finding a prior
+matching run above the minimum episode length, returning no episodes when nothing matches); `cfi.regime.
+snapshot`'s pure parsing helpers (`_decimal`, `_score_reading` across ok/insufficient/unavailable/missing
+status); the integration suite (catalog shape with all seven regime ids and six defined regimes each summing to
+weight 1, the empty-database path returning `mixed_unclear`/`insufficient_data` with zero duration and no
+historical examples) collects cleanly and is ready for the user's database-backed run.
+
+**Known limitations**
+- The new integration tests (`test_regime_api.py`) were written and confirmed to collect cleanly, but have not
+  been executed against a real PostgreSQL instance in this workspace (none is running here) — the user's run on
+  Windows is the real verification, same pattern as every prior phase's first Windows run. A fully "ok"
+  classification (all seven domains populated) is not separately re-tested here — each domain's own integration
+  suite already proves its own ingestion/scoring pipeline, and the classifier's decision logic is fully
+  unit-tested against synthetic snapshots.
+- The seven regime definitions (conditions, weights, thresholds) and the assignment thresholds
+  (`min_available_weight`, `min_confidence_assign`, `tie_margin`) are v1 judgment parameters awaiting the user's
+  explicit review (TODO.md), same posture as every score/parameter set in this platform.
+- Regime duration and historical examples are computed by live re-classification (a daily walk, capped at 120
+  days; a weekly sample over 365 days) rather than a stored regime-history table — documented performance
+  trade-offs, not silently narrowed.
+- Regime conditions are evaluated only for BTC (the platform's established benchmark asset) — not a per-asset
+  regime classification.
+- No frontend page — out of scope for this phase as instructed.
+
+**Next step:** deliver the new/modified files to the user's Windows machine via the device bridge (checksum-
+verified), then the user runs `uv sync`, `uv run pytest -q`, `uv run ruff check .`, `uv run ruff format --check
+.`, `uv run mypy` and commits from `E:\FINANCIAL TOOL\backend` (Git runs there — C5); this section will be
+updated with the resulting commit hash and verification transcript once the user reports back, following the
+exact pattern of every prior phase.
 
