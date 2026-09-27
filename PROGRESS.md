@@ -5,7 +5,8 @@ Single source of truth for what has been done. Updated at the end of every task.
 **Current phase:** 18 — Fix Quant Issues → implemented, fully self-verified (unit + integration tests against
 a real PostgreSQL/TimescaleDB instance, ruff, mypy all clean). 13 of RED_TEAM_REPORT.md's 15 findings
 corrected (ADR-0060–ADR-0064); findings #10 and #15 documented as deferred, no code change (ADR-0065), per
-the report's own guidance. Awaiting delivery to Windows and commit.
+the report's own guidance. Delivered to Windows and committed alongside Phases 16 and 17 (neither had reached
+the real repository before now) as `5333434` — see the Phase 18 log entry below.
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -30,9 +31,9 @@ the report's own guidance. Awaiting delivery to Windows and commit.
 | 13 | Divergence engine | ✅ Complete (backend only, as requested) — fully verified on Windows (`6cd6578`) |
 | 14 | Regime engine | ✅ Complete (backend only, as requested) — fully verified on Windows (`42bd2b0`) |
 | 15 | Historical similarity | ✅ Complete (backend only, as requested) — fully verified on Windows (`9ec74ac`) |
-| 16 | Backtesting | 🟡 Implemented, fully self-verified in sandbox (incl. real-DB integration tests) — pending delivery/commit alongside Phase 18's fixes |
-| 17 | Quant red-team | ✅ Complete — RED_TEAM_REPORT.md delivered, 15 findings, zero code changes (review-only phase) |
-| 18 | Fix Quant Issues | ✅ Implemented, fully self-verified in sandbox (incl. real-DB integration tests) — pending delivery/commit |
+| 16 | Backtesting | ✅ Complete — verified on Windows (`5333434`, delivered alongside Phases 17/18) |
+| 17 | Quant red-team | ✅ Complete — RED_TEAM_REPORT.md delivered, 15 findings, zero code changes; verified on Windows (`5333434`) |
+| 18 | Fix Quant Issues | ✅ Complete — verified on Windows (`5333434`) |
 | — | Anomaly engine | ⏳ Not started |
 | — | Capital rotation | ⏳ Not started |
 | — | Claude AI Analyst | ⏳ Not started |
@@ -1733,7 +1734,13 @@ domains persist their parameter sets to the database.
   RED_TEAM_REPORT.md findings, not to build Phase 16's deferred persistence/API surface.
 - No frontend work this phase (not requested).
 
-**Next step:** deliver Phase 16, 17 and 18's work (backtest engine, red-team report, and this phase's fixes —
-none of which have yet reached the Windows machine's real git repository) and commit there, per this phase's
-closing instruction. Then stop and await the user's next instruction.
+**Delivery:** all 60 changed/new files copied to the Windows machine via the device bridge and read back
+byte-for-byte (sha256) to confirm an exact match before staging. Committed as `5333434` on `main`
+("[P16-P18] Backtesting Engine, Quant Red-Team Review, Fix Quant Issues" — bundling all three phases in one
+commit since none had previously reached this repository, rather than fabricating a false incremental
+history this session cannot actually reconstruct). 59 files changed (9 new under `cfi/backtest/`, `RED_TEAM_REPORT.md`
+new, `test_regime_parameters.py` untouched — already identical).
+
+**Next step:** this phase stops here per the user's own closing instruction ("Commit. Stop.") — awaiting the
+user's next instruction.
 
