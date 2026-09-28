@@ -36,7 +36,7 @@ from cfi.macro.universe import (
 )
 from cfi.market.queries import MarketQueries
 from cfi.market.sources import VENUES
-from cfi.market.universe import ASSET_SYMBOLS, ohlcv_dataset_id
+from cfi.market.universe import ASSET_SYMBOLS, MARKET_CAP_USD_1D, ohlcv_dataset_id
 from cfi.market_structure import metrics as market_structure_metrics
 from cfi.market_structure.queries import MarketStructureQueries
 from cfi.market_structure.service import MarketStructureService
@@ -459,3 +459,37 @@ class Adapters:
         bars = market_structure_metrics.bars_from_rows(rows)
         series = market_structure_metrics.realized_volatility_series(bars)
         return [SeriesPoint(t, v, "ok") for t, v in series]
+
+    # ------------------------------------------------------------------ per-asset market cap
+    # (Phase 20 — Capital Rotation Engine: ranged per-asset market capitalization, distinct from
+    # ``total_market_cap``'s single global TOTAL series. Read directly via ``DerivativesQueries``
+    # (a generic dataset/asset-keyed observation reader, already imported and reused for
+    # ``liquidations_total`` — same precedent, no new query class needed) rather than through
+    # ``MarketStructureService.history()``, whose ``series`` parameter only accepts
+    # ``"total_market_cap"`` — an API-facing restriction, not a query-layer limitation.)
+
+    async def asset_market_cap(
+        self, asset: str, as_of: datetime, knowledge_time: datetime
+    ) -> Series:
+        """Daily market capitalization in USD for one tracked asset (CoinGecko's per-asset daily
+        chart, ``MARKET_CAP_USD_1D`` — genuinely backfillable history, unlike the live-snapshot-only
+        ``MARKET_CAP_USD``)."""
+        if asset not in ASSET_SYMBOLS:
+            return []
+        dq = DerivativesQueries(self.engine)
+        start, end = as_of - timedelta(days=LOAD_SPAN_DAYS), as_of + timedelta(seconds=1)
+        rows = await dq.observations(
+            MARKET_CAP_USD_1D.dataset_id,
+            asset=asset,
+            start=start,
+            end=end,
+            as_of=as_of,
+            knowledge_time=knowledge_time,
+        )
+        return [
+            SeriesPoint(
+                _dt(r["event_time"]), _decimal(r.get("value")), r.get("quality_status", "ok")
+            )
+            for r in rows
+            if r.get("value") is not None
+        ]

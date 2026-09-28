@@ -37,7 +37,7 @@ that structurally bans bullish/bearish/buy/sell language (ADR-0066). Delivered t
 | 17 | Quant red-team | ✅ Complete — RED_TEAM_REPORT.md delivered, 15 findings, zero code changes; verified on Windows (`5333434`) |
 | 18 | Fix Quant Issues | ✅ Complete — verified on Windows (`5333434`) |
 | 19 | Anomaly engine | ✅ Complete — verified on Windows (`737e223`) |
-| — | Capital rotation | ⏳ Not started |
+| 20 | Capital rotation | ✅ Complete — see the Phase 20 log entry below for delivery status |
 | — | Claude AI Analyst | ⏳ Not started |
 | — | Daily intelligence | ⏳ Not started |
 | — | Alerts | ⏳ Not started |
@@ -1800,6 +1800,75 @@ same posture as `divergence`/`regime`/`similarity` (Phases 13–15).
 **Delivery:** all 15 changed/new files copied to the Windows machine via the device bridge and read back
 byte-for-byte (sha256) to confirm an exact match before staging. Committed as `737e223` on `main`
 ("[P19] Market Anomaly Engine: 13 categories, percentile bands, non-AI interpretations").
+
+**Next step:** this phase stops here per the user's own closing instruction ("Commit. Stop.") — awaiting the
+user's next instruction.
+
+### 2026-09-28 — Phase 20: Capital Rotation Engine — 10 requested categories, genuine-TOTAL market share, flow corroboration
+
+**What changed** (ADR-0067; user's exact spec: "PHASE 20 — CAPITAL ROTATION: Build the Capital Rotation
+Engine. Analyze relative behavior across: BTC, ETH, SOL, major assets, large caps, mid caps, DeFi, AI-related
+assets, meme assets, stablecoins. Track: relative performance, volume, liquidity, market share, dominance,
+flows where available. Distinguish OBSERVED CAPITAL FLOW from INFERRED CAPITAL ROTATION. Never claim that
+capital moved from Asset A to Asset B solely because Asset B increased while Asset A decreased. Provide the
+evidence supporting each inferred rotation. Build tests. Commit. Stop.").
+
+- New package `cfi/rotation/` (`universe.py` — the 12-node registry covering all 10 requested categories,
+  versioned `ROTATION_PARAMETERS_V1`, `EXCLUDED_PAIRS`, `INFORMATIONAL_ONLY`, `NOT_TRACKED`; `metrics.py` —
+  pure functions: `share_series`, `sum_series` (both as-of joins), `flow_corroboration`; `service.py` —
+  `RotationService`, orchestrating `cfi.divergence.adapters.Adapters` plus Phase 13's own
+  `cfi.divergence.capital_flow_map.NodeDef`/`classify_edge`, reused unchanged).
+- 1 new `Adapters` method (`asset_market_cap`) — the first RANGED per-asset market-cap history in this
+  platform (CoinGecko's `/market_chart`, `MARKET_CAP_USD_1D`), read directly via `DerivativesQueries` to
+  bypass `MarketStructureService.history()`'s `series`-parameter restriction (same precedent as Phase 19's
+  `liquidations_total`).
+- New API routes `GET /api/v1/rotation/{catalog,pair,matrix}` (`cfi/api/routes/rotation.py`, wired into
+  `cfi/api/app.py`), using `resolve_query_times` (ADR-0060) like every other point-in-time route.
+- **Design flaw caught and fixed before the service layer was written**: an early draft's market-share
+  denominator was the sum of the platform's own 4 tracked assets, making `large_caps_share` degenerate to
+  always exactly 100%. Corrected to the genuine global CoinGecko TOTAL crypto market cap (the same denominator
+  Phase 12's own BTC/ETH dominance already uses) — `test_large_caps_share_is_never_degenerately_100_percent`
+  is a standing regression test.
+- `EXCLUDED_PAIRS`: pairs where one node is a strict aggregate of the other (`large_caps` vs. its own
+  BTC/ETH/SOL/XRP components; `stablecoins_total` vs. its own USDT/USDC components) are excluded from
+  `/matrix` and rejected (404) by `/pair` — comparing a whole to its own part would manufacture a "rotation"
+  out of arithmetic identity, never an independent observation.
+- `flow_corroboration` (new, `cfi/rotation/metrics.py`) is the evidence the user explicitly asked for: each
+  node's own OBSERVED institutional ETF / whale exchange net flow is checked against its own share direction
+  — same direction supports the inferred-rotation hypothesis, opposite direction contradicts it, no flow data
+  tracked reports `not_applicable`. Never claims the flow caused the share move.
+- Full design rationale (node/edge reuse, the denominator fix, the new adapter, `EXCLUDED_PAIRS`, the
+  flow-corroboration design, the matrix-eligibility scope decision) in ADR-0067.
+
+**Database changes:** none — every reading is computed live at read time from already-ingested data, the
+same posture as `divergence`/`anomaly`/`regime`/`similarity`.
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_rotation_universe.py` (10), `test_rotation_metrics.py` (14) — every expected value hand-computed in the test's own comments, including the large-caps-share-not-100%-degenerate structural check | all pass |
+| New integration tests: `test_rotation_api.py` (9) — catalog (12 nodes, excluded pairs), empty-database `insufficient_data` path, untracked-node disclosure, unknown-node/same-node/excluded-pair validation (404), seeded-market-cap `ok` path with real computed shares, the large-caps-share degeneracy regression, and matrix exclusion of forbidden pairs and `meme_assets` | all pass against a real PostgreSQL/TimescaleDB instance |
+| One test-environment bug found and fixed while writing the integration suite (not a platform bug): a hard-coded future-dated `as_of` (2026-10-05) exceeded the sandbox's real wall-clock "now" (2026-09-27), so `resolve_query_times`'s "never look beyond now" clamp (ADR-0060, by design) silently reset it to the actual present, misaligning the query window against the harness's seeded data | fixed by picking a fixed `as_of` safely in the real past, independent of the harnesses' own fake clocks |
+| Backend `uv run pytest -q` (whole suite: unit + integration, real `CFI_DATABASE_URL`/`CFI_REDIS_URL`) | **942 passed** |
+| `uv run ruff check .` (whole backend) | All checks passed! |
+| `uv run ruff format --check .` (whole backend) | 301 files already formatted |
+| `uv run mypy` (strict, whole backend) | Success: no issues found in 296 source files |
+
+**Known limitations**
+- Mid-cap/DeFi/AI-related assets have no tracked universe at all (genuinely not fabricated, R3) — disclosed in
+  `NOT_TRACKED`, and excluded from the pairwise `/matrix` scan (a node with no data can only ever classify to
+  `"unavailable"`, so including it would only add guaranteed-empty rows); `/pair` still accepts such a node
+  directly and reports its own disclosed status.
+- Meme assets keep Phase 13's retail-ATTENTION-proxy design (never a capital-flow or market-share measure) and
+  are likewise excluded from the matrix.
+- "Large caps" means only this platform's own 4-asset universe (BTC/ETH/SOL/XRP), not a broad large-cap index.
+- `flow_corroboration` only has institutional/whale flow data for BTC/ETH/SOL/XRP (ETF) and BTC/ETH (whale) —
+  stablecoin-share nodes and the untracked mid-cap/DeFi/AI-related nodes report `not_applicable`.
+- Stablecoin exchange balances/flows remain outside this platform's scope (`cfi.liquidity.universe`'s own
+  pre-existing limit).
+- No frontend work this phase (not requested).
+
+**Delivery:** pending this same task's remaining steps (Windows verification run and Git commit); this
+paragraph will be corrected with the final commit hash once that completes.
 
 **Next step:** this phase stops here per the user's own closing instruction ("Commit. Stop.") — awaiting the
 user's next instruction.

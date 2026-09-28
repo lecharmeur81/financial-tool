@@ -25,6 +25,7 @@ from cfi.api.routes import (
     meta,
     regime,
     retail,
+    rotation,
     similarity,
     whales,
 )
@@ -110,4 +111,5 @@ def create_app(
     app.include_router(regime.router)
     app.include_router(similarity.router)
     app.include_router(anomaly.router)
+    app.include_router(rotation.router)
     return app

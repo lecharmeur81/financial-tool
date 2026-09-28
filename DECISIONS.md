@@ -2343,3 +2343,90 @@ bullish/bearish-language-ban paths). `NOT_TRACKED` documents every scope limit: 
 feed, treasury purchases are BTC-only accumulation events, liquidations and volume are single-venue (OKX /
 Coinbase respectively), social/retail activity are attention/activity proxies, and market structure is TOTAL
 market cap only (the pre-existing Phase 12 ranged-history gap).
+
+## ADR-0067 — Phase 20: Capital Rotation Engine — a genuine global TOTAL-market-cap denominator,
+`classify_edge`/`NodeDef` reuse, and OBSERVED-flow corroboration of INFERRED rotation
+
+**Status:** Accepted (implemented 2026-09-28)
+
+**Context.** The user's Phase 20 instruction asked for relative-behavior analysis across BTC, ETH, SOL, major
+assets, large caps, mid caps, DeFi, AI-related assets, meme assets, and stablecoins — tracking relative
+performance, volume, liquidity, market share, dominance, and flows where available — while explicitly
+distinguishing OBSERVED CAPITAL FLOW from INFERRED CAPITAL ROTATION and never claiming "that capital moved
+from Asset A to Asset B solely because Asset B increased while Asset A decreased," with evidence supporting
+each inferred rotation.
+
+**Decision.**
+
+1. **Reuse Phase 13's node/edge types unchanged, rather than inventing a parallel abstraction (R13).**
+   `cfi.divergence.capital_flow_map.NodeDef`, `RotationEdge` and `classify_edge` already implement exactly the
+   hedge discipline the user is asking for: `classify_edge` only ever returns `"possible_rotation"` (never a
+   bare "rotation happened" claim), always with `evidence_class: "inferred"` and wording that says "consistent
+   with (but not proof of) capital rotating... No transfer between these is directly observed." Phase 20's own
+   `cfi.rotation` package supplies a new node registry (`cfi.rotation.universe.NODES`, 12 nodes covering all 10
+   requested categories — `major assets`/`large caps` both map onto this platform's tracked 4-asset universe,
+   BTC/ETH/SOL/XRP) built from that same `NodeDef` type, and reuses `classify_edge` verbatim.
+
+2. **A genuine global TOTAL crypto market cap denominator, not the sum of the platform's own 4 tracked
+   assets.** An early draft of `cfi.rotation.universe` described each asset's "share" as its market cap divided
+   by "TOTAL tracked crypto market cap (BTC+ETH+SOL+XRP)" — the sum of the same 4 assets used as the
+   denominator. Caught before the service layer was written: this makes `large_caps_share` a circular,
+   degenerate metric, always exactly 100%, since `large_caps` IS defined as that same sum. The final design
+   uses `cfi.divergence.adapters.Adapters.total_market_cap` — the genuine CoinGecko global TOTAL, the same
+   denominator Phase 12's own BTC/ETH dominance figures already use — for every `asset_share` and
+   `large_caps_share` reading, so a real "untracked share" of the global total is left over and disclosed
+   (`NOT_TRACKED`'s `untracked_share_pct` note), never hidden inside a self-referential 100%.
+   `test_large_caps_share_is_never_degenerately_100_percent` is a standing regression test for this.
+
+3. **A new adapter, `Adapters.asset_market_cap`**, is the first ranged (not single-snapshot) per-asset market
+   cap history anywhere in this platform — CoinGecko's `/coins/{id}/market_chart` (`MARKET_CAP_USD_1D`,
+   distinct from the live-snapshot-only `MARKET_CAP_USD` Phase 12 already used), read directly via
+   `DerivativesQueries.observations()` to bypass `MarketStructureService.history()`'s `series` parameter,
+   which only accepts `"total_market_cap"` — the same "read the Queries layer directly, an API-facing
+   restriction is not a query-layer limitation" precedent already used for `liquidations_total` (Phase 19) and
+   whale transfers (Phase 7).
+
+4. **`cfi.rotation.metrics.share_series`/`sum_series`** are the only two genuinely new pure functions: an
+   as-of join turning two raw value series into a market-share-percent series, and an as-of join summing
+   several raw series (used to build the `large_caps` aggregate's own numerator). Everything downstream —
+   window direction, magnitude, historical percentile, duration, historical examples — reuses
+   `cfi.divergence.metrics` unchanged, exactly as Phase 19 reused it for anomaly detection.
+
+5. **`EXCLUDED_PAIRS`**: pairs where one node is a strict aggregate of the other (`large_caps` vs. each of its
+   own BTC/ETH/SOL/XRP components; `stablecoins_total` vs. each of its own USDT/USDC components) are excluded
+   from the pairwise rotation matrix and from `/pair` (404). Comparing a whole to its own part would
+   manufacture a "rotation" out of arithmetic identity, never an independent observation — a stronger
+   violation of R1's "never treat correlation as causation" than an ordinary spurious correlation, since here
+   the two readings are not merely correlated but definitionally dependent.
+
+6. **`flow_corroboration`** is the evidence the user explicitly asked for ("provide the evidence supporting
+   each inferred rotation"): for a `possible_rotation` edge, each node's own OBSERVED institutional ETF net
+   flow and/or whale exchange net flow (already-published Phase 6/7 data, read through the same `Adapters`)
+   is checked against that node's own share direction — the same direction supports the hypothesis, the
+   opposite direction contradicts it. This is still not proof the flow caused the share move (R1) — flow and
+   share can each have independent causes — but it is a second, independently observed data point the
+   hypothesis can be checked against, never upgrading `classify_edge`'s hedged wording to a stated fact.
+   Nodes with no institutional/whale data of their own (stablecoin shares, the untracked mid-cap/DeFi/AI-related
+   nodes) report `"not_applicable"`, never a fabricated check.
+
+7. **`mid_caps`/`defi`/`ai_related` are registered nodes with `fetch_key: None`** (genuinely no tracked
+   universe, disclosed in `NOT_TRACKED`, never fabricated per R3) but are excluded from the pairwise `/matrix`
+   scan (`_MATRIX_ELIGIBLE`) since a node with no data at all can only ever classify to `"unavailable"` against
+   every other node — including it there would only add guaranteed-empty rows (R13). `/pair` still accepts
+   such a node directly, reporting its own disclosed `"unavailable"` status and reason. `meme_assets` keeps
+   Phase 13's own retail-ATTENTION-proxy design (never a capital-flow or market-share measure) and is likewise
+   excluded from the matrix (`INFORMATIONAL_ONLY`).
+
+**Consequences.** No database migration (same "no new tables, computed live at read time" precedent as
+`divergence`/`anomaly`/`regime`/`similarity`). Three new endpoints (`GET /api/v1/rotation/{catalog,pair,matrix}`)
+and one new package (`cfi.rotation`), plus one new `Adapters` method (`asset_market_cap`). 34 new unit tests
+(`test_rotation_universe.py`, `test_rotation_metrics.py` — pure-function/registry, hand-verified expected
+values) and 9 new integration tests (`test_rotation_api.py`, seeded via the existing `MarketHarness` +
+`CoinGeckoFake`'s `/market_chart` for per-asset caps and `MarketStructureHarness` + `CoinGeckoGlobalFake`'s
+`/global` for the genuine TOTAL, advancing its fake wall clock a day at a time to build ranged history from a
+single-snapshot-per-call dataset — covering the empty-database, validation (unknown node, same node twice,
+excluded-pair 404), computed-share, degenerate-100%-regression, and matrix-exclusion paths). `NOT_TRACKED`
+documents every scope limit: mid-caps/DeFi/AI-related assets have no tracked universe at all, meme assets get
+an attention proxy only, "large caps" means only this platform's own 4-asset universe, the untracked residual
+share of the global TOTAL is reported once and never decomposed further, and stablecoin exchange
+balances/flows remain outside this platform's scope (`cfi.liquidity.universe`'s own pre-existing limit).

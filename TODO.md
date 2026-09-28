@@ -505,8 +505,23 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
       should replace `exchange_flows`' adapter rather than continuing to alias `whale_flows`.
 - [ ] **Institutional treasury disposals are not tracked** (`institutional_flows` only ever accumulates) — no
       verified free source publishes dated disposal events; revisit if a provider is found.
-- [ ] Once Phase 20 (Claude AI Analyst) exists, its L5 interpretations should be layered ON TOP of Phase 19's
+- [ ] Once the Claude AI Analyst phase exists, its L5 interpretations should be layered ON TOP of Phase 19's
       L3 `possible_interpretations`, never replacing them — the registry here must stay AI-free (ADR-0066).
+
+## Phase 20 — Capital Rotation Engine (built 2026-09-28; see PROGRESS.md, DECISIONS.md ADR-0067)
+
+- [x] All 10 requested categories implemented (BTC/ETH/SOL/major assets/large caps/mid caps/DeFi/AI-related/
+      meme assets/stablecoins, mapped onto 12 tracked nodes), market share against the genuine global TOTAL
+      crypto market cap (never the platform's own 4-asset sum), `classify_edge` reuse for the OBSERVED-vs-
+      INFERRED discipline, and `flow_corroboration` as the evidence supporting each inferred rotation. Full
+      unit + integration regression run green (942 total), ruff and mypy strict clean.
+- [ ] **Mid-cap/DeFi/AI-related assets are genuinely not tracked** (documented in `NOT_TRACKED`, not a defect)
+      — no verified free source for a mid-cap/DeFi-sector/AI-token universe was identified this phase; revisit
+      if a provider is found, and only then add real nodes (never a proxy presented as the real thing).
+- [ ] **`flow_corroboration` has no institutional/whale data for stablecoin or untracked nodes** — always
+      reports `not_applicable` for those; revisit only if a genuinely new flow source is added for them.
+- [ ] Once the Claude AI Analyst phase exists, its L5 interpretations may layer on top of a rotation's
+      `flow_corroboration` evidence, never replacing the hedged `classify_edge` wording (ADR-0067).
 
 ## Deferred (to the phase that needs them)
 
