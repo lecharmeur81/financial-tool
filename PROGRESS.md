@@ -2,13 +2,15 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 19 — Anomaly Engine → implemented, fully self-verified (909 unit + integration tests
-against a real PostgreSQL/TimescaleDB instance, ruff, mypy all clean). Market Anomaly Engine covering all 13
-requested categories (ETF/institutional/whale/exchange flows, funding, OI, liquidations, stablecoin supply,
-retail/social activity, volume, volatility, market structure), percentile-band detection (never a raw fixed
-threshold), MAD-based magnitude, day-by-day-recomputed duration, and a fixed non-AI interpretation registry
-that structurally bans bullish/bearish/buy/sell language (ADR-0066). Delivered to Windows and committed as
-`737e223` — see the Phase 19 log entry below.
+**Current phase:** 20 — Capital Rotation Engine → implemented, fully self-verified (942 unit + integration
+tests against a real PostgreSQL/TimescaleDB instance, ruff, mypy all clean). Analyzes relative behavior across
+BTC/ETH/SOL/major assets/large caps/mid caps/DeFi/AI-related/meme assets/stablecoins (10 requested categories
+-> 12 tracked nodes), tracking market share against the genuine global TOTAL crypto market cap (never the
+platform's own 4-asset sum — a degenerate-100% design flaw caught and fixed before the service layer was
+written). Structurally distinguishes OBSERVED CAPITAL FLOW from INFERRED CAPITAL ROTATION (reusing Phase 13's
+own hedged `classify_edge`, never upgraded to a stated fact) and checks each inferred rotation against OBSERVED
+institutional/whale flow data (`flow_corroboration`, ADR-0067). Delivered to Windows and committed as
+`dc71d39` — see the Phase 20 log entry below.
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -1867,8 +1869,16 @@ same posture as `divergence`/`anomaly`/`regime`/`similarity`.
   pre-existing limit).
 - No frontend work this phase (not requested).
 
-**Delivery:** pending this same task's remaining steps (Windows verification run and Git commit); this
-paragraph will be corrected with the final commit hash once that completes.
+**Delivery:** all 16 changed/new files copied to the Windows machine via the device bridge and read back
+(sha256, or structurally where a pre-existing line-wrap difference was expected) to confirm a match before
+staging. `uv run ruff check .` / `ruff format --check .` / `mypy` all clean on the Windows machine itself;
+`uv run pytest tests/unit tests/api` (755 tests, no database needed) passed on Windows — the 187 tests under
+`tests/integration` were skipped there (`CFI_DATABASE_URL`/`CFI_REDIS_URL` not set in this bridge environment,
+which is a separate isolated VM from the user's own Docker Desktop stack), the same posture as every prior
+phase's delivery; the full 942-test run (including the 9 new integration tests) was already completed against
+a real PostgreSQL/TimescaleDB instance in Claude's own sandbox, reported above. Committed as `dc71d39` on
+`main` ("[P20] Capital Rotation Engine: 10 requested categories, genuine-TOTAL market share, flow
+corroboration").
 
 **Next step:** this phase stops here per the user's own closing instruction ("Commit. Stop.") — awaiting the
 user's next instruction.
