@@ -1,0 +1,177 @@
+"""``AlertService`` — orchestrates one alert-evaluation cycle (Phase 23 spec).
+
+Reuses, entirely unchanged: ``cfi.analyst.snapshot.build_snapshot`` (the same 14-tool evidence
+snapshot Phases 21/22 already build), ``cfi.analyst.repository.AnalystRepository.insert_snapshot``/
+``latest_snapshot`` (``ai.snapshot`` is not duplicated — see that method's docstring), and
+``cfi.brief.changes.compute_changes`` (Phase 22's snapshot-diff, reused here to produce the
+evaluation cycle's own audit-trail change set — see the module docstring in ``cfi.alerts.rules``
+for why it is NOT what decides whether any individual alert type fires).
+
+No AI/Claude component at all (Phase 23 spec: this is a fully deterministic rule engine) — no
+client, no prompt, no budget check, no validator for LLM output."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from cfi.alerts.lifecycle import Candidate, decide
+from cfi.alerts.repository import AlertRepository
+from cfi.alerts.rules import evaluate_all
+from cfi.alerts.universe import ALERT_TYPE_TOOL_IDS, cooldown_period
+from cfi.analyst.repository import AnalystRepository
+from cfi.analyst.snapshot import build_snapshot
+from cfi.brief.changes import ChangeSet, compute_changes
+from cfi.core.config import Settings
+from cfi.core.logging import get_logger
+
+log = get_logger(__name__)
+
+# The three "flagged-state" alert types (see cfi.alerts.rules module docstring): their evaluators
+# only emit a candidate while the flag holds, so a previously active alert whose dedup key is not
+# re-emitted this cycle must be auto-resolved rather than left active forever.
+_FLAGGED_STATE_TYPES = ("divergence", "anomaly", "capital_rotation")
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationResult:
+    created: int
+    rearmed: int
+    resolved: int
+    skipped_unchanged: int
+    skipped_cooldown: int
+    candidates_evaluated: int
+    comparison_basis: str
+
+
+class AlertService:
+    def __init__(self, engine: AsyncEngine, settings: Settings) -> None:
+        self.engine = engine
+        self.settings = settings
+        self.repo = AlertRepository(engine)
+        # Reused unchanged for the (shared, not alert-specific) snapshot insert/lookup — never a
+        # second, parallel implementation (Phase 23 spec "Phase 21/22 Integration").
+        self.analyst_repo = AnalystRepository(engine)
+
+    async def evaluate(
+        self, *, as_of: datetime, knowledge_time: datetime, now: datetime
+    ) -> EvaluationResult:
+        previous = await self.analyst_repo.latest_snapshot()
+        previous_payload = previous[1] if previous else None
+
+        snapshot = await build_snapshot(
+            self.engine, self.settings, as_of=as_of, knowledge_time=knowledge_time, question=None
+        )
+        snapshot_id, _snapshot_uuid = await self.analyst_repo.insert_snapshot(
+            created_at=snapshot.created_at,
+            as_of=snapshot.as_of,
+            knowledge_time=snapshot.knowledge_time,
+            snapshot_version=snapshot.snapshot_version,
+            payload=snapshot.payload(),
+            payload_hash=snapshot.snapshot_id,
+        )
+
+        # Reused for the cycle's own audit trail (Phase 23 spec "Phase 21/22 Integration": "reuse
+        # Phase 22 snapshot/change infrastructure where appropriate") — logged, not what decides
+        # whether any individual alert fires (see cfi.alerts.rules's module docstring).
+        changes: ChangeSet = compute_changes(snapshot, previous_payload)
+        log.info(
+            "alert_cycle_changes",
+            comparison_basis=changes.comparison_basis,
+            field_changes=len(changes.changes),
+        )
+
+        candidates = evaluate_all(snapshot)
+        cooldown_seconds = cooldown_period().total_seconds()
+
+        created = rearmed = resolved = skipped_unchanged = skipped_cooldown = 0
+        seen_keys: dict[str, set[str]] = {t: set() for t in _FLAGGED_STATE_TYPES}
+
+        for candidate in candidates:
+            if candidate.alert_type in seen_keys:
+                seen_keys[candidate.alert_type].add(candidate.dedup_key)
+
+            existing = await self.repo.latest_active_for_key(candidate.dedup_key)
+            action = decide(
+                existing,
+                Candidate(observed_value=candidate.observed_value),
+                now=now,
+                cooldown_seconds=cooldown_seconds,
+            )
+
+            if action == "skip_unchanged":
+                skipped_unchanged += 1
+                continue
+            if action == "skip_cooldown":
+                skipped_cooldown += 1
+                continue
+
+            new_id, _new_uuid = await self.repo.insert_alert(
+                now=now,
+                alert_type=candidate.alert_type,
+                severity=candidate.severity,
+                domain=candidate.domain,
+                dedup_key=candidate.dedup_key,
+                trigger_condition=candidate.trigger_condition,
+                observed_value=candidate.observed_value,
+                reference_value=candidate.reference_value,
+                evidence_field_ids=list(candidate.evidence_field_ids),
+                snapshot_id=snapshot_id,
+                source_tool_id=candidate.source_tool_id,
+                component_status=candidate.component_status,
+                data_quality_state=snapshot.data_quality_state,
+            )
+
+            if action == "create":
+                created += 1
+            else:  # "rearm"
+                rearmed += 1
+                old_id = await self.repo.latest_active_id_for_key(candidate.dedup_key)
+                # old_id is this candidate's own just-inserted row only if two evaluators ever
+                # shared a dedup_key (they never do, by construction); guard anyway (R3: never
+                # silently supersede the wrong row).
+                if old_id is not None and old_id != new_id:
+                    await self.repo.supersede(old_id, now=now, superseded_by=new_id)
+
+        resolved += await self._auto_resolve_cleared(seen_keys, now=now)
+
+        return EvaluationResult(
+            created=created,
+            rearmed=rearmed,
+            resolved=resolved,
+            skipped_unchanged=skipped_unchanged,
+            skipped_cooldown=skipped_cooldown,
+            candidates_evaluated=len(candidates),
+            comparison_basis=changes.comparison_basis,
+        )
+
+    async def _auto_resolve_cleared(self, seen_keys: dict[str, set[str]], *, now: datetime) -> int:
+        """A flagged-state alert type (divergence/anomaly/capital_rotation) whose evaluator no
+        longer emits a candidate for a dedup key that still has an active alert means the
+        underlying condition cleared — resolve it rather than leaving it active forever."""
+        resolved = 0
+        for alert_type in _FLAGGED_STATE_TYPES:
+            entries = await self.repo.active_entries_with_prefix(f"{alert_type}:")
+            still_flagged = seen_keys[alert_type]
+            for dedup_key, alert_id in entries:
+                if dedup_key not in still_flagged:
+                    await self.repo.resolve(alert_id, now=now)
+                    resolved += 1
+        return resolved
+
+    # ------------------------------------------------------------------ reads (API)
+
+    async def get_alert(self, alert_id: Any) -> dict[str, Any] | None:
+        return await self.repo.get_by_uuid(alert_id)
+
+    async def list_alerts(self, *, status: str | None, limit: int) -> list[dict[str, Any]]:
+        return await self.repo.list_alerts(status=status, limit=limit)
+
+    async def set_status(self, alert_id: Any, *, status: str, now: datetime) -> bool:
+        return await self.repo.set_status(alert_id, status=status, now=now)
+
+
+__all__ = ["ALERT_TYPE_TOOL_IDS", "AlertService", "EvaluationResult"]

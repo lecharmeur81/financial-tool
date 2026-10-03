@@ -680,6 +680,92 @@ Celery beat, daily crontab (00:05 UTC)        POST /brief/generate
 - **Alert record** (`usr.alert_event`) stores the rule version, triggering values with IDs, quality, and a snapshot reference.
 - **Channels:** in-app first; email and a messaging channel (e.g. Telegram) via a notification adapter — choice needs approval.
 - Optional: an AI explanation may be attached **after** an alert fires, labelled as interpretation; it never decides whether to fire.
+- **Status: implemented, Phase 23** (periodic-sweep evaluation and in-app delivery only — see
+  §5.19a; event-driven evaluation and the email/Telegram channels remain proposed/not built).
+
+### 5.19a Alerts implementation — Phase 23 (ADR-0071)
+
+A fully deterministic rule engine with **no AI/Claude component at all** — unlike the Daily Market
+Brief (§5.18a), this is not a second artifact over Claude's output; it reads the same 14-tool
+evidence snapshot directly and decides, by code, whether each of 11 alert types' trigger condition
+is satisfied. It implements ADR-0035's own decision (table name, rule types, noise-control
+concepts) rather than redesigning it.
+
+```
+Celery beat, every 15 min              POST /alerts/evaluate
+  "alerts:evaluate" → alerts.evaluate    → alerts.evaluate (same task, no args either way)
+       │                                        │
+       ▼                                        ▼
+  cfi.analyst.repository.AnalystRepository.latest_snapshot() — the PRIOR cycle's stored
+  ai.snapshot.payload, read BEFORE this cycle's own snapshot is inserted
+       │
+       ▼
+  cfi.analyst.snapshot.build_snapshot — the SAME 14-tool snapshot Phases 21/22 already build
+       │
+       ▼
+  AnalystRepository.insert_snapshot (ai.snapshot row, unchanged — not a second snapshot table)
+       │
+       ▼
+  cfi.brief.changes.compute_changes(current, previous_payload) — reused for this cycle's own
+  audit-trail ChangeSet (logged); does NOT decide whether any individual alert type fires (see
+  below)
+       │
+       ▼
+  cfi.alerts.rules.evaluate_all(snapshot) — 11 pure, DB-free evaluator functions, one per alert
+  type, each producing zero or more AlertCandidate values straight from snapshot.raw
+       │
+       ▼
+  cfi.alerts.lifecycle.decide(existing, candidate, cooldown) — pure dedup/cooldown/re-arm decision
+  → create | skip_unchanged | skip_cooldown | rearm
+       │
+       ▼
+  cfi.alerts.repository.AlertRepository — insert_alert / supersede (re-arm) / resolve
+  (auto-resolve for divergence/anomaly/capital_rotation once their flag clears)
+       │
+       ▼
+  GET /alerts, GET /alerts/{id}, POST /alerts/{id}/acknowledge|resolve
+```
+
+- **11 alert types**, one per `cfi.alerts.universe.ALERT_TYPE_TOOL_IDS` entry, reusing
+  `cfi.analyst.universe.DOMAIN_TOOL_IDS` for 10 of them and `get_market_regime` directly for the
+  11th (`regime_change`). "Exchange flows" is folded into `whale_activity` rather than kept as a
+  12th type: both read the one tool this platform has for on-chain exchange-flow data
+  (`get_whale_activity`) — a separate type would duplicate a signal, not add one.
+- **Two deliberately different trigger styles** (not unified into one mechanism — see
+  `cfi.alerts.rules`'s module docstring and ADR-0071 for why `compute_changes` could not do this
+  alone): the 7 score-bearing domains plus `regime_change` always report current categorical state
+  and rely on `decide()` to suppress repeats; `divergence`/`anomaly`/`capital_rotation` only
+  produce a candidate when the domain's own already-computed flag is positive (`is_divergent`, a
+  non-`normal` anomaly `Band`, `possible_rotation`) — flagged-state detections by definition
+  (CLAUDE.md A2), not a value whose change must be separately detected.
+- **No invented value, ever (R3):** every evaluator reads `snapshot.raw[tool_id]["data"]` directly;
+  a tool that did not run, or a component whose own `status` is
+  `insufficient_data`/`unavailable`/`not_applicable`, produces no candidate for that item at all.
+- **Severity describes significance, never a trading recommendation** (deliberately NOT ranked
+  across the 7 score-bearing domains' own, mutually incompatible band vocabularies — doing so
+  would itself be fabricating an interpretation, R3): `"critical"` only for anomaly's own known
+  extreme bands, `"elevated"` only for a regime-change alert at or above a declared confidence
+  threshold (`HIGH_CONFIDENCE_REGIME_THRESHOLD`), `"notable"` uniformly otherwise. Every
+  hand-written template string is checked against the same `BANNED_PATTERNS`
+  (`cfi.analyst.universe`) Phases 21/22 already enforce on AI text.
+- **Deduplication / cooldown / re-arm** (`cfi.alerts.lifecycle.decide`, pure and DB-free): no prior
+  alert for a dedup key creates one; an unchanged observed value is never repeated; a changed value
+  within the declared cooldown window (`cfi.alerts.universe.cooldown_period`, one hour, versioned
+  like every other `*_parameters` module in this codebase) is suppressed; past the cooldown, a new
+  alert is created and the prior one is superseded (`status="expired"`).
+- **Persistence** (`usr.alert_event`, migration 0009 — the table name and schema ADR-0035 already
+  specified): every row carries alert type, severity, domain, trigger condition, observed value,
+  reference value where applicable, evidence field ids, the `ai.snapshot.id` it was computed from
+  (reproducibility), source tool id, component status, the overall snapshot data-quality state, and
+  lifecycle `status` (`active → acknowledged/resolved/expired`).
+- **Delivery: in-app only.** ADR-0035 lists email/Telegram channels as needing approval — none is
+  built; alerts are created, listed, and acted on (`GET`/`POST /acknowledge`/`POST /resolve`)
+  entirely through the existing API and database, no new external integration.
+- **Scheduling reuses the existing Celery beat infrastructure.** One interval entry
+  (`cfi.worker.schedule.alert_entries`, every 15 minutes, on the existing `ingest` queue — no new
+  queue) is the only evaluation trigger; ADR-0035 also allows event-driven evaluation after each
+  computation completes, but this platform has no event bus to drive that off, so only the
+  periodic-sweep half of ADR-0035 is implemented (a disclosed limitation, not a silent gap).
 
 ### 5.20 Scalability — ADR-0037
 

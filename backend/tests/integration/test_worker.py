@@ -31,10 +31,13 @@ def test_celery_app_is_configured_for_safe_task_handling() -> None:
     assert "market.backfill_round" in worker.app.tasks
     assert "analyst.analyze" in worker.app.tasks
     assert "brief.generate" in worker.app.tasks
+    assert "alerts.evaluate" in worker.app.tasks
     queues = {entry["options"]["queue"] for entry in conf.beat_schedule.values()}
     assert queues == {"ingest_fast", "ingest", "backfill", "ai"}
     assert "brief:daily" in conf.beat_schedule
     assert conf.beat_schedule["brief:daily"]["options"]["queue"] == "ai"
+    assert "alerts:evaluate" in conf.beat_schedule
+    assert conf.beat_schedule["alerts:evaluate"]["options"]["queue"] == "ingest"
 
 
 def test_brief_is_scheduled_once_daily_on_the_ai_queue() -> None:
@@ -63,6 +66,27 @@ def test_brief_task_skips_when_the_anthropic_api_key_is_not_configured(
     result = worker.brief_generate_task.run()
     assert result["skipped"] == "Anthropic API key not configured"
     assert "brief_id" in result
+
+
+def test_alerts_are_evaluated_every_15_minutes_on_the_ingest_queue() -> None:
+    from cfi.worker.schedule import alert_entries
+
+    entries = alert_entries()
+    assert list(entries) == ["alerts:evaluate"]
+    entry = entries["alerts:evaluate"]
+    assert entry["task"] == "alerts.evaluate"
+    assert entry["schedule"] == 900.0
+    assert entry["options"]["queue"] == "ingest"
+
+
+def test_alerts_evaluate_task_runs_a_full_cycle(db: AsyncEngine) -> None:
+    """No credential gate (Phase 23 has no AI component at all) — the task runs straight
+    through, unlike ``brief_generate_task``/``analyst_analyze_task``."""
+    from cfi.worker import app as worker
+
+    result = worker.alerts_evaluate_task.run()
+    assert "created" in result
+    assert "comparison_basis" in result
 
 
 def test_disabled_provider_is_not_ingested() -> None:

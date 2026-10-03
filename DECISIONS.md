@@ -42,7 +42,7 @@ Status values: `Proposed` (awaiting the user's confirmation) · `Accepted` · `S
 | 0032 | Historical data and point-in-time reliability | Accepted | 2026-09-23 |
 | 0033 | Backtesting architecture | **Proposed** | 2026-09-23 |
 | 0034 | AI architecture and grounding | Accepted | 2026-09-23 |
-| 0035 | Alert architecture | **Proposed** | 2026-09-23 |
+| 0035 | Alert architecture | Accepted (periodic-sweep evaluation + in-app delivery implemented, Phase 23) | 2026-09-23 |
 | 0036 | Decision journal and paper trading | **Proposed** | 2026-09-23 |
 | 0037 | Scalability path and real-time processing | **Proposed** | 2026-09-23 |
 | 0038 | Cost control | **Proposed** | 2026-09-23 |
@@ -2668,3 +2668,83 @@ ingestion provider list and is now always scheduled. The previously reported lim
 re-attempted here: the DB-backed `ai.*` integration tests (now including `test_brief_service.py` and the new
 `test_worker.py` cases) are written and exercised on Windows but have not been executed against a real
 PostgreSQL/TimescaleDB instance in this sandbox.
+
+---
+
+## ADR-0071 — Phase 23: Alerts — a deterministic rule engine, two trigger styles instead of one
+unified diff, and `compute_changes` reused for audit only, not for firing decisions
+
+**Status:** Accepted (implemented 2026-10-03)
+
+**Context.** The user's Phase 23 spec asks for alerting over 11 named domains, built on the alert
+architecture already decided in ADR-0035 (`usr.alert_event`, rule types including "change-over-window" and
+"regime change", hysteresis/cooldown/deduplication, in-app delivery first) rather than a fresh design. The
+spec is explicit: no AI/Claude component, no invented values, reuse Phase 21/22's snapshot/change
+infrastructure "where appropriate," and never repeat an alert while its underlying condition is unchanged.
+Three design questions needed a decision: (1) whether Phase 22's generic `compute_changes` field-diff could
+drive every alert type's trigger condition by itself; (2) where the dedup/cooldown/re-arm decision should
+live so it could be tested without a database (none has been reachable in any phase so far); and (3) how to
+assign "severity" across 11 types without inventing a cross-domain ranking the platform does not actually
+have.
+
+**Decision.**
+
+1. **`compute_changes` is reused for the evaluation cycle's own audit trail, not as the firing mechanism.**
+   Direct inspection of every domain service's real output (not assumption, R7) found the generic field-diff
+   cannot see two of the three signal shapes this phase needs: `calculate_divergence`'s `is_divergent` is a
+   bare boolean, and `cfi.analyst.snapshot._flatten`'s dict-collapse rule (any dict containing a literal
+   `"value"` key becomes one numeric field) swallows institutional's and whale's per-asset `score.band` into
+   a single numeric field with no separate `band` entry at all. Patching those two gaps into the generic
+   diff — which Phase 22 owns and which this phase must not modify (strict scope: "Do not duplicate existing
+   … snapshot … mechanisms") — would itself be the kind of parallel mechanism the spec's "do not duplicate"
+   warns against. `cfi.alerts.rules` therefore reads `Snapshot.raw` directly with explicit, code-verified
+   JSON paths per domain, and `compute_changes` is still called once per cycle and logged (satisfying "reuse
+   Phase 22 snapshot/change infrastructure where appropriate") but decides nothing about any individual
+   alert.
+
+2. **Two trigger styles, not one, because the 11 domains are not all the same shape of signal.** The 7
+   score-bearing domains (institutional, whale, retail's two scores, derivatives, liquidity, macro,
+   market_structure) plus `regime_change` always report their current categorical state; whether that is a
+   *change* worth alerting on is decided afterwards by `cfi.alerts.lifecycle.decide` against the dedup key's
+   last stored alert. `divergence`/`anomaly`/`capital_rotation` instead only produce a candidate when the
+   domain's own already-computed flag is itself positive (`is_divergent`, a non-`normal` `Band`,
+   `possible_rotation`) — these three are themselves flagged-state findings (CLAUDE.md A2: a divergence, an
+   anomaly, and an inferred rotation hypothesis are L3/L6 conclusions, not a raw value whose change must be
+   separately detected), and a cleared flag is handled by an explicit auto-resolve pass rather than by
+   emitting a manufactured "no longer divergent" state.
+
+3. **Dedup/cooldown/re-arm is a pure function, deliberately separated from the repository.**
+   `cfi.alerts.lifecycle.decide(existing, candidate, now, cooldown_seconds) -> create | skip_unchanged |
+   skip_cooldown | rearm` touches no database at all — `cfi.alerts.repository.AlertRepository` only reads the
+   one fact this function needs (the dedup key's most recent non-terminal alert) and executes whatever it
+   decides. This is what makes "duplicate detection, cooldown period, re-arm condition" (an explicit required
+   test category) testable without a reachable database, the same constraint every prior phase has had to
+   design around.
+
+4. **Severity is assigned only where a real, disclosed closed vocabulary or threshold exists — never a
+   cross-domain ranking this phase does not own.** The 7 score-bearing domains each define their own band
+   labels independently (e.g. derivatives' "low/moderate/elevated/high stress" has no declared correspondence
+   to institutional's own band wording) — ranking across them would be fabricating an interpretation (R3), so
+   they stay at a uniform `"notable"`. `"critical"` is used only for anomaly's own already-disclosed extreme
+   bands (`extreme_high`/`extreme_low`, `cfi.anomaly.universe.Band`); `"elevated"` only for a regime-change
+   alert at or above a declared, versioned confidence threshold
+   (`cfi.alerts.universe.HIGH_CONFIDENCE_REGIME_THRESHOLD = "0.70"`) the regime engine itself already
+   computes and discloses.
+
+**Consequences.** New package `cfi.alerts` (`universe`, `rules`, `lifecycle`, `repository`, `service`); new
+`usr.alert_event` table (migration `0009`, implementing ADR-0035's own table name rather than introducing a
+new one); one additive read-only method on the existing `AnalystRepository` (`latest_snapshot`); new
+`alerts.evaluate` Celery task and `alerts:evaluate` beat entry (every 15 minutes, on the existing `ingest`
+queue — no new queue); new `GET /alerts`, `GET /alerts/{id}`, `POST /alerts/evaluate`, `POST
+/alerts/{id}/acknowledge`, `POST /alerts/{id}/resolve` API routes. No change to any Phase 5-22 service,
+methodology, or schema beyond the one additive repository method above. `usr.alert_rule` (the versioned,
+user-authored rule table sketched in DATA_DICTIONARY.md §4 during Phase 2 planning) was deliberately not
+built: the spec asks for fixed monitoring across 11 named domains, which 11 code-defined rule-engine
+functions satisfy directly, and a user-authored rule table with no UI to author rules would be exactly the
+kind of unrequested feature CLAUDE.md R13/the spec's "Strict Scope" forbids. Event-driven evaluation (the
+other half of ADR-0035, "in the `alerts` queue after the relevant computation completes") was not built
+either: this platform has no event bus, and the periodic 15-minute sweep is the existing-infrastructure
+alternative the spec's "do not introduce unnecessary new infrastructure" calls for — a disclosed scope
+reduction, not a silent gap. As in every prior phase, the DB-backed integration tests
+(`test_alerts_service.py`, the new `test_worker.py` cases) are written and exercised on Windows but have not
+been executed against a real PostgreSQL/TimescaleDB instance in this sandbox.

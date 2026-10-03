@@ -62,6 +62,23 @@ class AnalystRepository:
             snapshot_id = int((await conn.execute(stmt)).scalar_one())
         return snapshot_id, row_uuid
 
+    async def latest_snapshot(self) -> tuple[int, dict[str, Any]] | None:
+        """The most recently inserted ``ai.snapshot`` row, regardless of which feature created it
+        (analyst, brief, or alerts) — read-only, additive (Phase 23 spec "Phase 21/22 Integration":
+        "reuse the existing Phase 21 grounding/provenance mechanisms where applicable"). Used by
+        ``cfi.alerts.service.AlertService`` as the prior-cycle comparison basis, the same way
+        ``cfi.brief.repository.BriefRepository.get_snapshot_payload`` reads one specific snapshot
+        by id for the brief's own comparison basis — this is the only new read ``ai.snapshot``
+        needed, not a second snapshot table."""
+        stmt = (
+            select(t.ai_snapshot.c.id, t.ai_snapshot.c.payload)
+            .order_by(t.ai_snapshot.c.created_at.desc())
+            .limit(1)
+        )
+        async with self.engine.connect() as conn:
+            row = (await conn.execute(stmt)).first()
+        return (int(row[0]), row[1]) if row else None
+
     # ------------------------------------------------------------------ interpretation (job record)
 
     async def create_queued_interpretation(

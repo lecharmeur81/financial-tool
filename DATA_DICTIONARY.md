@@ -235,8 +235,8 @@ schemas exist and are empty; no tables have been created yet. **HT** = Timescale
 | `api_token` | Personal API tokens | `token_id`, `user_id`, `token_hash`, `scopes`, `expires_at`, `last_used_at` |
 | `journal_entry` | Decision journal (versioned, append-only) | `entry_id`, `version`, `user_id`, `decision`, `rationale`, `hypotheses`, `invalidation_conditions`, `snapshot_id`, `interpretation_id`, `created_at`, `outcome_review` |
 | `paper_account` / `paper_order` / `paper_fill` / `paper_position` | Paper trading | `account_id`, `user_id`; orders: `instrument_id`, `side`, `qty`, `order_type`, `submitted_at`, `journal_entry_id`; fills: `price`, `fee`, `slippage`, `filled_at`, `cost_model_version` |
-| `alert_rule` | User-defined rules (versioned) | `rule_id`, `version`, `user_id`, `rule_type`, `definition` (JSON), `min_quality`, `cooldown`, `channels`, `enabled` |
-| `alert_event` | Fired alerts | `event_id`, `rule_id`, `rule_version`, `fired_at`, `triggering_values` (IDs + values), `quality_status`, `snapshot_id`, `delivered` |
+| `alert_rule` | User-defined rules (versioned) — **not built**; Phase 23 (§5o) implemented 11 code-defined rule types instead of a user-authored rule table, since the spec asked for fixed monitoring across named domains, not user-authored rules | `rule_id`, `version`, `user_id`, `rule_type`, `definition` (JSON), `min_quality`, `cooldown`, `channels`, `enabled` |
+| `alert_event` | Fired alerts — **implemented in Phase 23** (§5o) with a different column set than planned here (no `rule_id`/`rule_version`, since there is no `alert_rule` table; `delivered` replaced by the `status` lifecycle) | see §5o for the real, implemented shape |
 
 ### `ops` — operations
 
@@ -1571,6 +1571,54 @@ invalidation_conditions}` — no probability field exists on the schema at all.
 metric:            AI Analyst (14 tools, 12-section grounded response, ai.snapshot/interpretation/usage)
 owner_phase:       21 (2026-09-28)
 status:            implemented
+```
+
+---
+
+## 5o. Alerts (implemented in Phase 23)
+
+A deterministic rule engine with no AI/Claude component — reads the same 14-tool evidence snapshot
+Phases 21/22 already build and decides, by code, whether one of 11 alert types' trigger condition
+is satisfied (ARCHITECTURE.md §5.19a). Implements ADR-0035's "Alert architecture" decision rather
+than redesigning it.
+
+### `usr.alert_event` (`cfi/db/tables.py::alert_event`, migration `0009`)
+
+One row per generated alert; never updated after insert except for its lifecycle fields
+(`status`/`acknowledged_at`/`resolved_at`/`superseded_by`/`updated_at`).
+
+| Field | Description |
+|---|---|
+| `id` (bigint, PK) / `uuid` (unique) | Internal identity / the `alert_id` returned to callers |
+| `created_at`, `updated_at` | Lifecycle timestamps |
+| `alert_type` | One of the 11 types in `cfi.alerts.universe.ALERT_TYPE_TOOL_IDS`: `institutional_flow`, `whale_activity` (covers "Whale activity" and "Exchange flows"), `retail_activity`, `derivatives`, `liquidity`, `macro`, `market_structure`, `divergence`, `anomaly`, `capital_rotation`, `regime_change` |
+| `severity` | `info` \| `notable` \| `elevated` \| `critical` — significance of the detected market event, never a trading recommendation |
+| `domain` | The asset symbol (e.g. `BTC`), a node pair (`btc->eth`), a score name (`activity_score`), or `GLOBAL` for a platform-wide domain |
+| `dedup_key` | Stable identity of "this particular condition" (e.g. `institutional_flow:BTC`, `anomaly:funding_rate_oi_weighted.v1`) — the key `cfi.alerts.lifecycle.decide` dedups/cools-down against |
+| `trigger_condition` | Human-readable description of what was evaluated |
+| `observed_value` | The current state as reported by the underlying tool (a band label, a regime id, `possible_rotation`, etc.) — never fabricated |
+| `reference_value` | The threshold/reference compared against, where applicable (`null` for a purely categorical state) |
+| `evidence_field_ids` (jsonb array) | The snapshot field id(s) this alert is grounded in (reproducible from `ai.snapshot.payload`) |
+| `snapshot_id` | FK to `ai.snapshot.id` — the exact evidence this alert was computed from (reproducibility) |
+| `source_tool_id` | Which of the 14 analyst tools this alert's domain data came from |
+| `component_status` | The specific field/component's own reported status (`ok` unless otherwise noted) |
+| `data_quality_state` | The overall snapshot data-quality state (`ok` \| `degraded` \| `insufficient`) at evaluation time — passed through, never fabricated, when sources conflict or data is stale |
+| `status` | `active` \| `acknowledged` \| `resolved` \| `expired` (lifecycle) |
+| `superseded_by` | FK to `usr.alert_event.id` — set when this alert was re-armed by a later one (`status` becomes `expired`) |
+| `acknowledged_at`, `resolved_at` | Set by the corresponding user-driven API action |
+
+### Deduplication / cooldown (`cfi/alerts/lifecycle.py::decide`)
+
+Pure, database-free: given the most recent non-terminal alert for a dedup key and a freshly
+evaluated candidate, returns `create` (no prior alert) / `skip_unchanged` (same observed value) /
+`skip_cooldown` (changed, but within `cfi.alerts.universe.cooldown_period()`, one hour) / `rearm`
+(changed, past cooldown — a new alert is created and the prior one marked `expired`).
+
+```
+metric:            Alerts (11 types, deterministic rule engine, usr.alert_event, in-app delivery)
+owner_phase:       23 (2026-10-03)
+status:            implemented (periodic-sweep evaluation only; event-driven evaluation and the
+                    email/Telegram channels ADR-0035 allows remain proposed, not built)
 ```
 
 ---

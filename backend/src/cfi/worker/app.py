@@ -14,6 +14,7 @@ from typing import Any
 
 from celery import Celery, signals
 
+from cfi.alerts.service import AlertService
 from cfi.analyst.client import anthropic_capabilities
 from cfi.analyst.repository import AnalystRepository
 from cfi.analyst.service import AnalystService
@@ -398,6 +399,33 @@ def brief_generate_task(brief_id: str | None = None) -> dict[str, Any]:
         finally:
             await http.aclose()
         return {"brief_id": str(parsed_id)}
+
+    return rt.run(go())
+
+
+@app.task(name="alerts.evaluate", time_limit=120, soft_time_limit=100)
+def alerts_evaluate_task() -> dict[str, Any]:
+    """Run one alert-evaluation cycle (Phase 23). No credential gate and no budget check — this
+    is a fully deterministic rule engine with no AI/Claude component at all, unlike
+    ``analyst_analyze_task``/``brief_generate_task``. A periodic sweep only (ADR-0035 also allows
+    event-driven evaluation after each computation completes, but this platform has no event bus
+    to drive that off — see PROGRESS.md's Phase 23 entry for this documented limitation)."""
+    rt = runtime()
+    now = utc_now()
+
+    async def go() -> dict[str, Any]:
+        engine = rt.engine()
+        svc = AlertService(engine, settings)
+        result = await svc.evaluate(as_of=now, knowledge_time=now, now=now)
+        return {
+            "created": result.created,
+            "rearmed": result.rearmed,
+            "resolved": result.resolved,
+            "skipped_unchanged": result.skipped_unchanged,
+            "skipped_cooldown": result.skipped_cooldown,
+            "candidates_evaluated": result.candidates_evaluated,
+            "comparison_basis": result.comparison_basis,
+        }
 
     return rt.run(go())
 

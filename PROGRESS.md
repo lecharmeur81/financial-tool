@@ -2,15 +2,16 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 22 — Daily Market Brief → implemented, fully self-verified in the sandbox (862 unit tests
-locally, ruff/format/mypy strict all clean; DB-backed integration suite written but requires the real
-PostgreSQL/TimescaleDB instance to run — see the Phase 22 log entry). An orchestration and presentation layer
-over every existing intelligence domain plus the Phase 21 AI Analyst: a 15-section brief answering what
-materially changed since the previous brief, change detection against the previous `completed` brief's own
-stored snapshot (never a defined-comparison-basis-free claim), a daily crontab-based Celery beat entry plus
-an on-demand API route sharing one `brief.generate` task, and full audit persistence (`ai.brief`, migration
-`0008`) sharing Phase 21's own `ai.usage` budget ceiling via an additive `brief_id` column. See the Phase 22
-log entry below for exactly what was (and was not) verified in this sandbox.
+**Current phase:** 23 — Alerts → implemented, fully self-verified in the sandbox AND on Windows (893 unit
+tests on both, ruff/format/mypy strict all clean on both; DB-backed integration suite written but requires
+the real PostgreSQL/TimescaleDB instance to run — see the Phase 23 log entry). A fully deterministic rule
+engine (no AI/Claude component) over 11 alert types spanning every Phase 5-20 domain plus regime change,
+reading the same 14-tool evidence snapshot Phases 21/22 already build, with pure dedup/cooldown/re-arm logic
+(`cfi.alerts.lifecycle.decide`), full audit persistence (`usr.alert_event`, migration `0009`, implementing
+ADR-0035's own pre-existing table name), and a 15-minute periodic-sweep Celery beat entry plus an in-app
+API (list/get/evaluate/acknowledge/resolve) — no new scheduling framework, no new external channel. See the
+Phase 23 log entry below for exactly what was (and was not) verified, and for the two disclosed scope
+reductions (no event-driven evaluation, no email/Telegram delivery — ADR-0035's "channels need approval").
 **Next phase:** to be defined by the user (do not start automatically — R13)
 
 ---
@@ -42,7 +43,7 @@ log entry below for exactly what was (and was not) verified in this sandbox.
 | 20 | Capital rotation | ✅ Complete — verified on Windows (`dc71d39`) |
 | 21 | Claude AI Analyst | ✅ Complete — verified on Windows (see Phase 21 log entry) |
 | 22 | Daily Market Brief | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 22 log entry) |
-| — | Alerts | ⏳ Not started |
+| 23 | Alerts | ✅ Complete — self-verified in sandbox AND on Windows (see Phase 23 log entry) |
 | — | Paper trading | ⏳ Not started |
 | — | Decision journal | ⏳ Not started |
 | — | Executive dashboard | ⏳ Not started |
@@ -2048,3 +2049,121 @@ existing row shape changes, and the downgrade path refuses if either change woul
 
 **Next step:** awaiting the user's next instruction — **not proceeding to Phase 23** per the user's own
 explicit instruction (R13).
+
+### 2026-10-03 — Phase 23: Alerts — a deterministic, no-AI rule engine over 11 types, pure dedup/
+cooldown/re-arm, `usr.alert_event` persistence (implementing ADR-0035's own pre-existing design)
+
+**What changed** (the user's exact spec: "## Phase 23 — Alerts … Build the alerting layer on top of
+the existing intelligence already completed in Phases 5-22 … Do not modify or rebuild Phases 5-22
+… Create a controlled alert engine that evaluates existing analytics and generates an alert only
+when a defined condition is satisfied … Do not invent values or infer unsupported facts … Use
+severity to describe the significance … not a trading recommendation … Implement protection against
+alert spam … Alerts must be grounded in the existing structured data and analytics … If required
+data is unavailable, do not generate the alert … Reuse the existing Phase 21 grounding/provenance
+mechanisms … Reuse Phase 22 snapshot/change infrastructure … Create the required alert persistence
+model/table … Track alert lifecycle/status … Implement the backend alert delivery mechanism …
+Reuse existing worker/task infrastructure … Add targeted tests … Then STOP. Do not proceed to Phase
+24."):
+
+- Inspected, before writing any code (the spec's own workflow step): every domain service's real
+  output shape (institutional/whale's per-asset `score.band` nested in a `value`-keyed dict that
+  collapses under the snapshot flattener's own evidence-envelope rule; derivatives' already-flat
+  per-asset `band`; liquidity/macro/market_structure's single global `score.band`; retail's two
+  independent scores; divergence's boolean `is_divergent` (not snapshot-flattened at all — booleans
+  are skipped by `_flatten`); anomaly's closed `Band` vocabulary; capital_rotation's
+  `inferred_capital_rotation.status`; regime's `regime_id`/`status`/`confidence`), and the
+  pre-existing ADR-0035 "Alert architecture" decision (ARCHITECTURE.md §5.19) and its empty `usr`
+  schema from the baseline migration — this phase implements that decision (table name
+  `usr.alert_event`, rule types, noise-control concepts) rather than redesigning it.
+- New `cfi.alerts` package: `universe.py` (11 alert types mapped to real analyst tool ids, reusing
+  `cfi.analyst.universe.DOMAIN_TOOL_IDS`; severity/status vocabularies; a versioned cooldown
+  parameter; reused `BANNED_PATTERNS`), `rules.py` (11 pure, database-free evaluator functions
+  reading `Snapshot.raw` directly — never inventing a value, skipping any item whose own status is
+  `insufficient_data`/`unavailable`/`not_applicable`), `lifecycle.py` (`decide()`, a pure
+  dedup/cooldown/re-arm function with no database access at all — the four-way decision
+  `create`/`skip_unchanged`/`skip_cooldown`/`rearm`), `repository.py` (`AlertRepository`, the
+  established Core-insert-per-write/bigint-identity+uuid convention), `service.py`
+  (`AlertService.evaluate()`: build the snapshot → persist it via the existing, unmodified
+  `AnalystRepository.insert_snapshot` → read the *prior* cycle's snapshot via one new additive
+  read-only method, `AnalystRepository.latest_snapshot()` → reuse `cfi.brief.changes.compute_changes`
+  for this cycle's own audit trail only (not as the firing mechanism — see ADR-0071 for exactly why
+  it cannot be, given the boolean/collapsed-dict gaps found during inspection) → run all 11
+  evaluators → `decide()` each candidate against the repository's one dedup-key lookup → insert/
+  supersede/auto-resolve).
+- Two deliberately different trigger styles over the 11 types (ADR-0071): the 7 score-bearing
+  domains plus `regime_change` always report current categorical state and let `decide()` suppress
+  repeats; `divergence`/`anomaly`/`capital_rotation` are flagged-state detections (CLAUDE.md A2) —
+  only a positive flag (`is_divergent`, a non-`normal` `Band`, `possible_rotation`) produces a
+  candidate at all, and a cleared flag is handled by an explicit auto-resolve pass
+  (`AlertService._auto_resolve_cleared`), not by inventing a "cleared" state.
+- Severity is assigned only where a real, disclosed closed vocabulary or threshold already exists —
+  never a cross-domain ranking this phase does not own (R3): `"critical"` only for anomaly's own
+  known extreme bands, `"elevated"` only for a regime-change alert at or above a declared, versioned
+  confidence threshold (`HIGH_CONFIDENCE_REGIME_THRESHOLD = "0.70"`), `"notable"` uniformly
+  otherwise. "Exchange flows" is folded into `whale_activity` rather than kept as its own 12th type
+  (both read the one tool this platform has for that data).
+- Persistence: new `usr.alert_event` table (migration `0009`, additive-only, implementing ADR-0035's
+  own pre-existing table name and schema) — every row carries alert type, severity, domain, dedup
+  key, trigger condition, observed/reference value, evidence field ids, the `ai.snapshot.id` it was
+  computed from (reproducibility), source tool id, component status, the overall snapshot
+  data-quality state, and lifecycle `status` (`active → acknowledged/resolved/expired`,
+  `superseded_by` self-reference for the re-arm case).
+- Delivery: in-app only — ADR-0035 lists email/Telegram as "channels need approval," so nothing
+  beyond persistence + a listing/action API (`GET /alerts`, `GET /alerts/{id}`,
+  `POST /alerts/evaluate`, `POST /alerts/{id}/acknowledge`, `POST /alerts/{id}/resolve`) was built.
+- Scheduling reuses the existing Celery beat infrastructure exactly: one new interval entry
+  (`cfi.worker.schedule.alert_entries`, every 15 minutes, on the existing `ingest` queue — no new
+  queue, no new scheduling framework) plus the `alerts.evaluate` task, which also runs on demand from
+  `POST /alerts/evaluate` (same task, no args either way — this task has no queued-row/job-id concept
+  to thread through, unlike `brief.generate`/`analyst.analyze`, since it has no AI call to make
+  asynchronous in the first place).
+- Full design rationale (why `compute_changes` could not drive every trigger condition by itself, why
+  dedup/cooldown is a pure function separated from the repository, why severity stops where real
+  disclosed vocabulary stops, and what was deliberately not built — `usr.alert_rule`, event-driven
+  evaluation, external channels) in ADR-0071.
+
+**Database changes:** migration `0009` — `usr.alert_event` (new table, in the `usr` schema the
+baseline migration already created empty). Purely additive (R10); the downgrade path refuses if the
+table holds data.
+
+| Check | Result |
+|---|---|
+| New unit tests: `test_alerts_universe.py` (5), `test_alerts_lifecycle.py` (7 — first observation, unchanged-condition dedup, within-cooldown suppression, the cooldown boundary itself, one second before/past the boundary), `test_alerts_rules.py` (19 — trigger and non-trigger conditions for every one of the 11 types, the anomaly `Band` threshold boundary at "normal"/"notable"/"extreme", the regime-confidence severity boundary at exactly `0.70`, missing tool data, a tool-level failure, and a no-banned-directive-language sweep over every candidate text a representative snapshot can produce) — 31 new tests total | all pass |
+| Existing unit test updated: `test_market_logic.py::test_schedule_covers_native_datasets_on_the_right_queues` — `beat_schedule([])` now also carries the unconditional `alerts:evaluate` entry alongside `brief:daily` | pass |
+| New integration tests (written, statically checked, DB-gated): `test_alerts_service.py` (3 — every required field actually persisted and its `snapshot_id` resolving to a real `ai.snapshot` row, two consecutive cycles over unchanged data producing no duplicate alerts, and the `acknowledge`/`resolve` lifecycle transition), plus 2 new cases in `test_worker.py` (the 15-minute beat entry's shape, and the task running a full cycle with no credential gate) | **written and statically checked (ruff/mypy on both the sandbox and Windows), but not executed** — no PostgreSQL/TimescaleDB instance was reachable in either environment (no `.env`, no Docker Desktop running); same already-documented limitation as every DB-backed suite since Phase 21, not re-attempted per the user's own instruction not to spend effort on unavailable infrastructure |
+| `uv run pytest tests/unit -q` (sandbox) | **893 passed** (up from 862 before this phase) |
+| `uv run pytest tests/unit -q` (Windows) | 893 passed |
+| `uv run pytest tests/integration --collect-only -q` (Windows, no database) | 205 collected (up from 200 — the 3 new alert-service tests plus 2 new worker-test cases), confirming every new/changed module imports cleanly |
+| `uv run ruff check .` (sandbox, then Windows) | All checks passed! (both) |
+| `uv run ruff format --check .` (sandbox, then Windows) | 352 files already formatted (both) |
+| `uv run mypy --no-incremental .` (sandbox, then Windows) | Success: no issues found in 347 source files (both) |
+| Alembic migration chain (Windows, `ScriptDirectory`, no DB connection needed) | head is `0009`, `0009 → 0008 → … → 0001 → None` — unbroken |
+
+**Known limitations**
+- The DB-backed integration suite (`test_alerts_service.py`, the 2 new `test_worker.py` cases, and
+  every other `ai.*`/`usr.*`/worker integration test since Phase 21) was written and statically
+  checked but **not executed against a real PostgreSQL/TimescaleDB instance** — neither this sandbox
+  nor the connected Windows machine has one reachable right now. Same, already-documented limitation
+  carried forward unchanged.
+- Only the periodic-sweep half of ADR-0035 is implemented, not the event-driven half ("in the
+  `alerts` queue after the relevant computation completes") — this platform has no event bus to
+  drive that off, and building one was not requested and would be exactly the kind of unnecessary new
+  infrastructure the spec's "Delivery" section explicitly forbids. A genuinely new market event is
+  caught within one 15-minute sweep, not instantly.
+- `usr.alert_rule` (the versioned, user-authored rule table DATA_DICTIONARY.md §4 sketched during
+  Phase 2 planning) was deliberately not built: the spec asks for fixed monitoring across 11 named
+  domains, which 11 code-defined rule functions satisfy directly; a rule table with no UI to author
+  rules would itself be an unrequested feature.
+- Severity is uniformly `"notable"` across the 7 score-bearing domains' own band changes (no
+  cross-domain ranking was invented — see ADR-0071) — a user wanting "derivatives stress is worse
+  than liquidity stress" comparisons gets that from each alert's own `observed_value`/
+  `reference_value` text, not from severity.
+- No frontend work this phase (not requested; the spec explicitly forbids unrelated frontend work).
+- No existing market indicator, calculation, or methodology was modified; every value an alert cites
+  still comes from the same 14 analyst tools Phase 21 already built, read through the same immutable
+  snapshot Phases 21/22 already produce.
+- Delivered to the Windows machine and verified there (893 unit tests, ruff/format/mypy all clean,
+  migration chain unbroken) before the commit named in this session's final report.
+
+**Next step:** awaiting the user's next instruction — **not proceeding to Phase 24** per the user's
+own explicit instruction (R13).

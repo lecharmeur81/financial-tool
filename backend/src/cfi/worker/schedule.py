@@ -193,6 +193,19 @@ def brief_entries() -> dict[str, dict[str, Any]]:
     }
 
 
+def alert_entries() -> dict[str, dict[str, Any]]:
+    """Phase 23: evaluate alerts every 15 minutes using this project's existing worker/beat
+    infrastructure — no new scheduling framework, and no new queue (reuses ``ingest``, since
+    evaluation is lightweight, DB-only work with no external provider call and no AI call)."""
+    return {
+        "alerts:evaluate": {
+            "task": "alerts.evaluate",
+            "schedule": 900.0,  # every 15 minutes
+            "options": {"queue": "ingest", "expires": 900},
+        }
+    }
+
+
 def beat_schedule(
     provider_ids: list[str],
     institutional_provider_ids: list[str] | None = None,
@@ -211,6 +224,7 @@ def beat_schedule(
     schedule.update(macro_entries(macro_provider_ids or []))
     schedule.update(market_structure_entries(market_structure_provider_ids or []))
     schedule.update(brief_entries())
+    schedule.update(alert_entries())
     for item in scheduled_ingestions(provider_ids):
         schedule[f"latest:{item.provider_id}:{item.dataset_id}"] = {
             "task": "market.ingest_latest",

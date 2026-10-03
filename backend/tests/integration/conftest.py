@@ -30,6 +30,7 @@ requires_services = pytest.mark.skipif(
 )
 
 DATA_TABLES = (
+    "usr.alert_event",
     "ai.usage",
     "ai.interpretation",
     "ai.snapshot",

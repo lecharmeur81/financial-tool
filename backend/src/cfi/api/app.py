@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from cfi.api.errors import register_exception_handlers
 from cfi.api.middleware import REQUEST_ID_HEADER, request_context_middleware
 from cfi.api.routes import (
+    alerts,
     analyst,
     anomaly,
     brief,
@@ -116,4 +117,5 @@ def create_app(
     app.include_router(rotation.router)
     app.include_router(analyst.router)
     app.include_router(brief.router)
+    app.include_router(alerts.router)
     return app
