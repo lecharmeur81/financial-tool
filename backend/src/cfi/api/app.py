@@ -21,6 +21,7 @@ from cfi.api.routes import (
     health,
     ingestion,
     institutional,
+    journal,
     liquidity,
     macro,
     market,
@@ -120,4 +121,5 @@ def create_app(
     app.include_router(brief.router)
     app.include_router(alerts.router)
     app.include_router(paper.router)
+    app.include_router(journal.router)
     return app

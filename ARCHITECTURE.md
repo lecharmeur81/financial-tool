@@ -905,7 +905,7 @@ explained by late data or revisions; unexpected ones are bugs). Dependency lockf
 - **Paper trading:** simulated accounts, orders, fills, positions, and PnL using the **same execution and cost model** as backtesting (§5.16),
   with fills priced from point-in-time market data plus latency and slippage. Every paper order can link to a journal entry.
 - **No live execution:** the platform holds no trading-enabled keys and has no order-routing component (ADR-0007).
-- **Status: paper trading implemented, Phase 24 (ADR-0072) — see §7a below. Decision journal remains proposed, not built.**
+- **Status: paper trading implemented, Phase 24 (ADR-0072) — see §7a below. Decision journal implemented, Phase 25 (ADR-0073) — see §7b below.**
 
 ### 7a. Paper trading implementation — Phase 24 (ADR-0072)
 
@@ -971,6 +971,77 @@ GET  /paper/performance                         performance_stats (cfi.paper.sta
   maintained counter) explicitly never project future performance — every response carries a
   disclaimer string to that effect (spec: "Do not present these statistics as evidence of future
   profitability").
+
+### 7b. Decision journal implementation — Phase 25 (ADR-0073)
+
+The remaining half of ADR-0036 — the user's own recorded investment/trading decisions, with
+built-in hindsight protection. A single consolidated table (`usr.decision_journal`), same
+rationale as §7a's `usr.paper_trade`: the spec's own field list is one flat record per decision,
+and this platform has no multi-row decision-revision workflow a separate table split would
+actually serve.
+
+```
+POST /journal/decisions                 cfi.journal.service.DecisionJournalService.create_decision
+  │                                               │
+  │                                               ▼
+  │                                  cfi.analyst.snapshot.build_snapshot (the SAME 14-tool
+  │                                  snapshot Phases 21-24 already build) → AnalystRepository.
+  │                                  insert_snapshot (ai.snapshot row, unchanged)
+  │                                               │
+  │                                               ▼
+  │                        AlertRepository.list_alerts(status="active") (relevant alerts, read-only)
+  │                        BriefRepository.latest_completed_brief() (market brief reference, read-only)
+  │                                               │
+  │                                               ▼
+  │                  cfi.journal.context.regime_label / observed_price — denormalized,
+  │                  zero-new-I/O extraction from the snapshot just built (no second source
+  │                  of truth; the snapshot itself remains `decision_snapshot_id`)
+  │                                               │
+  │                                               ▼
+  │                  cfi.journal.repository.DecisionJournalRepository.insert_decision
+  │                  (usr.decision_journal, status="open") — the ONLY method that ever
+  │                  writes the decision-time columns
+  ▼
+POST /journal/decisions/{id}/outcome            record_outcome (status → resolved|invalidated;
+                                                  writes ONLY the disjoint outcome columns, plus
+                                                  a fresh Adapters.price_close lookup to compute
+                                                  actual_price_at_outcome/actual_market_movement_pct
+                                                  when the asset is tracked)
+POST /journal/decisions/{id}/cancel             cancel_decision (status → cancelled; no outcome
+                                                  fields written)
+PATCH /journal/decisions/{id}/notes             update_notes (the one freely mutable field)
+POST/DELETE /journal/decisions/{id}/paper-trade link_paper_trade / unlink_paper_trade — a genuinely
+                                                  mutable cross-reference, resolved via the existing,
+                                                  read-only PaperTradeRepository.trade_id_for_uuid
+GET  /journal/decisions | /decisions/{id}       list_decisions / get_decision
+GET  /journal/review                            review — descriptive groupings only (by type,
+                                                  regime, invalidation condition, outcome)
+GET  /journal/stats                             stats — descriptive counts/averages only
+```
+
+- **Hindsight protection is a repository-API-shape invariant, not a convention.** Every
+  decision-time field (`decision_time`, `asset`, `decision_type`, `thesis`, `expected_scenario`,
+  `alternative_scenario`, `time_horizon`, `entry_price`, `observed_price_at_decision`,
+  `invalidation_condition`, `key_risks`, `confidence`, `decision_snapshot_id`, `market_brief_id`,
+  `relevant_alert_ids`, `market_regime_label`) is written exactly once, by `insert_decision`.
+  `update_notes`/`record_outcome`/`cancel`/`link_paper_trade`/`unlink_paper_trade` each write to
+  an explicitly named, wholly disjoint column set — there is no code path in `cfi.journal` that can
+  reach a decision-time column after creation ("Never silently modify the original decision record
+  based on the outcome"). A source-level test (`test_journal_universe.py`) keeps this claim honest
+  as the code evolves.
+- **No automatic judgment of the user.** `thesis_supported`/`thesis_contradicted`/
+  `invalidation_occurred`/`outcome` are the user's own self-assessment, supplied as plain booleans
+  and a label at `record_outcome` time — the service never infers them from the evidence ("Do not
+  automatically judge the user's intelligence, competence, or ability").
+- **No automatic cross-system conversion.** An alert is never turned into a decision; a paper
+  trade is never created from a journal entry or vice versa — `link_paper_trade`/
+  `unlink_paper_trade` are the only way the two systems connect, and only by reference.
+- **Review/statistics are purely descriptive** (`cfi.journal.stats`): exact-string groupings and
+  counts only, never a ranking or a "best strategy" ("Do not produce a 'best strategy' or rank the
+  user's decisions") — the API response for both endpoints carries a disclaimer string to that
+  effect.
+- **No user/account reference**, same genuine, disclosed limitation as §7a: no `usr.app_user`
+  table exists anywhere in this schema.
 
 ---
 

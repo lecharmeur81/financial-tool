@@ -614,9 +614,9 @@ a notification adapter (in-app first).
 ---
 
 ## ADR-0036 — Decision journal and paper trading
-**Status:** Accepted (paper trading half implemented, Phase 24, ADR-0072 — a single consolidated
-`usr.paper_trade` table rather than the four-table sketch below; decision journal half remains
-proposed)
+**Status:** Accepted (both halves implemented — paper trading, Phase 24, ADR-0072; decision
+journal, Phase 25, ADR-0073 — each a single consolidated table rather than the four/two-table
+sketch below)
 
 **Decision.** Append-only, versioned journal entries linked to snapshots, interpretations, user hypotheses, and invalidation conditions; paper trading
 uses the backtest execution-and-cost model with point-in-time prices; no live execution component and no trading-enabled keys.
@@ -2843,3 +2843,97 @@ methodology, or schema. As in every prior phase, the DB-backed integration tests
 (`test_paper_service.py`, `test_paper_api.py`) are written but have not been executed against a
 real PostgreSQL/TimescaleDB instance in this sandbox (the same environment limitation as every
 prior phase).
+
+---
+
+## ADR-0073 — Phase 25: Decision journal — a single consolidated table, hindsight protection as
+a repository-API-shape invariant, and no automatic judgment of the user
+
+**Status:** Accepted (implemented 2026-10-03)
+
+**Context.** ADR-0036 planned the decision journal as "append-only, versioned journal entries
+linked to snapshots, interpretations, user hypotheses, and invalidation conditions." The Phase 25
+spec asks for a flat "Decision record" per entry (decision-time fields and an outcome, together),
+reuse of the same Phase 21 snapshot infrastructure Phase 24 already reuses, a strict separation
+between "observation" and "interpretation" along the pipeline `thesis → evidence at decision time
+→ expected scenario → invalidation condition → actual outcome`, and — the phase's central
+constraint — a hard guarantee against hindsight bias: "Do not rewrite the original thesis after
+the outcome becomes known... Never silently modify the original decision record based on the
+outcome." Three design questions needed a decision before writing any code: (1) one table, or
+ADR-0036's append-only/versioned model; (2) how to make the hindsight guarantee structural rather
+than a convention someone has to remember; (3) how "integration with Paper Trading" ("Keep the two
+systems logically separate but linkable") should actually be modeled.
+
+**Decision.**
+
+1. **One consolidated `usr.decision_journal` table, not an append-only/versioned log.** The spec's
+   own field list — decision-time fields and outcome fields together, as attributes of a single
+   record — is the same shape ADR-0072 already chose for `usr.paper_trade`, and for the same
+   reason: a separate revision-history table would be new structure this phase was not asked to
+   build. Immutability of the decision-time fields is achieved without versioning (see point 2).
+
+2. **Hindsight protection is enforced by the repository's own API shape, not by a database trigger
+   or a convention.** `DecisionJournalRepository.insert_decision` is the only method that ever
+   writes the sixteen decision-time columns (`decision_time` through `market_regime_label`).
+   Every other write method (`update_notes`, `record_outcome`, `cancel`, `link_paper_trade`,
+   `unlink_paper_trade`) touches an explicitly named, disjoint column set that excludes all of
+   them by construction — there is no code path in `cfi.journal` that can reach a decision-time
+   column after creation. This was chosen over a database-level trigger or constraint (R13: do not
+   over-engineer a guarantee the application layer already provides cleanly) and is kept honest by
+   a source-level test (`test_journal_universe.py::test_post_creation_writes_never_touch_decision_
+   time_columns`) that statically scans every post-creation write method for an assignment to a
+   decision-time column name.
+
+3. **Paper-trade linking is a plain, mutable foreign-key reference, resolved through the existing,
+   unmodified `PaperTradeRepository.trade_id_for_uuid`.** The spec explicitly frames this
+   relationship as independently lifecycled ("a paper trade may exist before or after a journal
+   entry") and forbids automatic creation in either direction. A relationship is not
+   hindsight-sensitive evidence, so `paper_trade_id` lives outside the disjoint-column discipline
+   in point 2 and is set/cleared by its own dedicated `link_paper_trade`/`unlink_paper_trade`
+   methods — the only two write methods in this repository permitted to run more than once over a
+   decision's lifetime for the same reason `notes` is.
+
+4. **`observed_price_at_decision` and `actual_price_at_outcome`/`actual_market_movement_pct` are
+   auto-computed only when the journaled asset is one of the platform's 4 tracked symbols** —
+   reusing, respectively, the already-fetched `get_market_data` result inside the decision-time
+   snapshot (`cfi.journal.context.observed_price`, zero new I/O) and a fresh, lightweight
+   `Adapters.price_close` call at outcome time (mirroring ADR-0072's own pricing pipeline). This
+   makes "actual market movement" more than free text without inventing data for an untracked
+   asset — the spec's own "Entry/observation price if provided" language is read as "if available,"
+   never "assume one."
+
+**Alternatives considered.** An append-only/versioned journal table as ADR-0036 originally sketched
+(rejected: no feature in this phase reads prior versions, and the single-table design already
+satisfies the spec's own field list — same precedent as ADR-0072's rejection of the four-table
+order/fill model). A database `CHECK`/trigger enforcing immutability of the decision-time columns
+(rejected for this phase: the repository's own method boundaries already make the guarantee
+structural, and a trigger would be a second, redundant enforcement point — R13). Treating
+`paper_trade_id` under the same disjoint-write discipline as the other decision-time columns
+(rejected: the spec itself frames this specific reference as a lifecycled, linkable relationship,
+not evidence about the decision).
+
+**Trade-offs.** No revision history exists for a journal entry's notes or any other field — only
+the current value is ever stored (an acceptable simplification; nothing in the spec asks for a
+notes history). `actual_market_movement_pct` is `None` whenever the asset is untracked or either
+price is unavailable, which is the correct behavior but means not every decision gets a computed
+outcome percentage. Decision review groups free-text fields (`decision_type`,
+`invalidation_condition`) by exact literal string only — two differently worded but equivalent
+conditions are counted as two separate groups (documented, same honestly-narrow-over-fabricated
+posture as every other descriptive-statistics module in this codebase).
+
+**Future implications.** If an authentication phase is ever built, `usr.decision_journal` gains a
+nullable `user_id` column (additive, R10), exactly as ADR-0072 already notes for
+`usr.paper_trade`. If a revision history is ever wanted for `notes` or any other field, it is an
+additive append-only side table referencing `decision_journal.id`, not a redesign of this one.
+
+**Consequences.** New package `cfi.journal` (`universe`, `context`, `stats`, `repository`,
+`service`); new `usr.decision_journal` table (migration `0011`); new `POST /journal/decisions`,
+`GET /journal/decisions`, `GET /journal/decisions/{id}`, `PATCH /journal/decisions/{id}/notes`,
+`POST /journal/decisions/{id}/outcome`, `POST /journal/decisions/{id}/cancel`, `POST`/`DELETE
+/journal/decisions/{id}/paper-trade`, `GET /journal/review`, `GET /journal/stats` API routes, all
+running inline in the API request (same no-worker-task rationale as ADR-0072). No change to any
+Phase 5-24 service, methodology, or schema — `cfi.paper`, `cfi.alerts`, `cfi.brief`, and
+`cfi.analyst` are reused entirely unmodified. As in every prior phase, the DB-backed integration
+tests (`test_journal_service.py`, `test_journal_api.py`) are written but have not been executed
+against a real PostgreSQL/TimescaleDB instance in this sandbox (the same environment limitation as
+every prior phase).

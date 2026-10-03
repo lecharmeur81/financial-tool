@@ -1692,7 +1692,77 @@ carries a disclaimer string: simulated performance is never evidence of future p
 ```
 metric:            Paper trading (usr.paper_trade, simulation only, no worker task)
 owner_phase:       24 (2026-10-03)
-status:            implemented (Decision journal half of ADR-0036 remains proposed, not built)
+status:            implemented (Decision journal half of ADR-0036 also implemented, Phase 25)
+```
+
+---
+
+## 5q. Decision journal (implemented in Phase 25)
+
+The remaining half of ADR-0036. One consolidated table, same rationale as §5p's
+`usr.paper_trade` (ADR-0073; ARCHITECTURE.md §7b). Hindsight protection — "Never silently modify
+the original decision record based on the outcome" — is enforced by the repository's own API
+shape: the decision-time columns and the outcome columns are disjoint, written by different
+methods, and no method ever writes to both.
+
+### `usr.decision_journal` (`cfi/db/tables.py::decision_journal`, migration `0011`)
+
+One row per journaled decision. The decision-time columns are set once at creation by
+`insert_decision` and never written again by any other method; the outcome columns are set once,
+later, by `record_outcome`. `notes` is the one freely mutable field; `paper_trade_id` is a
+genuinely mutable cross-reference (a relationship, not evidence).
+
+| Field | Unit | Description |
+|---|---|---|
+| `id` (bigint, PK) / `uuid` (unique) | — | Internal identity / the `decision_id` returned to callers |
+| `created_at`, `updated_at` | — | Lifecycle timestamps |
+| `decision_time` | timestamptz | Always the entry's creation time — there is no backdated decision (no look-ahead by construction, same convention as `usr.paper_trade.entry_time`) |
+| `asset` | — | Free text — not restricted to `cfi.market.universe.ASSET_SYMBOLS`; only the optional auto-captured `observed_price_at_decision` requires a tracked asset |
+| `decision_type` | — | Free text, user-supplied (e.g. `long_spot`, `watch`) — grouped by exact string in review, never inferred |
+| `thesis` | — | The user's own reasoning, required, verbatim, never rewritten after the outcome is known |
+| `expected_scenario`, `alternative_scenario` | — | User-supplied; `null` if not provided — never invented |
+| `time_horizon` | — | Free text, user-supplied |
+| `entry_price` | USD | Purely user-stated; never conflated with `observed_price_at_decision` below |
+| `observed_price_at_decision` | USD | Auto-captured from the SAME decision-time snapshot's own already-fetched `get_market_data` result (`cfi.journal.context.observed_price`) — zero new adapter calls; `null` if `asset` is not one of the platform's 4 tracked symbols or the price was itself unavailable (missing is first-class, R3) |
+| `invalidation_condition` | — | User-supplied; grouped by exact string in review |
+| `key_risks` | — | User-supplied free text |
+| `confidence` | ratio (0-1) | User-stated only; `null` if not provided — "Do not invent user decisions or confidence levels" |
+| `notes` | — | The one field mutable at any time, via its own `update_notes` method |
+| `status` | — | `open` \| `resolved` \| `invalidated` \| `cancelled` (lifecycle; `open` → any of the three terminal states) |
+| `outcome` | — | User-supplied label (`as_expected` \| `partially_as_expected` \| `not_as_expected`), set once by `record_outcome`; `null` until then |
+| `thesis_supported`, `thesis_contradicted`, `invalidation_occurred` | — | User's own self-assessment booleans, never system-inferred ("Do not automatically judge") |
+| `evidence_changed_notes` | — | User-supplied free text: what evidence changed after the decision |
+| `actual_market_movement_text` | — | User-supplied free text description of what actually happened |
+| `actual_price_at_outcome` | USD | A fresh, lightweight `Adapters.price_close` lookup at outcome time — computed only when `asset` is tracked; `null` otherwise |
+| `actual_market_movement_pct` | % | `(actual_price_at_outcome - decision_price) / decision_price * 100`, where `decision_price` is `observed_price_at_decision` or, failing that, `entry_price` — pure arithmetic from two observed/stated prices, computed only when both are available, never invented |
+| `lessons_notes` | — | User-supplied free text |
+| `outcome_timestamp` | timestamptz | Set only by `record_outcome`; `null` for `open`/`cancelled` |
+| `decision_snapshot_id` | — | FK to `ai.snapshot.id` — the SAME immutable 14-tool snapshot Phases 21-24 already build, captured at creation time — the decision's one true evidence record |
+| `market_brief_id` | — | FK to `ai.brief.id` — the latest *completed* Daily Market Brief at decision time, if any |
+| `relevant_alert_ids` (jsonb array) | — | UUIDs of every `usr.alert_event` row `active` at decision time (capped at `cfi.paper.universe.RELEVANT_ALERTS_LIMIT`, reused unchanged) — contextual evidence only; never auto-converted into a decision |
+| `market_regime_label` | — | Denormalized copy of the snapshot's own `get_market_regime` label at decision time (`cfi.journal.context.regime_label`) — kept only because grouping by a plain column is cheaper than a jsonb path; the snapshot remains the source of truth |
+| `paper_trade_id` | — | FK to `usr.paper_trade.id` — a genuinely mutable cross-reference, set/cleared by `link_paper_trade`/`unlink_paper_trade`; never created automatically in either direction |
+
+**No user/account reference:** same genuine, disclosed limitation as §5p — no `usr.app_user` or
+equivalent table exists anywhere in this schema.
+
+### Decision review and statistics (`cfi/journal/stats.py`, pure functions)
+
+`decision_stats`: `total_decisions`, `open_decisions`, `resolved_decisions`,
+`invalidated_decisions`, `cancelled_decisions`, `thesis_supported_count`,
+`thesis_contradicted_count`, `invalidation_occurred_count`, `average_time_to_resolution_hours`.
+
+`decision_review`: `decisions_by_type`, `decisions_by_regime`, `decisions_by_invalidation_condition`,
+`decisions_by_outcome` — exact-string groupings only, computed live over current rows, never a
+separately maintained counter (R3). No clustering or semantic matching of free-text fields is
+attempted (a documented limitation: two differently worded but equivalent invalidation conditions
+are counted as two separate groups). Both API responses carry a disclaimer string: these are
+descriptive statistics, not recommendations, and never a ranking of the user's own decisions.
+
+```
+metric:            Decision journal (usr.decision_journal, no worker task)
+owner_phase:       25 (2026-10-03)
+status:            implemented (completes ADR-0036; paper trading half already implemented Phase 24)
 ```
 
 ---

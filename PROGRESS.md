@@ -2,18 +2,17 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 24 — Paper Trading → implemented, self-verified in the sandbox (928 unit tests, up from
-893; ruff/format/mypy strict all clean; DB-backed integration suite written but requires the real
-PostgreSQL/TimescaleDB instance to run — see the Phase 24 log entry). Simulation-only paper trading: a
-single consolidated `usr.paper_trade` table (migration `0010`), reusing the same observed-price adapter
-(`cfi.divergence.adapters.Adapters.price_close`) and versioned cost model (`cfi.backtest.costs`) as
-backtesting, the same immutable 14-tool evidence snapshot Phases 21-23 already build (captured at decision
-time), deterministic long/short P&L with leverage handled correctly (dollar P&L independent of leverage,
-return% on margin), live unrealized P&L for open positions, and a full API (create/list/get/close/cancel/
-positions/performance) running inline with no new worker task. No exchange connection, no trading
-credential, no real execution pathway anywhere in the new code. See the Phase 24 log entry below for the
-honest design deviations from ADR-0036's original four-table sketch (ADR-0072) and for what was (and was
-not) verified.
+**Current phase:** 25 — Decision Journal → implemented, self-verified in the sandbox (957 unit tests, up
+from 928; ruff/format/mypy strict all clean; DB-backed integration suite written but requires the real
+PostgreSQL/TimescaleDB instance to run — see the Phase 25 log entry). Completes ADR-0036: a single
+consolidated `usr.decision_journal` table (migration `0011`), reusing the same immutable 14-tool evidence
+snapshot Phases 21-24 already build (captured at decision time, never rebuilt afterward), a repository
+whose own API shape makes hindsight protection structural (decision-time columns and outcome columns are
+disjoint, written by different methods, never both by the same one), descriptive-only review/statistics
+(no ranking, no "best strategy"), and a full API (create/list/get/update-notes/record-outcome/cancel/
+link-unlink-paper-trade/review/stats) running inline with no new worker task. No automatic decision
+generation, no trading advice, no real execution pathway anywhere in the new code. See the Phase 25 log
+entry below for the hindsight-protection design and for what was (and was not) verified.
 **Next phase:** to be defined by the user (do not start automatically — R13)
 
 ---
@@ -47,7 +46,7 @@ not) verified.
 | 22 | Daily Market Brief | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 22 log entry) |
 | 23 | Alerts | ✅ Complete — self-verified in sandbox AND on Windows (see Phase 23 log entry) |
 | 24 | Paper trading | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 24 log entry) |
-| — | Decision journal | ⏳ Not started |
+| 25 | Decision journal | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 25 log entry) |
 | — | Executive dashboard | ⏳ Not started |
 | — | Security + AI + stress testing | ⏳ Not started |
 | — | Production | ⏳ Not started |
@@ -2288,4 +2287,134 @@ endpoints … Do NOT start Phase 25"):
   final report.
 
 **Next step:** awaiting the user's next instruction — **not proceeding to Phase 25** per the
+user's own explicit instruction (R13).
+
+---
+
+### 2026-10-03 — Phase 25: Decision Journal — one consolidated table, hindsight protection as a
+repository-API-shape invariant, completing ADR-0036 (ADR-0073)
+
+**What changed** (the user's exact spec: "## Phase 25 — Decision Journal … Build a structured
+decision-journal system on top of the completed Phases 5-24 … This is a decision-analysis and
+learning system, not a trading recommendation engine … Do NOT … Automatically generate trading
+decisions … Introduce real trading execution … Start Phase 26 … Then STOP. Do not proceed to
+Phase 26"):
+
+- New package `cfi.journal`:
+  - `universe.py` — fixed vocabulary: `STATUS_VALUES` (`open`/`resolved`/`invalidated`/
+    `cancelled`), `VALID_TRANSITIONS` (`open` → any of the three terminal states, all terminal),
+    `DECISION_JOURNAL_SCHEMA_VERSION`, reuses `cfi.market.universe.ASSET_SYMBOLS` and
+    `cfi.paper.universe.RELEVANT_ALERTS_LIMIT` unchanged.
+  - `context.py` — pure, database-free extraction over an already-built
+    `cfi.analyst.snapshot.Snapshot`: `regime_label` and `observed_price`, both reading only
+    fields the snapshot's own `get_market_regime`/`get_market_data` tool calls already fetched —
+    zero new I/O, never a second source of truth (the snapshot itself remains the evidence of
+    record via `decision_snapshot_id`).
+  - `stats.py` — `decision_stats`/`decision_review`, pure functions over already-persisted rows
+    (never a separately maintained counter): decision counts by status, thesis-supported/
+    contradicted/invalidation-occurred counts, average time-to-resolution, and exact-string
+    groupings by decision type, market regime, invalidation condition, and outcome — explicitly
+    no ranking, clustering, or "best strategy" output (enforced by what the dataclasses do not
+    contain, not by a disclaimer alone).
+  - `repository.py` — `DecisionJournalRepository`, Core insert/update-per-write style identical to
+    `PaperTradeRepository`/`AlertRepository` (R13). `insert_decision` is the only method that ever
+    writes the sixteen decision-time columns; `update_notes`, `record_outcome`, `cancel`,
+    `link_paper_trade`, `unlink_paper_trade` each write to an explicitly named, wholly disjoint
+    column set — this is what makes hindsight protection a property of the repository's own API
+    shape rather than a convention to remember.
+  - `service.py` — `DecisionJournalService`: `create_decision` (validates asset/decision-type/
+    thesis/confidence, builds and inserts the SAME 14-tool evidence snapshot Phases 21-24 already
+    build via `cfi.analyst.snapshot.build_snapshot`/`AnalystRepository.insert_snapshot`, captures
+    currently `active` alerts and the latest completed brief as contextual-only references,
+    extracts `market_regime_label`/`observed_price_at_decision` from that same snapshot with zero
+    new I/O, inserts the decision as `open`), `update_notes`, `record_outcome` (enforces the
+    `open`-only transition, computes `actual_price_at_outcome`/`actual_market_movement_pct` via a
+    fresh, lightweight `Adapters.price_close` lookup only when the asset is tracked and never
+    invents a figure otherwise), `cancel_decision`, `link_paper_trade`/`unlink_paper_trade`
+    (resolving the paper-trade UUID via the existing, unmodified
+    `PaperTradeRepository.trade_id_for_uuid`), `get_decision`, `list_decisions`, `review`, `stats`.
+    Every "now" is an optional parameter (defaults to the real clock, overridable for tests), the
+    same convention `PaperTradingService`/`AlertService` already use.
+- `cfi/db/tables.py` — added `decision_journal` table in the `usr` schema (bigint identity + uuid
+  convention, matching every other new table since Phase 21).
+- `backend/migrations/versions/20261003_0011_decision_journal.py` — new migration:
+  `usr.decision_journal` table, additive only, FKs to `ai.snapshot`/`ai.brief`/`usr.paper_trade`.
+  Confirmed against the real Alembic chain (not assumed, R7): head is `0011`,
+  `0011 → 0010 → … → 0001 → None`, unbroken.
+- `backend/src/cfi/api/routes/journal.py` — new file: `POST /journal/decisions`, `GET
+  /journal/decisions`, `GET /journal/decisions/{id}`, `PATCH /journal/decisions/{id}/notes`,
+  `POST /journal/decisions/{id}/outcome`, `POST /journal/decisions/{id}/cancel`, `POST`/`DELETE
+  /journal/decisions/{id}/paper-trade`, `GET /journal/review`, `GET /journal/stats` — all run
+  inline in the API request (no Celery task, same rationale as `paper.py`: no AI call and no
+  periodic sweep is needed).
+- `backend/src/cfi/api/app.py` — added `journal` import and `app.include_router(journal.router)`.
+- `backend/tests/unit/test_journal_universe.py`, `test_journal_context.py`, `test_journal_stats.py`
+  — all new (29 tests total, all pure/database-free), including a source-level guard
+  (`test_journal_package_contains_no_execution_or_advice_pathway`, mirroring Phase 24's own
+  no-real-execution scan) and a second source-level guard
+  (`test_post_creation_writes_never_touch_decision_time_columns`) that statically parses
+  `cfi.journal.repository`'s AST to confirm no post-creation write method assigns to a
+  decision-time-only column.
+- `backend/tests/integration/test_journal_service.py`, `test_journal_api.py` — new, DB-gated,
+  written but not executed (reuse the same Coinbase-fake harness Phase 24's own paper suite
+  already uses to seed real daily bars); 17 and 6 tests respectively, covering decision creation,
+  decision-time snapshot capture, thesis preservation across an outcome, hindsight protection,
+  invalidation conditions, paper-trade linking (including an unknown-trade rejection), alert/brief
+  linking, historical review/stats, missing market data, invalid state transitions, and data
+  provenance.
+- `backend/tests/integration/conftest.py` — added `"usr.decision_journal"` to `DATA_TABLES`.
+- `ARCHITECTURE.md` — added `### 7b. Decision journal implementation — Phase 25 (ADR-0073)`;
+  updated §7's closing status line.
+- `DATA_DICTIONARY.md` — added `## 5q. Decision journal (implemented in Phase 25)`.
+- `DECISIONS.md` — added `## ADR-0073`; updated ADR-0036's status line to "Accepted (both halves
+  implemented — paper trading, Phase 24, ADR-0072; decision journal, Phase 25, ADR-0073)".
+- `PROGRESS.md` — this entry; updated the phase table and header.
+
+**Tests run and results**
+
+| Test | Result |
+|---|---|
+| New unit tests: `test_journal_universe.py` (8 — fixed vocabulary, valid/terminal transitions, no self-transitions, a no-execution/no-advice source scan, and the hindsight-protection AST scan over `repository.py`), `test_journal_context.py` (11 — regime-label and observed-price extraction, including unavailable-tool, missing-field, non-string/non-numeric, and untracked-asset cases), `test_journal_stats.py` (10 — empty journal, status-count splits, thesis-supported/contradicted counts, invalidation-occurred count, average time-to-resolution over mixed statuses, exact-string groupings for type/regime/invalidation-condition/outcome including the documented no-clustering limitation, and a static guard that `DecisionReview` never grows a ranking/score field) — 29 new tests total | all pass |
+| New integration tests (written, statically checked, DB-gated): `test_journal_service.py` (17 — decision creation and the decision-time snapshot, never-inventing confidence, an untracked asset still journaling without a fabricated price, hindsight protection verified field-by-field across `record_outcome`, cancel recording no outcome, resolving/cancelling an already-terminal decision rejected, link/unlink paper-trade round trip, linking an unknown paper trade rejected, relevant alert IDs captured at decision time, missing market data producing a `None` field rather than a guess, review/stats reflecting real recorded decisions, an unknown decision rejected, notes updates touching only the notes field, data provenance via the stored snapshot ID, empty thesis and out-of-range confidence rejected before any snapshot is built), `test_journal_api.py` (6 — full create/list/get/notes/outcome round trip through the real API with a disclaimer check on both review and stats endpoints, an empty thesis rejected with 422, an unknown decision returning 404, a cancel round trip including the second-cancel rejection, a paper-trade link/unlink round trip, and an unknown status filter returning 404) | **written and statically checked (ruff/mypy), but not executed** — no PostgreSQL/TimescaleDB instance is reachable in this sandbox; same already-documented limitation as every DB-backed suite since Phase 21 |
+| `uv run pytest tests/unit -q` | **957 passed** (up from 928 before this phase) |
+| `uv run pytest tests/integration/test_journal_service.py tests/integration/test_journal_api.py -q` (no database) | 23 skipped (confirms every new module imports and collects cleanly) |
+| `uv run ruff check .` | All checks passed! |
+| `uv run ruff format --check .` | 378 files already formatted |
+| `uv run mypy` (strict; src, tests, migrations) | Success: no issues found in 373 source files |
+| Alembic migration chain (`ScriptDirectory`, no DB connection needed) | head is `0011`, `0011 → 0010 → … → 0001 → None` — unbroken |
+
+**Known limitations**
+
+- The DB-backed integration suite (`test_journal_service.py`, `test_journal_api.py`, and every
+  other `ai.*`/`usr.*` integration test since Phase 21) was written and statically checked but
+  **not executed against a real PostgreSQL/TimescaleDB instance** — none is reachable in this
+  sandbox. Same, already-documented limitation carried forward unchanged.
+- **One consolidated `usr.decision_journal` table, not an append-only/versioned log** as
+  ADR-0036's original Phase 2 planning sketched (see ADR-0073 for the full reasoning) — the Phase
+  25 spec's own "Decision record" field list is a single flat record, and no feature this phase
+  was asked to build reads a prior version of a field.
+- **No revision history for `notes` or any other mutable field** — only the current value is
+  stored. A documented simplification, not an oversight: nothing in the spec asks for a notes
+  history, and an additive side table could be added later without a redesign.
+- **`actual_price_at_outcome`/`actual_market_movement_pct` are `None` whenever the journaled asset
+  is not one of the platform's 4 tracked symbols (`cfi.market.universe.ASSET_SYMBOLS`), or the
+  price itself is unavailable** — missing is first-class (R3), never a guessed figure.
+- **Decision review groups free-text fields by exact literal string only** — two differently
+  worded but equivalent invalidation conditions (or decision types) are counted as two separate
+  groups. No clustering or semantic matching is attempted anywhere in this phase, same posture as
+  every other descriptive-statistics module in this codebase.
+- **No user/account reference field.** No `usr.app_user` or equivalent table exists anywhere in
+  this schema (no authentication phase has been built) — a genuine, disclosed limitation, not an
+  invented placeholder, same as §7a/§5p already document for paper trading.
+- Hindsight protection is enforced at the application layer (the repository's own method
+  boundaries), not by a database trigger or constraint — a deliberate, documented simplicity
+  choice (R13), kept honest by a source-level AST scan test rather than relying on convention
+  alone.
+- No frontend work this phase (not requested; the spec explicitly forbids unrelated frontend work).
+- No existing market indicator, calculation, methodology, or Phase 5-24 service was modified;
+  `cfi.analyst`, `cfi.brief`, `cfi.alerts`, and `cfi.paper` are all reused entirely unchanged.
+- Delivered to the Windows machine and verified there before the commit named in this session's
+  final report.
+
+**Next step:** awaiting the user's next instruction — **not proceeding to Phase 26** per the
 user's own explicit instruction (R13).
