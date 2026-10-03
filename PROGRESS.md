@@ -11,8 +11,8 @@ manufactured certainty, and "capital moved from X to Y" stated as fact, a 12-sec
 order is enforced by construction (ten intelligence domains structurally distinguished within three of those
 sections — ADR-0069 correction), a monthly budget ceiling enforced against `ai.usage`, and a full audit
 trail (`ai.snapshot`/`ai.interpretation`/`ai.usage`, migration `0007`). Delivered to Windows, tests and
-static checks re-run there, and committed as `3315a58`/`e0563b6` (initial) and the ADR-0069 correction commit
-below — see the Phase 21 log entries.
+static checks re-run there, and committed as `3315a58`/`e0563b6` (initial) and `ba20939` (ADR-0069
+correction) — see the Phase 21 log entries.
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -2026,6 +2026,14 @@ have not yet been executed against a real PostgreSQL/TimescaleDB instance.
 
 **Documentation updated:** `ARCHITECTURE.md` (§5.17/§5.18), `DECISIONS.md` (ADR-0069), `PROGRESS.md` (this
 entry).
+
+**Delivered to Windows, re-verified, committed.** The 11 changed files (4 analyst source files, 3 unit test
+files, 1 integration test file, 3 docs files) were copied via the device bridge and read back (md5) to
+confirm a byte-for-byte match. On Windows: `uv run pytest tests/unit tests/api -q` → **833 passed**;
+`uv run pytest tests/integration/test_analyst_service.py -q` → 5 skipped (same unchanged DB limitation);
+`uv run ruff check .` → All checks passed!; `uv run ruff format --check .` → 324 files already formatted;
+`uv run mypy --no-incremental .` → Success, no issues found in 319 source files. Committed as `ba20939` on
+`main` ("[P21] correction: structurally distinguish all 10 intelligence domains (ADR-0069)").
 
 **Next step:** none — correction complete; awaiting the user's next instruction (R13: do not proceed to
 Phase 22 automatically).
