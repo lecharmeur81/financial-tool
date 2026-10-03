@@ -2,10 +2,11 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 26 — Executive Dashboard → implemented, self-verified in the sandbox. Backend: one new
-pass-through endpoint (`GET /api/v1/market/summary`, reusing `cfi.analyst.tools.get_market_data` verbatim),
-2 new integration tests (DB-gated, written but not executed); unit suite unchanged at 957 passing;
-ruff/format/mypy strict all clean. Frontend: the Executive Dashboard page (`app/page.tsx`) rewritten from its
+**Current phase:** 26 — Executive Dashboard → implemented, verified in the sandbox AND on Windows
+(`926d4ad`). Backend: one new pass-through endpoint (`GET /api/v1/market/summary`, reusing
+`cfi.analyst.tools.get_market_data` verbatim), 2 new integration tests (DB-gated, written but not executed —
+no `CFI_DATABASE_URL`/`CFI_REDIS_URL` on either machine); unit suite unchanged at 957 passing on both;
+ruff/format/mypy strict all clean on both. Frontend: the Executive Dashboard page (`app/page.tsx`) rewritten from its
 placeholder into 12 required sections, each reusing its domain's existing API output unchanged — regime,
 market overview, a compact capital-flow/intelligence overview, divergences, anomalies, capital rotation,
 institutional/whale/retail (kept visually distinct), derivatives & liquidity, macro, alerts, daily brief, and
@@ -49,7 +50,7 @@ to any Phase 5-25 backend service — see the Phase 26 log entry below for the f
 | 23 | Alerts | ✅ Complete — self-verified in sandbox AND on Windows (see Phase 23 log entry) |
 | 24 | Paper trading | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 24 log entry) |
 | 25 | Decision journal | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 25 log entry) |
-| 26 | Executive dashboard | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 26 log entry) |
+| 26 | Executive dashboard | ✅ Complete — verified in sandbox AND on Windows (`926d4ad`) (see Phase 26 log entry) |
 | — | Security + AI + stress testing | ⏳ Not started |
 | — | Production | ⏳ Not started |
 | — | Real-time intelligence | ⏳ Not started |
@@ -2497,9 +2498,9 @@ all five request-time pages confirmed dynamic).
 **Known limitations:**
 
 - DB-backed integration tests for the new `/market/summary` endpoint are written but not executed
-  against a real PostgreSQL/TimescaleDB instance in this sandbox — the same, already-documented
-  environment limitation as every prior phase. The spec explicitly says not to spend time solving
-  this.
+  against a real PostgreSQL/TimescaleDB instance on either machine — the same, already-documented
+  environment limitation as every prior phase (`CFI_DATABASE_URL`/`CFI_REDIS_URL` unset on both).
+  The spec explicitly says not to spend time solving this.
 - Regime, divergence, anomaly, rotation, market-structure, and liquidity-overview have no
   dedicated page of their own — only their dashboard section. This is a deliberate scope decision
   (ADR-0074), not an oversight; a future phase can add dedicated pages reusing the client modules
@@ -2508,8 +2509,14 @@ all five request-time pages confirmed dynamic).
   and derivatives scores (the whale and derivatives APIs are per-asset, with no all-assets
   overview endpoint, unlike institutional's `/overview`) — consistent with how `/whales` and
   `/derivatives` already default to BTC.
-- Not delivered to or verified on the Windows machine yet in this session; delivery/commit remains
-  pending, same posture as Phases 22, 24, and 25 at this point in their own sessions.
+- Frontend checks (`lint`/`format:check`/`typecheck`/`test`/`build`) were run and verified in the
+  sandbox only; the Windows machine's `device_bash` workspace (a separate isolated Linux VM, not
+  the Windows host directly) had no `pnpm`/`node_modules` for this frontend and lacked permissions
+  to install `pnpm` via `corepack` in this session, so those checks could not be independently
+  re-run there. Backend checks (`ruff`/`mypy`/`pytest tests/unit`) WERE re-run and verified on
+  Windows (957 passing, all clean) and all 41 changed/added files were confirmed byte-identical
+  by MD5 across both machines before committing. The user can run `pnpm install && pnpm lint &&
+  pnpm typecheck && pnpm test && pnpm build` from `frontend/` on Windows to confirm independently.
 - No existing market indicator, calculation, methodology, or Phase 5-25 backend service was
   modified; every section reuses its domain's existing API output unchanged.
 
