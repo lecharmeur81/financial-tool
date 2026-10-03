@@ -8,9 +8,11 @@ entry). A controlled, evidence-grounded AI interpretation layer (L5): 14 read-on
 existing domain service (no raw database access), an immutable hashed evidence snapshot, a deterministic
 (non-AI) validator enforcing exact-number grounding and banning bullish/bearish verdicts, trading directives,
 manufactured certainty, and "capital moved from X to Y" stated as fact, a 12-section response schema whose
-order is enforced by construction, a monthly budget ceiling enforced against `ai.usage`, and a full audit
+order is enforced by construction (ten intelligence domains structurally distinguished within three of those
+sections — ADR-0069 correction), a monthly budget ceiling enforced against `ai.usage`, and a full audit
 trail (`ai.snapshot`/`ai.interpretation`/`ai.usage`, migration `0007`). Delivered to Windows, tests and
-static checks re-run there, and committed as `3315a58` — see the Phase 21 log entry below.
+static checks re-run there, and committed as `3315a58`/`e0563b6` (initial) and the ADR-0069 correction commit
+below — see the Phase 21 log entries.
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -1974,3 +1976,56 @@ Committed as `3315a58` on `main` ("[P21] Claude AI Analyst").
 
 **Next step:** none — phase complete; awaiting the user's next instruction (R13: do not proceed to Phase 22
 automatically).
+
+### 2026-10-03 — Phase 21 correction (ADR-0069): ten intelligence domains made structurally explicit
+
+**What changed.** Two gaps found against the user's own spec: (1) institutional/whale/retail findings were
+merged into one flat `capital_participant_behavior` list, and derivatives/liquidity into one flat
+`derivatives_liquidity_context` list — the prompt told Claude what belonged where, but the schema could not
+tell them apart afterward; (2) macro, market structure, divergences, anomalies and capital rotation had no
+dedicated placement in the output schema at all, despite each having its own analyst tool feeding the
+snapshot. The user's instruction was explicit: keep the 12-section structure, make all 10 domains
+structurally identifiable without expanding to 18 flat top-level fields, and make it impossible for the
+validator to let Claude claim to have analyzed a domain whose data was unavailable — without requiring
+fabricated filler content for a domain that genuinely has nothing to report.
+
+- `cfi.analyst.schema`: `capital_participant_behavior`, `derivatives_liquidity_context` and `key_changes`
+  changed from a flat `list[EvidenceItem]` to three new nested models — `ParticipantBehavior
+  {institutional, whale, retail}`, `MarketContext {derivatives, liquidity}`, `KeyChanges {macro,
+  market_structure, divergences, anomalies, capital_rotation}`. The 12 top-level section names and their
+  order are unchanged; only these three fields' type changed.
+- `cfi.analyst.universe`: new `DOMAIN_TOOL_IDS` (domain → tool_id) and `DOMAIN_LOCATIONS` (domain →
+  (top_level_field, sub_field)) — one mapping, reused by the schema's own tests, the prompt, and the
+  validator, so the three can never drift apart. Removed the three now-nested field names from
+  `GROUNDED_LIST_SECTIONS` (they get their own domain-aware check instead).
+- `cfi.analyst.validator`: new `_check_domain_sections`/`_field_id_tool`. Per domain: (a) a cited field_id
+  must belong to that domain's own tool — a whale field cited inside "institutional" fails even though the
+  number itself is real; (b) if the domain's own tool has `status != "ok"` in the snapshot, any non-empty
+  content for it must contain `"Insufficient data."` or `"Sources conflict."` — an empty list remains fully
+  valid (never required to fabricate filler for an unavailable domain).
+- `cfi.analyst.prompts`: the system prompt's section-shape description and the task's domain list are now
+  generated from `DOMAIN_LOCATIONS` (previously the task prompt did not mention macro or market structure by
+  name at all); explicitly restates that an unavailable domain gets `"Insufficient data."`, never a forced
+  narrative.
+- No change to any Phase 5-20 service, the 14-tool catalog's membership, the 12 top-level section names/
+  order, or the existing grounding/banned-language checks (ADR-0068) — this is a structural refinement of
+  three fields' internal shape only.
+
+**Database changes:** none.
+
+| Check | Result |
+|---|---|
+| New targeted tests: 6 in `test_analyst_schema.py` (institutional/whale/retail distinguishable, derivatives/liquidity distinguishable, all 5 "additional intelligence" domains placed, participant-behavior/key-changes require all their domain keys, 12-top-level-sections-unchanged), 7 in `test_analyst_validator.py` (5 domains ground correctly together, institutional/whale/retail independently grounded, derivatives/liquidity independently grounded, cross-domain field_id citation fails, missing-domain-without-disclosure fails, missing-domain-with-disclosure passes, missing-domain-with-empty-list passes), 2 in `test_analyst_prompts.py` (every domain subkey named in the system prompt, every domain named in the task) | all 15 pass |
+| `uv run pytest tests/unit tests/api -q` (full regression, no database needed) | **833 passed** (818 + 15 new) |
+| `uv run pytest tests/integration/test_analyst_service.py -q` | 5 skipped — fixture updated to the new nested shape, still requires a real database (unchanged limitation, not re-attempted this task) |
+| `uv run ruff check .` / `ruff format --check .` | All checks passed! / 324 files already formatted |
+| `uv run mypy --no-incremental .` | Success: no issues found in 319 source files |
+
+**Known limitations** — unchanged from Phase 21's own log entry: the five DB-backed `ai.*` integration tests
+have not yet been executed against a real PostgreSQL/TimescaleDB instance.
+
+**Documentation updated:** `ARCHITECTURE.md` (§5.17/§5.18), `DECISIONS.md` (ADR-0069), `PROGRESS.md` (this
+entry).
+
+**Next step:** none — correction complete; awaiting the user's next instruction (R13: do not proceed to
+Phase 22 automatically).

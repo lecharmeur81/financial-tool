@@ -516,6 +516,16 @@ API POST /analyst/analyze                              Celery "ai" queue, task a
   cites the snapshot `field_id`(s) it relies on. Section order is enforced **by construction**:
   `cfi.analyst.schema.AnalystResponse`'s Pydantic field order is the one true order, not a
   property of the incoming JSON (ADR-0068).
+- **Ten intelligence domains, structurally distinguished within three of those twelve sections
+  (ADR-0069).** `capital_participant_behavior` is an object `{institutional, whale, retail}`
+  (each a list of evidence items), `derivatives_liquidity_context` is `{derivatives, liquidity}`,
+  and `key_changes` is `{macro, market_structure, divergences, anomalies, capital_rotation}` — the
+  five domains that previously had no dedicated placement at all. The 12 top-level section names
+  and their order are unchanged; only these three fields' *type* changed, from a flat list to a
+  named per-domain object, so each domain is structurally identifiable rather than merged into a
+  list the prompt alone described. Every domain maps 1:1 to one of the 14 analyst tools
+  (`cfi.analyst.universe.DOMAIN_TOOL_IDS`), reusing the same tool_id-prefixed `field_id` every
+  snapshot field already carries — no new identification mechanism was invented.
 - **Model is a configuration value** (`Settings.anthropic_model`, currently `claude-sonnet-5`),
   never hard-coded; model, prompt version, and snapshot version are stored with every
   `ai.interpretation` row.
@@ -558,6 +568,12 @@ API POST /analyst/analyze                              Celery "ai" queue, task a
   stated as fact (not hedged), and historical-similarity-as-guarantee phrasing. On failure, Claude
   is retried exactly once with the validator's own errors appended to the prompt; a second failure
   is stored as `failed` with those errors — never silently reinterpreted or partially accepted.
+- **Per-domain checks (ADR-0069):** for each of the 10 structured domains, every cited `field_id`
+  must belong to *that domain's own tool* (a whale `field_id` cited inside the "institutional"
+  bucket fails, even though the number itself is real and grounded elsewhere); and if a domain's
+  own tool had no data in this snapshot (`status != "ok"`), any non-empty content for that domain
+  must contain `"Insufficient data."` or `"Sources conflict."` — Claude may still leave the list
+  empty (not every domain needs a finding for every question), it may just never fabricate one.
 - **Auditability:** every `ai.interpretation` row carries its `snapshot_id` (linking to the
   immutable, hashed `ai.snapshot.payload` Claude actually saw), `prompt_version`, `model`,
   `tools_called`, `validation_status`/`validation_errors`, `attempt_count`, `data_quality_state`,

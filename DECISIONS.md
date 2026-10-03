@@ -2538,3 +2538,64 @@ snapshot verbatim (`cfi.analyst.universe.KNOWN_PLATFORM_LIMITATIONS`): the untra
 universes and meme-asset proxy status (Phase 20), the 4-asset "large caps" universe, and missing flow
 corroboration for some rotation nodes — none of Phases 1-20's own methodologies were changed to accommodate
 Claude.
+
+## ADR-0069 — Phase 21 correction: ten intelligence domains made structurally explicit within the
+existing 12-section schema
+
+**Status:** Accepted (implemented 2026-10-03)
+
+**Context.** After Phase 21 shipped, review found two gaps against the user's own spec: (1) institutional,
+whale and retail findings were all placed into one flat `capital_participant_behavior: list[EvidenceItem]`,
+and derivatives/liquidity findings into one flat `derivatives_liquidity_context: list[EvidenceItem]` — the
+*prompt* told Claude what belonged in each bucket, but the *schema* could not tell the three (or two) apart
+after the fact; and (2) five domains that already had their own analyst tool and fed the snapshot — macro,
+market structure, divergences, anomalies, capital rotation — had no dedicated placement in the response
+schema at all, relying entirely on Claude's own judgment to mention them somewhere. The user's instruction
+was explicit: preserve the existing 12-section `AnalystResponse` structure, make all 10 domains structurally
+identifiable without expanding to 18 flat top-level fields, prefer nested structured fields, and ensure the
+validator can tell when Claude claims to have analyzed a domain whose own data was unavailable — without
+requiring fabricated filler content for a domain that genuinely has nothing to report.
+
+**Decision.**
+
+1. **The 12 top-level section names and their order are unchanged.** Only the *type* of three of them
+   changed: `capital_participant_behavior` (flat list → `ParticipantBehavior {institutional, whale, retail}`),
+   `derivatives_liquidity_context` (flat list → `MarketContext {derivatives, liquidity}`), and `key_changes`
+   (flat list → `KeyChanges {macro, market_structure, divergences, anomalies, capital_rotation}`). This was
+   the smallest schema change that makes every domain structurally identifiable: it reuses "Key Changes" —
+   already the platform's generic "what changed" bucket (CLAUDE.md R6 item 5) — as the home for the five
+   domains that had no placement at all, rather than adding a 13th top-level field or exploding the response
+   into 18 flat sections (both of which the user explicitly asked to avoid).
+
+2. **One domain-to-tool mapping, reused by the schema, the prompt and the validator
+   (`cfi.analyst.universe.DOMAIN_TOOL_IDS`/`DOMAIN_LOCATIONS`).** Every domain maps 1:1 to one of the 14
+   existing analyst tools, and every snapshot `field_id` is already prefixed with its tool_id (`snapshot.py`'s
+   `_flatten`, unchanged since Phase 21) — so no new tagging mechanism was invented (R13). The validator
+   derives a field_id's tool with a one-line prefix split and rejects an evidence item whose cited field_id
+   belongs to a *different* domain's tool (e.g. a whale field cited inside the "institutional" bucket) — the
+   schema split is enforced, not merely requested by the prompt.
+
+3. **The validator checks domain availability, not just domain identity.** For each of the 10 domains, if
+   that domain's own tool has `status != "ok"` in this snapshot, any non-empty content for that domain must
+   contain `"Insufficient data."` or `"Sources conflict."` — this makes it structurally impossible for Claude
+   to present unsupported analysis for a domain it was never given data for. Per the user's explicit
+   instruction, an **empty list remains a fully valid answer** for an unavailable domain — the validator never
+   requires fabricated filler text, it only rejects fabricated *claims*.
+
+4. **The prompt was corrected to match the schema, not the other way around.** The system prompt's section
+   description and the task's domain list (previously silent on macro and market structure, and only
+   generically mentioning "anomalies"/"capital rotation") are now generated from the same
+   `DOMAIN_TOOL_IDS`/`DOMAIN_LOCATIONS` mapping the schema and validator use, so the three cannot drift apart
+   again. The task explicitly enumerates all 12 domains from the user's own "Prompt correction" list and
+   restates that a domain with insufficient data gets `"Insufficient data."`, never a forced narrative.
+
+**Consequences.** `cfi.analyst.schema` gained three new nested models (`ParticipantBehavior`, `MarketContext`,
+`KeyChanges`); `cfi.analyst.universe` gained `DOMAIN_TOOL_IDS`/`DOMAIN_LOCATIONS`; `cfi.analyst.validator`
+gained `_check_domain_sections`/`_field_id_tool`; `cfi.analyst.prompts` regenerated its section-shape and
+task-domain-list text from the same mapping. No change to any Phase 5-20 service, to the 14-tool catalog's
+membership, to the 12 top-level section names/order, or to the grounding/banned-language checks already in
+place (ADR-0068) — this is a structural refinement of three existing fields' internal shape, not a redesign.
+15 new targeted unit tests (schema shape, cross-domain grounding, missing-domain behavior); the existing 818
+unit+API tests plus these 15 all pass (833/833), ruff/format/mypy strict all clean. The previously reported
+limitation is unchanged and not re-attempted here: the five DB-backed `ai.*` integration tests still have not
+been executed against a real PostgreSQL/TimescaleDB instance.

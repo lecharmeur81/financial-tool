@@ -60,6 +60,45 @@ def test_system_prompt_states_ai_analyst_is_not_an_oracle() -> None:
     assert "ORACLE" in SYSTEM_PROMPT
 
 
+def test_system_prompt_names_every_domain_subkey_of_the_three_structured_sections() -> None:
+    """ADR-0069: the prompt must spell out the exact structured keys Claude is required to use
+    for each of the 10 domains — not just the three merged top-level section names."""
+    for key in (
+        "institutional",
+        "whale",
+        "retail",
+        "derivatives",
+        "liquidity",
+        "macro",
+        "market_structure",
+        "divergences",
+        "anomalies",
+        "capital_rotation",
+    ):
+        assert f'"{key}"' in SYSTEM_PROMPT
+
+
+def test_user_task_explicitly_names_every_domain() -> None:
+    """Section-9-style prompt correction: the standard (no-question) analysis task must explicitly
+    enumerate every domain the platform tracks, not leave macro/market structure implicit."""
+    prompt = user_prompt(_snapshot(None))
+    for phrase in (
+        "Institutional Behavior",
+        "Whale Behavior",
+        "Retail Behavior",
+        "Derivatives",
+        "Liquidity",
+        "Macro",
+        "Market Structure",
+        "Divergences",
+        "Anomalies",
+        "Capital Rotation",
+        "Market Regime",
+        "Historical Context",
+    ):
+        assert phrase in prompt
+
+
 def test_user_prompt_embeds_the_question() -> None:
     prompt = user_prompt(_snapshot("Is institutional demand absorbing retail selling?"))
     assert "Is institutional demand absorbing retail selling?" in prompt

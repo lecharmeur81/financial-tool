@@ -1,10 +1,11 @@
-"""Versioned prompt assembly (Phase 21 spec, Section 9). A clear separation between system
-instructions, the analyst's task, the structured market context (the snapshot), and the user's own
-question — never one giant unversioned string mixed into application logic. External text never
-enters this prompt: the snapshot is built entirely from this platform's own database, not from
-ingested social/news free text (Section 15's prompt-injection boundary is therefore a non-issue for
-*this* input path, but the instruction below still tells Claude to treat any text-shaped values
-inside the snapshot as data, in case a future phase adds a text-bearing dataset).
+"""Versioned prompt assembly (Phase 21 spec, Section 9; domain structure correction ADR-0069). A
+clear separation between system instructions, the analyst's task, the structured market context
+(the snapshot), and the user's own question — never one giant unversioned string mixed into
+application logic. External text never enters this prompt: the snapshot is built entirely from this
+platform's own database, not from ingested social/news free text (Section 15's prompt-injection
+boundary is therefore a non-issue for *this* input path, but the instruction below still tells
+Claude to treat any text-shaped values inside the snapshot as data, in case a future phase adds a
+text-bearing dataset).
 """
 
 from __future__ import annotations
@@ -13,7 +14,19 @@ import json
 
 from cfi.analyst.schema import AnalystResponse
 from cfi.analyst.snapshot import Snapshot
-from cfi.analyst.universe import KNOWN_PLATFORM_LIMITATIONS, PROMPT_VERSION, RESPONSE_SECTIONS
+from cfi.analyst.universe import (
+    DOMAIN_LOCATIONS,
+    KNOWN_PLATFORM_LIMITATIONS,
+    PROMPT_VERSION,
+    RESPONSE_SECTIONS,
+)
+
+# Grouped by which top-level section each domain's structured sub-field lives under (ADR-0069) —
+# built from the same `DOMAIN_LOCATIONS` the schema and validator use, so the prompt can never drift
+# out of sync with the actual required JSON shape.
+_DOMAIN_GROUPS: dict[str, list[str]] = {}
+for _domain, (_top_field, _sub_field) in DOMAIN_LOCATIONS.items():
+    _DOMAIN_GROUPS.setdefault(_top_field, []).append(_sub_field)
 
 SYSTEM_PROMPT = f"""You are the AI Analyst of a cryptocurrency Capital Flow Intelligence \
 platform. You are the analyst, not the database: every fact you may cite is already present in \
@@ -35,11 +48,23 @@ Known, permanent platform limitations you must reflect rather than paper over:
 
 Respond with a single JSON object with exactly these top-level keys, in this order, and no others:
 {json.dumps(list(RESPONSE_SECTIONS))}
-- "evidence", "contradicting_evidence", "key_changes", "capital_participant_behavior", \
-"derivatives_liquidity_context" and "historical_context" are each a list of objects \
-{{"text": str, "field_ids": [str, ...]}}. Every number in "text" must be copied EXACTLY as it \
-appears in the "display" value of one of the snapshot fields listed in "field_ids" for that same \
-item — do not compute, round, or convert it yourself.
+- "evidence", "contradicting_evidence" and "historical_context" are each a list of objects \
+{{"text": str, "field_ids": [str, ...]}}.
+- "capital_participant_behavior" is an object with EXACTLY these keys, each a list of objects \
+{{"text": str, "field_ids": [str, ...]}}: \
+{json.dumps(_DOMAIN_GROUPS["capital_participant_behavior"])}.
+- "derivatives_liquidity_context" is an object with EXACTLY these keys, same list-of-evidence-\
+object shape: {json.dumps(_DOMAIN_GROUPS["derivatives_liquidity_context"])}.
+- "key_changes" is an object with EXACTLY these keys, same list-of-evidence-object shape: \
+{json.dumps(_DOMAIN_GROUPS["key_changes"])}.
+- For every key in "capital_participant_behavior", "derivatives_liquidity_context" and \
+"key_changes": if that domain's underlying tool data is not present or unavailable in the \
+snapshot, use an empty list, or a single item {{"text": "Insufficient data.", "field_ids": []}} \
+(or "Sources conflict." if that domain's sources disagree) — never invent findings for a domain \
+whose data you were not given, and never cite a field_id from a different domain's tool.
+- In every one of the above lists, every number in "text" must be copied EXACTLY as it appears in \
+the "display" value of one of the snapshot fields listed in "field_ids" for that same item — do \
+not compute, round, or convert it yourself.
 - "scenarios" is a list of objects {{"label", "description", "supporting_evidence": [...], \
 "contradicting_evidence": [...], "strengthening_conditions": [str,...], \
 "invalidation_conditions": [str,...]}} — evidence items follow the same field_ids rule above. \
@@ -58,10 +83,12 @@ def user_prompt(snapshot: Snapshot, *, retry_errors: list[str] | None = None) ->
     appended so the one retry attempt can address exactly what failed, never a vague "try again"."""
     task = (
         "Analyze the snapshot below and answer the question if one is given; otherwise produce a "
-        "structured market analysis covering what changed, the strongest current signals, "
-        "whether institutional/whale/retail behavior is aligned or divergent, the derivatives "
-        "and liquidity environment, the current regime, notable anomalies, and any evidence of "
-        "possible capital rotation."
+        "structured market analysis that explicitly considers every one of these domains: "
+        "Institutional Behavior, Whale Behavior, Retail Behavior, Derivatives, Liquidity, Macro, "
+        "Market Structure, Divergences, Anomalies, Capital Rotation, Market Regime, and "
+        "Historical Context. Do not force a narrative for a domain that has insufficient data — "
+        'use "Insufficient data." for a domain with no usable data in the snapshot, and '
+        '"Sources conflict." for a domain whose sources disagree.'
     )
     question = snapshot.question or "(no specific question — produce a structured market analysis)"
     parts = [

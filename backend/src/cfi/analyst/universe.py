@@ -1,8 +1,8 @@
 """Versioned parameters, fixed vocabulary and scope disclosures for the AI Analyst (Phase 21,
-ADR-0068). Nothing here is fitted to data (R13) — the section order and grounding rules are the
-user's own explicit Phase 21 spec, and the banned-language patterns are a structural, testable
-enforcement of R1 ("never turn uncertainty into certainty") and the spec's Section 12 grounding
-tests, not a stylistic preference.
+ADR-0068; domain structure correction ADR-0069). Nothing here is fitted to data (R13) — the section
+order and grounding rules are the user's own explicit Phase 21 spec, and the banned-language
+patterns are a structural, testable enforcement of R1 ("never turn uncertainty into certainty") and
+the spec's Section 12 grounding tests, not a stylistic preference.
 """
 
 from __future__ import annotations
@@ -38,20 +38,61 @@ RESPONSE_SECTIONS = (
     "data_quality",
 )
 
-# Grounded sections: lists of evidence items that must cite snapshot field_ids, and whose numeric
-# claims are checked against those exact cited fields (R6 "every numeric token maps to a cited field
-# ID with matching value"). Free-prose sections (summary, market_regime, risks_uncertainties,
-# invalidation_conditions, data_quality) still get the whole-snapshot backstop number sweep (any
-# number anywhere in the response must appear somewhere in the snapshot) but do not require per-item
-# citations, since they are narrative synthesis, not itemised evidence.
+# Flat grounded-list sections: unchanged by the domain-structure correction (ADR-0069) — these were
+# never merged-domain buckets, so they keep their original flat `list[EvidenceItem]` shape and
+# simple getattr-based validation. "key_changes", "capital_participant_behavior" and
+# "derivatives_liquidity_context" are no longer flat lists (see DOMAIN_LOCATIONS below) and are
+# validated by `_check_domain_sections` in `validator.py` instead.
 GROUNDED_LIST_SECTIONS = (
     "evidence",
     "contradicting_evidence",
-    "key_changes",
-    "capital_participant_behavior",
-    "derivatives_liquidity_context",
     "historical_context",
 )
+
+# --------------------------------------------------------------------------- domain structure
+# (ADR-0069)
+
+# The 10 intelligence domains that previously had either no dedicated placement at all (macro,
+# market_structure, divergences, anomalies, capital_rotation) or were merged indistinguishably into
+# one flat list (institutional/whale/retail into capital_participant_behavior; derivatives/liquidity
+# into derivatives_liquidity_context). Each domain maps to exactly one analyst tool (`cfi.analyst.
+# tools`) — this is the same field_id prefix every snapshot field already carries (`snapshot.py`'s
+# `_flatten` prefixes every field with its tool_id), so no new tagging mechanism was invented; the
+# domain-to-tool mapping below is simply named so the schema, prompt and validator can all refer to
+# it the same way (R13: reuse, do not invent a parallel identification scheme).
+DOMAIN_TOOL_IDS: dict[str, str] = {
+    "institutional": "get_institutional_flows",
+    "whale": "get_whale_activity",
+    "retail": "get_retail_activity",
+    "derivatives": "get_derivatives",
+    "liquidity": "get_liquidity",
+    "macro": "get_macro",
+    "market_structure": "get_market_structure",
+    "divergences": "calculate_divergence",
+    "anomalies": "get_anomalies",
+    "capital_rotation": "get_capital_rotation",
+}
+
+# Where each domain's evidence list lives inside `AnalystResponse` — (top_level_field, sub_field).
+# The 12 top-level section names and their order are UNCHANGED (still `RESPONSE_SECTIONS` above);
+# only the *type* of these three fields changed, from a flat `list[EvidenceItem]` to a structured
+# object with one named list per domain it covers (`cfi.analyst.schema.ParticipantBehavior`,
+# `MarketContext`, `KeyChanges`).
+DOMAIN_LOCATIONS: dict[str, tuple[str, str]] = {
+    "institutional": ("capital_participant_behavior", "institutional"),
+    "whale": ("capital_participant_behavior", "whale"),
+    "retail": ("capital_participant_behavior", "retail"),
+    "derivatives": ("derivatives_liquidity_context", "derivatives"),
+    "liquidity": ("derivatives_liquidity_context", "liquidity"),
+    "macro": ("key_changes", "macro"),
+    "market_structure": ("key_changes", "market_structure"),
+    "divergences": ("key_changes", "divergences"),
+    "anomalies": ("key_changes", "anomalies"),
+    "capital_rotation": ("key_changes", "capital_rotation"),
+}
+
+if set(DOMAIN_TOOL_IDS) != set(DOMAIN_LOCATIONS):  # pragma: no cover - module-invariant guard
+    raise ValueError("DOMAIN_TOOL_IDS and DOMAIN_LOCATIONS must declare exactly the same domains")
 
 MAX_VALIDATION_ATTEMPTS = 2  # one Claude call, one retry with the validator's own errors appended
 

@@ -1,13 +1,18 @@
 """Deterministic, non-AI validation of the analyst's structured output against its own snapshot
-(Phase 21 spec, Sections 4, 11, 12; ARCHITECTURE.md 5.18's "Validator checks"). Nothing here calls
-Claude or any other model — every check is a plain string/number comparison against
-``cfi.analyst.snapshot.Snapshot``, so it is itself fully unit-testable with synthetic fixtures.
+(Phase 21 spec, Sections 4, 11, 12; ARCHITECTURE.md 5.18's "Validator checks"; domain structure
+correction ADR-0069). Nothing here calls Claude or any other model — every check is a plain
+string/number comparison against ``cfi.analyst.snapshot.Snapshot``, so it is itself fully
+unit-testable with synthetic fixtures.
 
 Failure modes covered, matching the user's own Section 12 test list: an invented number (grounding),
 an unsupported bullish/bearish/certainty/directive claim (language), a rotation hypothesis presented
 as an observed fact (language — "capital moved" phrasing), a historical-similarity guarantee
-(language), and a missing ``"Insufficient data."``/``"Sources conflict."`` disclosure when the
-snapshot itself says the data called for one (Section 4).
+(language), a missing ``"Insufficient data."``/``"Sources conflict."`` disclosure when the snapshot
+itself says the data called for one (Section 4), and (ADR-0069) a claim about one of the 10
+structured intelligence domains whose own underlying tool had no data in the snapshot — the
+per-domain check below makes it structurally impossible for Claude to "simply claim to have
+analyzed a domain when the corresponding snapshot data was not available", without requiring
+fabricated filler content for a domain that genuinely has nothing to report.
 """
 
 from __future__ import annotations
@@ -19,6 +24,8 @@ from cfi.analyst.schema import AnalystResponse, EvidenceItem
 from cfi.analyst.snapshot import Snapshot
 from cfi.analyst.universe import (
     BANNED_PATTERNS,
+    DOMAIN_LOCATIONS,
+    DOMAIN_TOOL_IDS,
     GROUNDED_LIST_SECTIONS,
     INSUFFICIENT_DATA_PHRASE,
     SOURCES_CONFLICT_PHRASE,
@@ -91,6 +98,59 @@ def _check_evidence_item(
             )
 
 
+def _field_id_tool(field_id: str) -> str:
+    """The tool_id a snapshot field_id belongs to — every field_id is built by ``snapshot.
+    _flatten`` as ``f"{tool_id}.{sub_key}"`` or ``f"{tool_id}[{index}]..."``, so the tool_id is
+    always the prefix up to the first ``.`` or ``[``."""
+    return re.split(r"[.\[]", field_id, maxsplit=1)[0]
+
+
+def _check_domain_sections(
+    response: AnalystResponse, snapshot: Snapshot, errors: list[str]
+) -> None:
+    """ADR-0069: validate each of the 10 structured intelligence domains independently.
+
+    Two checks per domain, beyond the ordinary grounding/banned-language check every evidence item
+    already gets: (1) a cited field_id must actually belong to *this* domain's own tool — citing a
+    whale field while writing in the "institutional" bucket is exactly the kind of mislabeling the
+    structural split exists to prevent; (2) if the domain's own tool had no data in this snapshot
+    (``status != "ok"``), any non-empty content for that domain must say so explicitly rather than
+    present unsupported analysis — Claude may still leave the list empty (Section 5: not every
+    field needs a finding for every question), it just may not fabricate one."""
+    for domain, (top_attr, sub_attr) in DOMAIN_LOCATIONS.items():
+        tool_id = DOMAIN_TOOL_IDS[domain]
+        tool_result = snapshot.raw.get(tool_id)
+        available = tool_result is not None and tool_result.get("status") == "ok"
+        items: list[EvidenceItem] = getattr(getattr(response, top_attr), sub_attr)
+        for i, item in enumerate(items):
+            where = f"{top_attr}.{sub_attr}[{i}]"
+            _check_evidence_item(item, where, snapshot, errors)
+            for fid in item.field_ids:
+                if fid in snapshot.field_index and _field_id_tool(fid) != tool_id:
+                    errors.append(
+                        f"{where}: cites field_id {fid!r} from tool {_field_id_tool(fid)!r}, but "
+                        f"this is the {domain!r} domain (expected tool {tool_id!r}) — a domain's "
+                        "evidence may only cite that domain's own tool (ADR-0069)"
+                    )
+            if not available:
+                has_disclosure = (
+                    INSUFFICIENT_DATA_PHRASE in item.text or SOURCES_CONFLICT_PHRASE in item.text
+                )
+                if not has_disclosure:
+                    status = tool_result.get("status") if tool_result else "missing"
+                    errors.append(
+                        f"{where}: domain {domain!r} has no data in this snapshot (tool "
+                        f"{tool_id!r} status={status!r}) but the response contains content for it "
+                        f"without {INSUFFICIENT_DATA_PHRASE!r} or {SOURCES_CONFLICT_PHRASE!r} — "
+                        "Claude cannot claim to have analyzed an unavailable domain (ADR-0069)"
+                    )
+                if item.field_ids:
+                    errors.append(
+                        f"{where}: domain {domain!r} is unavailable but cites field_ids "
+                        f"{item.field_ids!r} — no fields exist for this domain in this snapshot"
+                    )
+
+
 def _check_prose(text: str, where: str, snapshot: Snapshot, errors: list[str]) -> None:
     _check_banned_language(text, where, errors)
     all_numbers = _snapshot_display_numbers(snapshot)
@@ -111,6 +171,8 @@ def validate(response: AnalystResponse, snapshot: Snapshot) -> ValidationResult:
     for section, items in grounded_sections.items():
         for i, item in enumerate(items):
             _check_evidence_item(item, f"{section}[{i}]", snapshot, errors)
+
+    _check_domain_sections(response, snapshot, errors)
 
     _check_prose(response.summary, "summary", snapshot, errors)
     _check_prose(response.market_regime, "market_regime", snapshot, errors)
