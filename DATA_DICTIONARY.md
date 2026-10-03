@@ -1449,6 +1449,104 @@ status:            implemented
 
 ---
 
+## 5n. AI Analyst (implemented in Phase 21)
+
+Realizes and supersedes the "planned" fields in §9/§9a below for the `ai` schema. The AI Analyst is L5
+(CLAUDE.md R2): it interprets L1-L4 evidence and never writes to observed data, metrics, signals, or regimes.
+
+### `ai.snapshot` (`cfi/db/tables.py::ai_snapshot`, migration `0007`)
+
+One immutable, hashed evidence bundle per analysis — never updated after insert.
+
+| Field | Description |
+|---|---|
+| `id` (bigint, PK) / `uuid` (unique) | Internal identity / stable external identifier |
+| `created_at`, `as_of`, `knowledge_time` | Point-in-time coordinates the snapshot was built with |
+| `snapshot_version` | `cfi.analyst.universe.SNAPSHOT_VERSION` (`analyst_snapshot.v1`) |
+| `payload` (jsonb) | The exact JSON given to Claude: `snapshot_version`, `as_of`, `knowledge_time`, `question`, `tools_called`, `not_tracked` (known platform limitations), `data_quality_state`, `has_conflicts`, `fields` (field_id → `{display, evidence_category, quality_status, unit, source}`), `tool_results` (raw, per-tool) |
+| `payload_hash` | sha256 of a canonical JSON encoding of the pre-flattening tool results — same inputs always produce the same hash (ADR-0041) |
+
+### `ai.interpretation` (`cfi/db/tables.py::ai_interpretation`, migration `0007`)
+
+One row per analysis request; created `queued` by the API before the Celery worker task runs (its `uuid` is
+returned immediately as the stable `analysis_id`), then updated in place: `queued → running → completed/failed`.
+
+| Field | Description |
+|---|---|
+| `id` (bigint, PK) / `uuid` (unique) | Internal identity / the `analysis_id` returned to callers |
+| `created_at`, `updated_at` | Lifecycle timestamps |
+| `snapshot_id` | FK to `ai.snapshot.id` — the exact evidence Claude used |
+| `status` | `queued` \| `running` \| `completed` \| `failed` |
+| `question` | The user's own question, if any (else `null` — a general analysis) |
+| `prompt_version` | `cfi.analyst.universe.PROMPT_VERSION` (`analyst_prompt.v1`) |
+| `model` | `Settings.anthropic_model` at the time of the call |
+| `response` (jsonb) | The validated `cfi.analyst.schema.AnalystResponse`, in its 12-section canonical order |
+| `validation_status` | `ok` \| `failed` (the deterministic validator's own verdict) |
+| `validation_errors` (jsonb) | The validator's own error strings, if any (on the final attempt) |
+| `attempt_count` | 1 or 2 (`cfi.analyst.universe.MAX_VALIDATION_ATTEMPTS`) — one call, at most one retry |
+| `tools_called` (jsonb) | The 14 tool IDs called for this analysis (always all 14 in this phase) |
+| `data_quality_state` | `ok` \| `degraded` \| `insufficient`, rolled up by `check_data_quality` |
+| `error` | Set only when `status = failed`: budget-ceiling refusal, malformed Claude output after the retry, or a provider error |
+
+### `ai.usage` (`cfi/db/tables.py::ai_usage`, migration `0007`)
+
+One row per Claude API call attempt (the first call, and the one retry, are each their own row) — the basis
+of the monthly budget ceiling (`Settings.ai_monthly_budget_usd`, TODO.md B3), enforced by summing this table
+for the current calendar month, never by a separate counter.
+
+| Field | Description |
+|---|---|
+| `id` (bigint, PK) / `uuid` (unique) | Internal identity / external identifier |
+| `created_at` | When this attempt was recorded |
+| `interpretation_id` | FK to `ai.interpretation.id` |
+| `model` | Model that answered this attempt |
+| `input_tokens`, `output_tokens` | From the Messages API's own `usage` block |
+| `latency_ms` | Wall-clock time for this one call |
+| `cost_usd` | Estimated cost (`Settings.anthropic_{input,output}_cost_per_mtok_usd` × tokens) — Anthropic's own billing is the source of truth for actual charges |
+| `attempt` | 1 or 2 |
+
+### The 14 analyst tools (`cfi/analyst/universe.py::TOOLS`, `cfi/analyst/tools.py`)
+
+Read-only wrappers over already-tested domain services — Claude never gets a database connection or calls
+these directly; `cfi.analyst.snapshot.build_snapshot` calls all 14 once per analysis, before Claude is invoked.
+
+| tool_id | Wraps |
+|---|---|
+| `get_market_data` | `cfi.divergence.adapters.Adapters` (price/volume/volatility) + `window_reading` |
+| `get_institutional_flows` | `cfi.institutional.service.InstitutionalService.overview` |
+| `get_whale_activity` | `cfi.whales.service.WhaleService.overview` |
+| `get_retail_activity` | `cfi.retail.service.RetailService.overview` |
+| `get_derivatives` | `cfi.derivatives.service.DerivativesService.overview` |
+| `get_liquidity` | `cfi.liquidity.service.LiquidityService.overview` |
+| `get_macro` | `cfi.macro.service.MacroService.overview` |
+| `get_market_structure` | `cfi.market_structure.service.MarketStructureService.overview` |
+| `calculate_divergence` | `cfi.divergence.service.DivergenceService.matrix` (Phase 13) |
+| `get_market_regime` | `cfi.regime.service.RegimeService.current` (Phase 14) |
+| `find_historical_similar_periods` | `cfi.similarity.service.SimilarityService.current` (Phase 15) |
+| `get_anomalies` | `cfi.anomaly.service.AnomalyService.scan` (Phase 19) |
+| `get_capital_rotation` | `cfi.rotation.service.RotationService.matrix` (Phase 20) |
+| `check_data_quality` | Pure function over the other 13 tools' own results — not a new database read |
+
+### Response schema (`cfi/analyst/schema.py::AnalystResponse`) and grounding (`cfi/analyst/validator.py`)
+
+The 12 required sections, in this fixed order (enforced by the schema's own field order, not by asking Claude
+for ordered JSON keys): Summary, Evidence, Contradicting Evidence, Market Regime, Key Changes,
+Capital/Participant Behavior, Derivatives & Liquidity Context, Historical Context, Risks/Uncertainties,
+Scenarios, Invalidation Conditions, Data Quality. `evidence`/`contradicting_evidence`/`key_changes`/
+`capital_participant_behavior`/`derivatives_liquidity_context`/`historical_context` are lists of
+`{text, field_ids}`; every number in `text` must equal the exact `display` value of one of its cited
+`field_ids` (checked by `cfi.analyst.validator.validate`, a pure function with no model call). `scenarios` are
+non-predictive: `{label, description, supporting_evidence, contradicting_evidence, strengthening_conditions,
+invalidation_conditions}` — no probability field exists on the schema at all.
+
+```
+metric:            AI Analyst (14 tools, 12-section grounded response, ai.snapshot/interpretation/usage)
+owner_phase:       21 (2026-09-28)
+status:            implemented
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.
@@ -1520,7 +1618,7 @@ exact inputs depend on verified provider data.
 
 ---
 
-## 9. AI interpretation record (L5) — planned fields
+## 9. AI interpretation record (L5) — planned fields (realized shape: §5n `ai.interpretation`)
 
 | Field | Description |
 |---|---|
@@ -1535,7 +1633,7 @@ exact inputs depend on verified provider data.
 
 ---
 
-## 9a. AI snapshot content (planned — ADR-0034)
+## 9a. AI snapshot content (planned — ADR-0034; realized shape: §5n `ai.snapshot`)
 
 An immutable JSON document; the only evidence Claude may use.
 

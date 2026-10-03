@@ -8,12 +8,18 @@ job history of record).
 from __future__ import annotations
 
 import time
+import uuid
+from datetime import datetime
 from typing import Any
 
 from celery import Celery, signals
 
+from cfi.analyst.client import anthropic_capabilities
+from cfi.analyst.repository import AnalystRepository
+from cfi.analyst.service import AnalystService
 from cfi.core.config import get_settings
 from cfi.core.logging import configure_logging, get_logger
+from cfi.core.time import utc_now
 from cfi.derivatives.jobs import ingest_source as ingest_derivative_source
 from cfi.derivatives.sources import source as derivative_source
 from cfi.derivatives.sources import sources_for as derivative_sources_for
@@ -32,6 +38,7 @@ from cfi.market.universe import ASSET_SYMBOLS, dataset_by_id
 from cfi.market_structure.jobs import ingest_source as ingest_market_structure_source
 from cfi.market_structure.sources import source as market_structure_source
 from cfi.market_structure.sources import sources_for as market_structure_sources_for
+from cfi.providers.http import ProviderHttpClient
 from cfi.retail.jobs import ingest_source as ingest_retail_source
 from cfi.retail.sources import source as retail_source
 from cfi.retail.sources import sources_for as retail_sources_for
@@ -280,6 +287,51 @@ def market_structure_ingest_task(provider_id: str, dataset_id: str, subject: str
         item = market_structure_source(provider_id, dataset_id, subject)
         results = await ingest_market_structure_source(ctx, item)
         return {"runs": [(r.job_type, r.status, r.inserted, r.revisions) for r in results]}
+
+    return rt.run(go())
+
+
+@app.task(name="analyst.analyze", time_limit=180, soft_time_limit=150)
+def analyst_analyze_task(analysis_id: str, as_of: str, knowledge_time: str) -> dict[str, Any]:
+    """Run one queued AI-Analyst analysis (Phase 21). Skipped (not failed) only when the Anthropic
+    API key is not configured at all — the queued row is still resolved to ``failed`` with an
+    explicit error, since a caller is polling this specific ``analysis_id`` and must never see it
+    stuck in ``queued`` forever (R3: no silent gap)."""
+    rt = runtime()
+    parsed_id = uuid.UUID(analysis_id)
+    parsed_as_of = datetime.fromisoformat(as_of)
+    parsed_knowledge_time = datetime.fromisoformat(knowledge_time)
+
+    if not settings.anthropic_api_key:
+        log.warning("analyst_skipped_no_credential", analysis_id=analysis_id)
+
+        async def mark_not_configured() -> None:
+            repo = AnalystRepository(rt.engine())
+            interpretation_id = await repo.interpretation_id_for_uuid(parsed_id)
+            if interpretation_id is not None:
+                await repo.mark_failed(
+                    interpretation_id,
+                    now=utc_now(),
+                    error="provider_not_configured: Anthropic API key is not configured.",
+                )
+
+        rt.run(mark_not_configured())
+        return {"skipped": "Anthropic API key not configured"}
+
+    async def go() -> dict[str, Any]:
+        engine = rt.engine()
+        http = ProviderHttpClient(anthropic_capabilities(settings))
+        try:
+            svc = AnalystService(engine, settings, http=http)
+            await svc.run_analysis(
+                parsed_id,
+                as_of=parsed_as_of,
+                knowledge_time=parsed_knowledge_time,
+                now=utc_now(),
+            )
+        finally:
+            await http.aclose()
+        return {"analysis_id": analysis_id}
 
     return rt.run(go())
 

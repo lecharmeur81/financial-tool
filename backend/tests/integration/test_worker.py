@@ -28,6 +28,7 @@ def test_celery_app_is_configured_for_safe_task_handling() -> None:
     assert conf.task_ignore_result is True
     assert "market.ingest_latest" in worker.app.tasks
     assert "market.backfill_round" in worker.app.tasks
+    assert "analyst.analyze" in worker.app.tasks
     queues = {entry["options"]["queue"] for entry in conf.beat_schedule.values()}
     assert queues == {"ingest_fast", "ingest", "backfill"}
 

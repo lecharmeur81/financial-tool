@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from decimal import Decimal
 
+import httpx2
 import pytest
 
 from cfi.core.errors import ProviderPermanentError, ProviderTransientError
@@ -216,3 +218,90 @@ def test_retry_after_parsing() -> None:
     assert _retry_after_seconds(None) is None
     assert _retry_after_seconds("not a date") is None
     assert _retry_after_seconds("Wed, 21 Oct 2015 07:28:00 GMT") == 0  # past date → no wait
+
+
+# --------------------------------------------------------------------------- json_body/headers
+# (Phase 21, ADR-0068): additive RequestSpec fields for the Anthropic Messages API — a POST with a
+# JSON body and extra non-secret headers, sent by ``cfi.analyst.client.ClaudeClient``. Every other
+# adapter leaves both at their defaults, so these tests only need to prove the new fields work and
+# that a GET-only adapter's request is byte-for-byte unaffected by their existence.
+
+
+async def test_json_body_is_sent_as_the_request_body() -> None:
+    clock = FakeClock()
+    caps = ProviderCapabilities(
+        provider_id="json_post",
+        display_name="json_post",
+        base_url="https://mock-json.invalid",
+        datasets=frozenset(),
+    )
+    captured: list[httpx2.Request] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        captured.append(request)
+        return httpx2.Response(200, json={"ok": True})
+
+    client = ProviderHttpClient(
+        caps, transport=httpx2.MockTransport(handle), sleep=clock.sleep, clock=clock
+    )
+    spec = RequestSpec(
+        path="/v1/messages",
+        method="POST",
+        json_body={"model": "claude-sonnet-5", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    await client.send(spec)
+    assert captured[0].method == "POST"
+    assert json.loads(captured[0].content) == {
+        "model": "claude-sonnet-5",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    await client.aclose()
+
+
+async def test_extra_headers_are_merged_with_auth_headers() -> None:
+    clock = FakeClock()
+    caps = ProviderCapabilities(
+        provider_id="hdr",
+        display_name="hdr",
+        base_url="https://mock-hdr.invalid",
+        datasets=frozenset(),
+        auth=AuthSpec(type=AuthType.API_KEY_HEADER, name="x-api-key", env_var="HDR_KEY"),
+    )
+    captured: list[httpx2.Request] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        captured.append(request)
+        return httpx2.Response(200, json={"ok": True})
+
+    client = ProviderHttpClient(
+        caps,
+        transport=httpx2.MockTransport(handle),
+        environ={"HDR_KEY": "secret123"},
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    spec = RequestSpec(
+        path="/v1/messages",
+        method="POST",
+        headers={"anthropic-version": "2023-06-01", "content-type": "application/json"},
+        json_body={"a": 1},
+    )
+    await client.send(spec)
+    sent = captured[0]
+    assert sent.headers["anthropic-version"] == "2023-06-01"
+    assert sent.headers["content-type"] == "application/json"
+    assert sent.headers["x-api-key"] == "secret123"  # auth header still present alongside them
+    await client.aclose()
+
+
+async def test_get_only_adapter_request_is_unaffected_by_the_new_fields() -> None:
+    """Every ingestion adapter's ``RequestSpec`` never sets ``json_body``/``headers`` — confirm a
+    plain GET request still carries no JSON body and no extra headers by default."""
+    clock, adapter = FakeClock(), MockProviderA()
+    server = MockServerA(POINTS)
+    client, _recorder = _client(server, adapter, clock)
+    await client.send(adapter.first_request("d", WINDOW))
+    sent = server.requests[0]
+    assert sent.method == "GET"
+    assert sent.content == b""
+    await client.aclose()

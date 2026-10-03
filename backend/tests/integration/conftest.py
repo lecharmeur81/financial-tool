@@ -30,6 +30,9 @@ requires_services = pytest.mark.skipif(
 )
 
 DATA_TABLES = (
+    "ai.usage",
+    "ai.interpretation",
+    "ai.snapshot",
     "ops.quality_check_result",
     "ops.backfill_state",
     "obs.institutional_flow",

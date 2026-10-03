@@ -15,7 +15,7 @@ from sqlalchemy import (
     Table,
     Text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 metadata = MetaData()
 
@@ -332,6 +332,58 @@ backfill_state = Table(
     Column("note", Text),
     Column("updated_at", TS, nullable=False),
     schema="ops",
+)
+
+ai_snapshot = Table(
+    "snapshot",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("uuid", UUID(as_uuid=True), nullable=False, unique=True),
+    Column("created_at", TS, nullable=False),
+    Column("as_of", TS, nullable=False),
+    Column("knowledge_time", TS, nullable=False),
+    Column("snapshot_version", Text, nullable=False),
+    Column("payload", JSONB, nullable=False),
+    Column("payload_hash", Text, nullable=False),
+    schema="ai",
+)
+
+ai_interpretation = Table(
+    "interpretation",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("uuid", UUID(as_uuid=True), nullable=False, unique=True),
+    Column("created_at", TS, nullable=False),
+    Column("updated_at", TS, nullable=False),
+    Column("snapshot_id", BigInteger),
+    Column("status", Text, nullable=False),
+    Column("question", Text),
+    Column("prompt_version", Text),
+    Column("model", Text),
+    Column("response", JSONB),
+    Column("validation_status", Text),
+    Column("validation_errors", JSONB),
+    Column("attempt_count", Integer, nullable=False),
+    Column("tools_called", JSONB),
+    Column("data_quality_state", Text),
+    Column("error", Text),
+    schema="ai",
+)
+
+ai_usage = Table(
+    "usage",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("uuid", UUID(as_uuid=True), nullable=False, unique=True),
+    Column("created_at", TS, nullable=False),
+    Column("interpretation_id", BigInteger, nullable=False),
+    Column("model", Text, nullable=False),
+    Column("input_tokens", Integer),
+    Column("output_tokens", Integer),
+    Column("latency_ms", Integer),
+    Column("cost_usd", Numeric),
+    Column("attempt", Integer, nullable=False),
+    schema="ai",
 )
 
 quality_check_result = Table(

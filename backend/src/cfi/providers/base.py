@@ -114,7 +114,8 @@ class FetchWindow:
 
 @dataclass(frozen=True, slots=True)
 class RequestSpec:
-    """One HTTP request an adapter wants sent. ``params`` must not contain secrets."""
+    """One HTTP request an adapter wants sent. ``params``/``headers``/``json_body`` must not
+    contain secrets — credentials come only from :class:`AuthSpec` via the environment."""
 
     path: str
     params: Mapping[str, str] = field(default_factory=dict)
@@ -122,6 +123,14 @@ class RequestSpec:
     page: int = 1
     # Adapter bookkeeping for pagination (e.g. the overall window end). Never sent to the provider.
     state: Mapping[str, str] = field(default_factory=dict)
+    # Non-secret headers to send in addition to whatever AuthSpec adds (e.g. an API version
+    # header, ``content-type``). Every dataset-ingestion adapter leaves this empty; Phase 21's
+    # Claude API client is the first caller that needs it.
+    headers: Mapping[str, str] = field(default_factory=dict)
+    # A JSON request body for ``method="POST"`` calls that are not query-parameter-shaped (every
+    # ingestion adapter fetches by query parameters only, so this is ``None`` for all of them).
+    # ``None`` means "no body" — the request is sent exactly as before this field existed.
+    json_body: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

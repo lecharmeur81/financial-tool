@@ -11,6 +11,8 @@ import asyncio
 from collections.abc import Coroutine
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncEngine
+
 from cfi.core.config import Settings
 from cfi.db.engine import create_engine
 from cfi.derivatives import sources as derivatives
@@ -31,9 +33,19 @@ class WorkerRuntime:
         self.settings = settings
         self.loop = asyncio.new_event_loop()
         self._context: JobContext | None = None
+        self._engine: AsyncEngine | None = None
 
     def run[T](self, coro: Coroutine[Any, Any, T]) -> T:
         return self.loop.run_until_complete(coro)
+
+    def engine(self) -> AsyncEngine:
+        """A bare DB engine, without :meth:`context`'s ingestion-specific adapter/client/dataset
+        registration setup — the AI Analyst task (Phase 21) only ever reads through existing
+        domain services and writes ``ai.*`` rows; it needs no provider client, no dataset registry
+        (R13: no unneeded setup for a task that does not ingest)."""
+        if self._engine is None:
+            self._engine = create_engine(self.settings)
+        return self._engine
 
     async def context(self) -> JobContext:
         if self._context is None:
@@ -79,3 +91,6 @@ class WorkerRuntime:
                 await client.aclose()
             await self._context.db.dispose()
             self._context = None
+        if self._engine is not None:
+            await self._engine.dispose()
+            self._engine = None

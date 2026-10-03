@@ -482,42 +482,90 @@ Walk-forward splitter ─▶ Signal/strategy evaluation ─▶ Execution & cost 
 - **Universe as-of:** asset/instrument/venue universes are taken as they existed at each date (§5.26).
 - Backtests run as `backfill`/`compute` queue jobs and store results in `sig`-adjacent research tables; they never change live signals.
 
-### 5.17 AI architecture — ADR-0034
+### 5.17 AI architecture — ADR-0034, realized in Phase 21 (ADR-0068)
 
 ```
-trigger (schedule / user request)
-  → Snapshot builder (reads L1–L4 via point-in-time loader) → immutable ai.snapshot (JSON, hash)
-  → Prompt assembly (versioned templates in repo; snapshot as delimited data)
-  → Claude API (server-side, ai worker; structured JSON output schema)
-  → Validator (deterministic) → pass: store ai.interpretation · fail: retry once with errors → still failing: store as failed, show deterministic summary only
-  → API/UI (labelled as AI Interpretation; hypotheses labelled separately)
+API POST /analyst/analyze                              Celery "ai" queue, task analyst.analyze
+  → ai.interpretation row inserted, status=queued        ── analysis_id returned immediately
+                                                               │
+                                                               ▼
+  Snapshot builder (cfi.analyst.snapshot): calls all 14 tools once (cfi.analyst.tools — each a
+  thin, read-only wrapper over an existing, already-tested domain service; no raw DB access)
+  → flattened field_id → SnapshotField map → immutable ai.snapshot row (JSON, sha256 hash)
+  → Prompt assembly (cfi.analyst.prompts): versioned system prompt + task + delimited snapshot
+    JSON + user question
+  → Budget check (ai.usage summed for the current calendar month against
+    Settings.ai_monthly_budget_usd) — refuses explicitly (AIBudgetExceededError) before any call
+  → Claude API (cfi.analyst.client.ClaudeClient, over cfi.providers.http.ProviderHttpClient —
+    the same auth/timeout/retry/backoff/rate-limit/circuit-breaker machinery every ingestion
+    adapter gets, R8)
+  → Deterministic validator (cfi.analyst.validator; no model call) → pass: store ai.interpretation
+    (completed) · fail: retry once with the validator's own errors appended to the prompt → still
+    failing: store as failed with the validator's errors, nothing silently reinterpreted
+  → GET /analyst/{analysis_id} (status/response/errors; labelled as AI Interpretation, L5)
 ```
 
-- **Claude is called only by `ai` workers**, never by the frontend or the API request path; the API key never leaves the server.
-- **Structured output** with the nine R6 sections; every statement tagged with its evidence category and the snapshot field IDs it relies on.
-- **Model tiering by configuration** (model IDs are config values, never hard-coded): a smaller/cheaper model for routine summaries,
-  a stronger model for deep analysis. Chosen models and prompt versions are stored with each output.
-- **Cost controls:** prompt caching for the stable system prompt and schema; batch processing for non-urgent jobs (e.g. daily briefs);
-  per-day and per-month budget ceilings enforced before each call; usage recorded in `ai.usage`.
-- **No action tools.** Claude cannot query the internet, write data, trigger alerts, or place trades. If later it gets read-only "fetch more
-  evidence" tools, every tool result is appended to the snapshot so its citations remain verifiable.
-- **Evaluation harness (R12):** golden snapshots with expected properties, adversarial snapshots (missing data, conflicting providers,
-  misleading free text), regression runs on every prompt/model change; metrics: unsupported-number rate, missing-section rate,
-  "Insufficient data." compliance, conflict-reporting compliance, and calibration tracking of stated confidence over time.
+- **Claude is called only by the `ai` Celery queue's `analyst.analyze` task**, never by the frontend
+  or synchronously inside an API request; the API key is read from the environment server-side only
+  (R9) and the API process never imports the Celery application that would need it
+  (`cfi.worker.client` is a separate, minimal task producer — ADR-0068).
+- **Structured output** with the twelve required sections (Summary, Evidence, Contradicting
+  Evidence, Market Regime, Key Changes, Capital/Participant Behavior, Derivatives & Liquidity
+  Context, Historical Context, Risks/Uncertainties, Scenarios, Invalidation Conditions, Data
+  Quality — CLAUDE.md R6's nine plus three added in the Phase 21 spec); every evidence statement
+  cites the snapshot `field_id`(s) it relies on. Section order is enforced **by construction**:
+  `cfi.analyst.schema.AnalystResponse`'s Pydantic field order is the one true order, not a
+  property of the incoming JSON (ADR-0068).
+- **Model is a configuration value** (`Settings.anthropic_model`, currently `claude-sonnet-5`),
+  never hard-coded; model, prompt version, and snapshot version are stored with every
+  `ai.interpretation` row.
+- **Cost controls:** a monthly budget ceiling (`Settings.ai_monthly_budget_usd`, TODO.md B3)
+  enforced by summing `ai.usage.cost_usd` for the current month before every call — refuses
+  explicitly, never silently skips; usage (tokens, latency, estimated cost) recorded per attempt.
+- **No action tools.** The 14 analyst tools (`cfi.analyst.universe.TOOLS`) are read-only wrappers
+  over existing domain services (institutional, whale, retail, derivatives, liquidity, macro,
+  market structure, divergence, regime, similarity, anomaly, rotation, plus market data and a
+  cross-tool data-quality summary) — Claude never queries the database directly, writes data,
+  triggers alerts, or places trades.
+- **Evaluation harness (R12):** the deterministic validator's own unit tests exercise every
+  grounding-failure scenario (invented numbers, unsupported directional verdicts, an inferred
+  rotation stated as fact, a historical-similarity guarantee, missing "Insufficient data."/"Sources
+  conflict." disclosures) against synthetic snapshots — no live model calls required to regression-
+  test grounding.
 
-### 5.18 AI grounding — ADR-0034
+### 5.18 AI grounding — ADR-0034, realized in Phase 21 (ADR-0068)
 
-- **Snapshot = the complete evidence Claude may use.** JSON with a stable **field ID** per value, and for each value: evidence category,
-  value, unit, `as_of`, quality status, provider(s), original source, and, where relevant, historical context (percentile, z-score) that the
-  statistical engine already computed.
-- **Explicit absences:** expected-but-missing inputs appear as entries with `quality_status = missing`, so Claude can say **"Insufficient data."**
-  instead of guessing. Conflicts appear with all provider values.
-- **No arithmetic by Claude.** Any number in the output must be a snapshot value (within display rounding). Needed derived numbers are
-  computed by the statistical engine and added to the snapshot before the call.
-- **Validator checks:** all nine sections present and in order · every numeric token maps to a cited field ID with matching value ·
-  every cited ID exists · statements about missing inputs use "Insufficient data." · conflicts in the snapshot are reported ·
-  no buy/sell instructions · evidence-category tags present. Failures are stored with details (R12 evidence).
-- **Display:** AI text is visually distinct from data; each cited number links back to its snapshot field and from there to lineage.
+- **Snapshot = the complete evidence Claude may use** (`cfi.analyst.snapshot.Snapshot`). Every tool
+  result is flattened into a stable dotted **field_id** → `SnapshotField(display, value, unit,
+  evidence_category, quality_status, source)`; a numeric leaf's `display` string is the exact text
+  Claude must copy verbatim when citing it (never recomputed or rounded by the model).
+- **Explicit absences:** a tool that raises a well-understood `CFIError` comes back `"status":
+  "unavailable"` with its `error_code`/`detail` preserved, never hidden; `check_data_quality`
+  (the 14th tool) rolls every tool's status up into one `data_quality_state`
+  (`ok`/`degraded`/`insufficient`) and a `has_conflicts` flag, both carried into the prompt and
+  the stored `ai.interpretation` row.
+- **No arithmetic by Claude.** The system prompt instructs Claude to copy numbers exactly as they
+  appear in cited `display` values; the deterministic validator (`cfi.analyst.validator.validate`)
+  then re-extracts every numeric token from the response and checks it against the snapshot,
+  independent of what Claude claims to have done.
+- **Validator checks (no model call, pure string/number comparison):** all twelve sections present
+  (enforced by the Pydantic schema itself, `extra="forbid"`) · every numeric token in a grounded
+  section maps to one of its cited `field_id`s' exact `display` value · every cited `field_id`
+  exists in the snapshot · prose sections get a whole-snapshot numeric backstop sweep ·
+  `"Insufficient data."` is required verbatim when `data_quality_state == "insufficient"` ·
+  `"Sources conflict."` is required verbatim when `has_conflicts` · banned-language patterns catch
+  bullish/bearish verdicts, trading directives, manufactured certainty, "capital moved from X to Y"
+  stated as fact (not hedged), and historical-similarity-as-guarantee phrasing. On failure, Claude
+  is retried exactly once with the validator's own errors appended to the prompt; a second failure
+  is stored as `failed` with those errors — never silently reinterpreted or partially accepted.
+- **Auditability:** every `ai.interpretation` row carries its `snapshot_id` (linking to the
+  immutable, hashed `ai.snapshot.payload` Claude actually saw), `prompt_version`, `model`,
+  `tools_called`, `validation_status`/`validation_errors`, `attempt_count`, `data_quality_state`,
+  and, on failure, `error`; each Claude call attempt is its own `ai.usage` row (tokens, latency,
+  estimated cost). No free-form conversational memory is kept — only these structured, queryable
+  records (Phase 21 spec, Section 13).
+- **Display:** AI text is visually distinct from data; each cited number links back to its snapshot
+  `field_id` and from there to the underlying tool result.
 
 ### 5.19 Alert architecture — ADR-0035
 

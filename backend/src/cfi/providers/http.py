@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx2
 
@@ -323,16 +323,18 @@ class ProviderHttpClient:
                     outcome="circuit_open",
                 )
             headers, secret_params = self._auth()
+            headers = {**headers, **dict(spec.headers)}
             await self.limiter.acquire()
             t0 = self._clock()
             retry_after: float | None = None
             try:
-                response = await self._client.request(
-                    spec.method,
-                    spec.path,
-                    params={**dict(spec.params), **secret_params},
-                    headers=headers,
-                )
+                request_kwargs: dict[str, Any] = {
+                    "params": {**dict(spec.params), **secret_params},
+                    "headers": headers,
+                }
+                if spec.json_body is not None:
+                    request_kwargs["json"] = dict(spec.json_body)
+                response = await self._client.request(spec.method, spec.path, **request_kwargs)
             except httpx2.TimeoutException as exc:
                 outcome: Outcome = "timeout"
                 status: int | None = None

@@ -8,6 +8,7 @@ Every error has a stable ``error_code``. Handling rules:
 - InsufficientDataError: the result is ``missing`` — reported, never guessed.
 - ComputationError: a bug; fail loudly.
 - AIValidationError: reject or flag the AI output.
+- AIBudgetExceededError: refuse the analysis; do not call the API; do not retry.
 """
 
 from __future__ import annotations
@@ -109,6 +110,16 @@ class AIValidationError(CFIError):
     error_code = "ai_validation_error"
     http_status = HTTPStatus.UNPROCESSABLE_ENTITY
     title = "AI output failed validation"
+
+
+class AIBudgetExceededError(CFIError):
+    """The monthly Claude API budget ceiling (Settings.ai_monthly_budget_usd, TODO.md B3) has been
+    met or exceeded for the current calendar month. Never a silent skip (R3): the analysis fails
+    explicitly with this error, visible to the caller and recorded on the interpretation row."""
+
+    error_code = "ai_budget_exceeded"
+    http_status = HTTPStatus.SERVICE_UNAVAILABLE
+    title = "AI monthly budget exceeded"
 
 
 PROBLEM_JSON = "application/problem+json"

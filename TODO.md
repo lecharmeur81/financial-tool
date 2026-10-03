@@ -505,8 +505,11 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
       should replace `exchange_flows`' adapter rather than continuing to alias `whale_flows`.
 - [ ] **Institutional treasury disposals are not tracked** (`institutional_flows` only ever accumulates) — no
       verified free source publishes dated disposal events; revisit if a provider is found.
-- [ ] Once the Claude AI Analyst phase exists, its L5 interpretations should be layered ON TOP of Phase 19's
+- [x] Once the Claude AI Analyst phase exists, its L5 interpretations should be layered ON TOP of Phase 19's
       L3 `possible_interpretations`, never replacing them — the registry here must stay AI-free (ADR-0066).
+      Done in Phase 21: `get_anomalies` (`cfi.analyst.tools`) passes Phase 19's own scan output — including its
+      fixed, AI-free `possible_interpretations`/contradicting evidence — into the snapshot unmodified; Claude
+      cites it as evidence, and the registry itself was not touched.
 
 ## Phase 20 — Capital Rotation Engine (built 2026-09-28; see PROGRESS.md, DECISIONS.md ADR-0067)
 
@@ -520,8 +523,37 @@ reply "approve A1–A12 as recommended" or name the changes. Details: `ARCHITECT
       if a provider is found, and only then add real nodes (never a proxy presented as the real thing).
 - [ ] **`flow_corroboration` has no institutional/whale data for stablecoin or untracked nodes** — always
       reports `not_applicable` for those; revisit only if a genuinely new flow source is added for them.
-- [ ] Once the Claude AI Analyst phase exists, its L5 interpretations may layer on top of a rotation's
-      `flow_corroboration` evidence, never replacing the hedged `classify_edge` wording (ADR-0067).
+- [x] Once the Claude AI Analyst phase exists, its L5 interpretations may layer on top of a rotation's
+      `flow_corroboration` evidence, never replacing the hedged `classify_edge` wording (ADR-0067). Done in
+      Phase 21: `get_capital_rotation` passes Phase 20's own matrix (its hedged `possible_rotation` wording and
+      `flow_corroboration` intact) into the snapshot; `cfi.analyst.validator.ROTATION_FACT_LANGUAGE` separately
+      bans the analyst's own prose from asserting "capital moved from X to Y" as an observed fact.
+
+## Phase 21 — Claude AI Analyst (built 2026-09-28; see PROGRESS.md, DECISIONS.md ADR-0068)
+
+- [x] Foundation layer only, per the user's own explicit scope boundary: 14 read-only tools over every
+      existing domain service, an immutable hashed evidence snapshot, a deterministic (non-AI) grounding
+      validator, a 12-section response schema with order enforced by construction, a monthly budget ceiling,
+      and full auditability (`ai.snapshot`/`ai.interpretation`/`ai.usage`, migration `0007`). Full unit + API
+      regression run green locally (818 total); 5 new integration tests written (repository round-trip, a full
+      run against a fake Anthropic transport, the one-retry-then-fail path, budget-ceiling refusal, and the
+      `/analyze` endpoint) but **not executed against a real PostgreSQL instance this session** — no such
+      instance was reachable from this sandbox (see PROGRESS.md's Phase 21 log entry); they will run on the
+      Windows machine's own Docker Desktop stack, alongside every other phase's own integration suite.
+- [ ] **Explicitly NOT built this phase** (per the user's own instruction): Daily Brief, Alerts, Paper Trading,
+      Decision Journal, Executive Dashboard, or any autonomous trading/execution — those are later phases.
+- [ ] **No unrestricted conversational memory** — only structured `ai.interpretation`/`ai.usage` records exist;
+      a future "Daily Intelligence" phase that wants longitudinal AI commentary should read those, never add a
+      free-form chat history table.
+- [ ] Model tiering (a cheaper model for routine summaries, a stronger one for deep analysis — ARCHITECTURE.md
+      §5.17) is not implemented: `Settings.anthropic_model` is one fixed model for every call. Revisit once a
+      genuinely routine (cheap) vs. deep (expensive) analysis distinction exists in the product.
+- [ ] Prompt caching for the stable system prompt (ARCHITECTURE.md §5.17's cost-control suggestion) is not
+      implemented — the system prompt is resent in full on every call. Revisit if call volume/cost makes it
+      worthwhile; the Messages API's own prompt-caching headers would be an additive change to
+      `cfi.analyst.client.ClaudeClient`, not a redesign.
+- [ ] **Delivery to the Windows machine and the `git commit` hash are still pending** as of this entry — the
+      sandbox self-verification (unit/API tests, ruff, mypy) is complete; see PROGRESS.md's Phase 21 log entry.
 
 ## Deferred (to the phase that needs them)
 
@@ -571,6 +603,10 @@ against official documentation before any adapter is written.
       point-in-time universe-membership work that would then be needed for survivorship-bias handling) — out
       of scope for the long-only v1 the user's spec described (ADR-0059).
 - [ ] **Phase 13/14/15:** regime and similarity models must be evaluated on periods not used to design them.
-- [ ] **Phase 19:** AI validator must reject any number not present in the snapshot; add adversarial tests (prompted to invent data).
-- [ ] **Phase 21:** alerts fire on signals/regimes, never on AI text alone.
+- [x] **Phase 19:** AI validator must reject any number not present in the snapshot; add adversarial tests
+      (prompted to invent data) — done in Phase 21: `cfi.analyst.validator.validate` re-extracts every numeric
+      token and checks it against the snapshot's own display values independent of Claude's own claims;
+      `test_analyst_validator.py` covers an invented number, a number cited against the wrong `field_id`, and
+      an unknown `field_id`.
+- [ ] **Phase 22:** alerts fire on signals/regimes, never on AI text alone.
 - [ ] **Phase 25:** API-key storage, rate-limit abuse, prompt injection via ingested text (e.g. social data fed to Claude), dependency audit.

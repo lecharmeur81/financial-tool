@@ -2430,3 +2430,111 @@ documents every scope limit: mid-caps/DeFi/AI-related assets have no tracked uni
 an attention proxy only, "large caps" means only this platform's own 4-asset universe, the untracked residual
 share of the global TOTAL is reported once and never decomposed further, and stablecoin exchange
 balances/flows remain outside this platform's scope (`cfi.liquidity.universe`'s own pre-existing limit).
+
+## ADR-0068 — Phase 21: Claude AI Analyst — controlled tool reuse, snapshot-hash grounding,
+section-order-by-construction, and a minimal Celery producer for the API process
+
+**Status:** Accepted (implemented 2026-09-28)
+
+**Context.** The user's Phase 21 instruction asked for the AI interpretation layer described in CLAUDE.md's R6
+and ARCHITECTURE.md §5.17/5.18: an evidence-grounded Claude analyst answering ~14 example questions, never
+inventing numbers/sources/whale identities/institutional ownership, never presenting an inferred rotation or a
+historical similarity as a guaranteed fact, with a fixed 12-section output schema, a controlled tool
+architecture reusing existing services (no raw DB access), full evidence provenance, a versioned/separated
+prompt, a Claude API provider abstraction with proper timeout/retry/error handling, schema-validated output
+with a bounded retry, a complete auditability record, no free-form conversational memory, and a security review
+covering prompt injection and secret handling. This is the first write path in the codebase outside
+`cfi.ingestion` and the first phase to populate the `ai` schema (created empty in migration 0001).
+
+**Decision.**
+
+1. **`RequestSpec` gained two small, additive fields — `headers` and `json_body`** (`cfi.providers.base`) —
+   rather than a parallel HTTP client for the Anthropic Messages API. Every existing GET-only adapter leaves
+   both at their defaults (`{}`/`None`), so `ProviderHttpClient.send()`'s behavior for them is unchanged byte
+   for byte; `cfi.analyst.client.ClaudeClient` is the first and only caller that sets them, and inherits
+   authentication, timeouts, retry with exponential backoff, rate limiting, circuit breaking, and per-attempt
+   logging for free (R8, R13: extend the shared client, do not reimplement it).
+
+2. **14 read-only tools (`cfi.analyst.tools`, catalogued in `cfi.analyst.universe.TOOLS`), each a thin wrapper
+   over an existing, already-tested domain service** — `get_market_data` (via `Adapters` + `window_reading`),
+   `get_institutional_flows`/`get_whale_activity`/`get_retail_activity`/`get_derivatives`/`get_liquidity`/
+   `get_macro`/`get_market_structure` (each domain's own `Service.overview`, constructed exactly as its API
+   route does — `Adapters`' own shortcut construction only sets `enabled_providers=[]`, which would silently
+   disable every provider-disclosure field), `calculate_divergence`/`get_market_regime`/
+   `find_historical_similar_periods`/`get_anomalies`/`get_capital_rotation` (Phases 13-20's own engines), and
+   `check_data_quality` (a pure function over the other 13 tools' own results, not a new database read).
+   Claude never calls these directly and never gets a database connection (ARCHITECTURE.md §5.17's "no action
+   tools"); `cfi.analyst.snapshot.build_snapshot` calls all 14 exactly once per analysis, before Claude is ever
+   invoked, and raises `ComputationError` (never a silently incomplete snapshot) if any declared tool is not
+   called.
+
+3. **The snapshot is hashed and grounding is enforced by exact string matching, not by trusting the model.**
+   `cfi.analyst.snapshot._flatten` turns every tool result into stable dotted `field_id`s, promoting an
+   "evidence-envelope" dict (one already carrying `value`/`unit`/`evidence_category`/`quality_status`/`source`
+   — the same convention `DATA_DICTIONARY.md` §2 requires of every dataset) as one field rather than exploding
+   it key-by-key. Every existing service already serializes `Decimal` values as exact-format strings before
+   returning them, so a numeric field's `display` string is precisely what Claude is instructed to copy
+   verbatim; `cfi.analyst.validator` re-extracts every number in the response and checks it, independent of
+   what Claude claims, against the snapshot's own display values (per-cited-`field_id` for the six grounded
+   list sections, whole-snapshot backstop for the six prose sections). The whole snapshot is sha256-hashed
+   (`snapshot_id`) and stored verbatim in `ai.snapshot.payload` before the Claude call, so what Claude saw is
+   always reproducible after the fact (ADR-0041).
+
+4. **Section order is enforced by construction, not by asking Claude to emit keys in order.** A JSON object's
+   key order carries no semantic meaning, so `cfi.analyst.schema.AnalystResponse`'s Pydantic field declaration
+   order — matching `cfi.analyst.universe.RESPONSE_SECTIONS` exactly — is the canonical order for every
+   response this system ever serializes or stores, regardless of the order Claude's own JSON used.
+   `extra="forbid"` on every model (top-level and nested `EvidenceItem`/`Scenario`) rejects a stray key loudly
+   rather than silently dropping it.
+
+5. **Banned-language enforcement is production code, not a test-only regex.** Phase 19's Anomaly Engine banned
+   a fixed set of words in its own *test* fixtures; Phase 21's `cfi.analyst.universe.BANNED_PATTERNS` runs at
+   runtime against live Claude output. Scoped deliberately narrower than a blanket word-ban: bare "buy"/"sell"
+   are not banned (they are ordinary market vocabulary — "buy-side flow", "aggregate sell volume"), only
+   "bullish"/"bearish" verdicts, actionable trading directives, manufactured certainty language, and
+   historical-similarity-as-guarantee phrasing. A separate `ROTATION_FACT_LANGUAGE` pattern specifically bans
+   "capital (has) moved from X to Y" phrasing, protecting Phase 20's own `classify_edge` hedge discipline from
+   being undone by the analyst's own prose.
+
+6. **The monthly budget ceiling (`Settings.ai_monthly_budget_usd`, default $20, TODO.md B3) is enforced by
+   summing `ai.usage.cost_usd` for the current calendar month before every call**, never by a separate,
+   driftable counter — the same "derive, don't duplicate" posture as everywhere else in the platform. Exceeding
+   it raises the new `AIBudgetExceededError` (`cfi.core.errors`), which the service records as a `failed`
+   interpretation with an explicit error, never a silent skip.
+
+7. **A queued-then-worker-runs job design**, mirroring every other domain's ingestion-job shape: the API
+   inserts an `ai.interpretation` row with `status='queued'` synchronously and returns its `uuid` as a stable
+   `analysis_id` immediately, then hands the actual work to a new `analyst.analyze` Celery task on its own
+   `ai` queue (so a slow or rate-limited Claude call never blocks an API worker). The task is retried at most
+   once on a validation failure (`MAX_VALIDATION_ATTEMPTS = 2`), with the validator's own errors appended to
+   the retry prompt; a second failure is stored `failed` with those errors, never reinterpreted.
+
+8. **`cfi.worker.client` is a separate, deliberately tiny Celery producer for the API process** — the real
+   `cfi.worker.app` module eagerly builds every ingestion domain's adapters/sources/jobs and calls the global
+   `get_settings()` at import time (needed so Celery's `beat_schedule` can be built at module load), which
+   made it unsuitable to import from the API request path (it broke under test `Settings` that bypass the
+   environment entirely). `cfi.worker.client.send_task` takes the caller's own `Settings` explicitly and never
+   imports `cfi.worker.app`, so the API process's import graph does not grow to include every ingestion
+   adapter just to enqueue one task by name.
+
+9. **Three new bigint-identity tables with a separate public `uuid` column** (`ai.snapshot`, `ai.interpretation`,
+   `ai.usage`; migration `0007`), matching every other table's own `bigint GENERATED ALWAYS AS IDENTITY`
+   convention rather than a UUID primary key — external callers (the API, this ADR's own audit trail) address
+   rows by `uuid` only. `ai.snapshot` is never updated after insert; `ai.interpretation` moves
+   `queued → running → completed/failed` in place; `ai.usage` gets one row per Claude call attempt. Downgrade
+   refuses to run if any of the three tables holds data (R10).
+
+**Consequences.** New package `cfi.analyst` (`universe`, `tools`, `snapshot`, `schema`, `validator`, `prompts`,
+`client`, `repository`, `service`), one new route (`cfi.api.routes.analyst`: `/catalog`, `POST /analyze`,
+`GET /{analysis_id}`), one new Celery task (`analyst.analyze` on the `ai` queue) plus a lightweight `engine()`
+accessor on `WorkerRuntime` (no ingestion-adapter setup needed for this task), and the additive
+`RequestSpec.headers`/`json_body` fields. 56 new unit tests covering the tool/snapshot/schema/validator/
+prompt/client layers (including every grounding-failure scenario from the user's own Section 12 test list,
+and the extended `RequestSpec` fields against a plain GET adapter to confirm zero behavior change), plus 5
+new integration tests (repository round-trip, a full run against a fake Anthropic transport, the one-retry-
+then-fail path, budget-ceiling refusal, and the `/analyze` endpoint creating a queued row) that require the
+real test database and are not run in a sandbox without one. Known, permanent limitations carried into every
+snapshot verbatim (`cfi.analyst.universe.KNOWN_PLATFORM_LIMITATIONS`): the untracked mid-cap/DeFi/AI-related
+universes and meme-asset proxy status (Phase 20), the 4-asset "large caps" universe, and missing flow
+corroboration for some rotation nodes — none of Phases 1-20's own methodologies were changed to accommodate
+Claude.

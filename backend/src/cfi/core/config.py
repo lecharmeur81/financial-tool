@@ -143,6 +143,27 @@ class Settings(BaseSettings):
                 raise ValueError("CFI_MARKET_BACKFILL_DAYS must look like '1m=7,1h=365'")
         return value
 
+    # AI Analyst (Phase 21, ADR-0034/0068). Optional: without a key, analyst tasks are skipped
+    # (not failed) — same "credential not configured" posture as SoSoValue/FRED. Model, base URL
+    # and token ceiling are configuration, never hard-coded (R9, ARCHITECTURE.md 5.17).
+    anthropic_api_key: SecretStr | None = None
+    anthropic_api_base_url: str = "https://api.anthropic.com"
+    anthropic_api_version: str = "2023-06-01"
+    anthropic_model: str = "claude-sonnet-5"
+    anthropic_max_tokens: int = Field(default=4096, ge=1, le=32000)
+    anthropic_timeout_seconds: float = Field(default=60.0, gt=0)
+    anthropic_rate_limit_requests: int = Field(default=50, ge=1)
+    anthropic_rate_limit_per_seconds: float = Field(default=60.0, gt=0)
+    # B3 (TODO.md Part B, approved 2026-09-23): a small fixed monthly ceiling; the AI pauses (with
+    # an explicit, visible notice — never a silent skip) once this month's recorded ``ai.usage``
+    # cost meets or exceeds it.
+    ai_monthly_budget_usd: float = Field(default=20.0, ge=0)
+    # Estimated cost only (``ai.usage.cost_usd`` — Section 13's "latency/token usage"); Anthropic's
+    # own billing is the source of truth for actual charges. Configurable, never hard-coded into the
+    # calculation itself, since list prices change over time (R9/R13).
+    anthropic_input_cost_per_mtok_usd: float = Field(default=3.0, ge=0)
+    anthropic_output_cost_per_mtok_usd: float = Field(default=15.0, ge=0)
+
     @field_validator("database_url")
     @classmethod
     def _database_url_uses_psycopg(cls, value: SecretStr) -> SecretStr:
