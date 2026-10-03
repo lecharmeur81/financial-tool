@@ -370,13 +370,43 @@ ai_interpretation = Table(
     schema="ai",
 )
 
+ai_brief = Table(
+    "brief",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("uuid", UUID(as_uuid=True), nullable=False, unique=True),
+    Column("created_at", TS, nullable=False),
+    Column("updated_at", TS, nullable=False),
+    Column("reporting_period_start", TS, nullable=False),
+    Column("reporting_period_end", TS, nullable=False),
+    Column("snapshot_id", BigInteger),
+    Column("previous_brief_id", BigInteger),
+    Column("status", Text, nullable=False),
+    Column("prompt_version", Text),
+    Column("analyst_version", Text),
+    Column("model", Text),
+    Column("response", JSONB),
+    Column("validation_status", Text),
+    Column("validation_errors", JSONB),
+    Column("attempt_count", Integer, nullable=False),
+    Column("tools_called", JSONB),
+    Column("data_quality_state", Text),
+    Column("changes", JSONB),
+    Column("error", Text),
+    schema="ai",
+)
+
 ai_usage = Table(
     "usage",
     metadata,
     Column("id", BigInteger, Identity(always=True), primary_key=True),
     Column("uuid", UUID(as_uuid=True), nullable=False, unique=True),
     Column("created_at", TS, nullable=False),
-    Column("interpretation_id", BigInteger, nullable=False),
+    # Nullable (Phase 22, migration 0008): a brief-generated usage row has no interpretation — see
+    # `brief_id` below. Exactly one of the two is set (enforced by the database's
+    # `usage_exactly_one_owner` CHECK, migration 0008), never both and never neither.
+    Column("interpretation_id", BigInteger),
+    Column("brief_id", BigInteger),
     Column("model", Text, nullable=False),
     Column("input_tokens", Integer),
     Column("output_tokens", Integer),

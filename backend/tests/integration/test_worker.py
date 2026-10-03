@@ -5,6 +5,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 from sqlalchemy import make_url
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.core.config import Settings
 from cfi.derivatives.universe import all_datasets as derivative_datasets
@@ -29,8 +30,39 @@ def test_celery_app_is_configured_for_safe_task_handling() -> None:
     assert "market.ingest_latest" in worker.app.tasks
     assert "market.backfill_round" in worker.app.tasks
     assert "analyst.analyze" in worker.app.tasks
+    assert "brief.generate" in worker.app.tasks
     queues = {entry["options"]["queue"] for entry in conf.beat_schedule.values()}
-    assert queues == {"ingest_fast", "ingest", "backfill"}
+    assert queues == {"ingest_fast", "ingest", "backfill", "ai"}
+    assert "brief:daily" in conf.beat_schedule
+    assert conf.beat_schedule["brief:daily"]["options"]["queue"] == "ai"
+
+
+def test_brief_is_scheduled_once_daily_on_the_ai_queue() -> None:
+    from cfi.worker.schedule import brief_entries
+
+    entries = brief_entries()
+    assert list(entries) == ["brief:daily"]
+    entry = entries["brief:daily"]
+    assert entry["task"] == "brief.generate"
+    assert entry["options"]["queue"] == "ai"
+    # a daily brief is a fixed time of day (crontab), not an "every N seconds" interval — the only
+    # entry in this schedule that is not interval-based (Phase 22, Section 8).
+    from celery.schedules import crontab
+
+    assert isinstance(entry["schedule"], crontab)
+
+
+def test_brief_task_skips_when_the_anthropic_api_key_is_not_configured(
+    monkeypatch: pytest.MonkeyPatch, db: AsyncEngine
+) -> None:
+    from cfi.worker import app as worker
+
+    monkeypatch.setattr(
+        worker, "settings", worker.settings.model_copy(update={"anthropic_api_key": None})
+    )
+    result = worker.brief_generate_task.run()
+    assert result["skipped"] == "Anthropic API key not configured"
+    assert "brief_id" in result
 
 
 def test_disabled_provider_is_not_ingested() -> None:

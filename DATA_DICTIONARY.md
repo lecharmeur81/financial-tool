@@ -1498,12 +1498,40 @@ for the current calendar month, never by a separate counter.
 |---|---|
 | `id` (bigint, PK) / `uuid` (unique) | Internal identity / external identifier |
 | `created_at` | When this attempt was recorded |
-| `interpretation_id` | FK to `ai.interpretation.id` |
+| `interpretation_id` | FK to `ai.interpretation.id` — nullable since migration `0008` (a brief-generated row has no interpretation; see `brief_id` below) |
+| `brief_id` | FK to `ai.brief.id`, added in migration `0008` — nullable; exactly one of `interpretation_id`/`brief_id` is set (CHECK `usage_exactly_one_owner`), never both and never neither |
 | `model` | Model that answered this attempt |
 | `input_tokens`, `output_tokens` | From the Messages API's own `usage` block |
 | `latency_ms` | Wall-clock time for this one call |
 | `cost_usd` | Estimated cost (`Settings.anthropic_{input,output}_cost_per_mtok_usd` × tokens) — Anthropic's own billing is the source of truth for actual charges |
 | `attempt` | 1 or 2 |
+
+### `ai.brief` (`cfi/db/tables.py::ai_brief`, migration `0008`) — Phase 22
+
+One row per generated Daily Market Brief; same `queued → running → completed/failed` job-record
+shape as `ai.interpretation`, reusing the Phase 21 Claude-call machinery
+(`cfi.analyst.client.ClaudeClient`) and the shared `ai.usage` budget ceiling rather than a parallel
+logging system (ARCHITECTURE.md §5.18a).
+
+| Field | Description |
+|---|---|
+| `id` (bigint, PK) / `uuid` (unique) | Internal identity / the `brief_id` returned to callers |
+| `created_at`, `updated_at` | Lifecycle timestamps |
+| `reporting_period_start`, `reporting_period_end` | The 24-hour window this brief covers |
+| `snapshot_id` | FK to `ai.snapshot.id` — the exact evidence Claude used (the same `ai.snapshot` table Phase 21 writes to; not a separate snapshot store) |
+| `previous_brief_id` | FK to `ai.brief.id` — the previous `completed` brief used as the change-detection comparison basis (`null` means none existed yet) |
+| `status` | `queued` \| `running` \| `completed` \| `failed` |
+| `prompt_version` | `cfi.brief.universe.BRIEF_PROMPT_VERSION` (`brief_prompt.v1`) |
+| `analyst_version` | `cfi.brief.universe.BRIEF_ANALYST_VERSION` (`brief_analyst.v1`) — this layer's own version id, independent of Phase 21's own `PROMPT_VERSION`/`RESPONSE_SCHEMA_VERSION` |
+| `model` | `Settings.anthropic_model` at the time of the call |
+| `response` (jsonb) | The validated `cfi.brief.schema.BriefResponse`, in its 15-section canonical order |
+| `validation_status` | `ok` \| `failed` (the deterministic validator's own verdict) |
+| `validation_errors` (jsonb) | The validator's own error strings, if any (on the final attempt) |
+| `attempt_count` | 1 or 2 (`cfi.brief.universe.MAX_VALIDATION_ATTEMPTS`) |
+| `tools_called` (jsonb) | The 14 analyst tool IDs called for this brief's snapshot (the same snapshot builder Phase 21 uses) |
+| `data_quality_state` | `ok` \| `degraded` \| `insufficient`, rolled up by `check_data_quality` |
+| `changes` (jsonb) | The computed `cfi.brief.changes.ChangeSet`: `comparison_basis` (`previous_brief` \| `none`) and every `FieldChange` (`change_id`, `field_id`, `previous_display`, `current_display`, `delta`) — recorded for auditability even though it is also implicit in `response` |
+| `error` | Set only when `status = failed`: budget-ceiling refusal, malformed Claude output after the retry, or a provider error |
 
 ### The 14 analyst tools (`cfi/analyst/universe.py::TOOLS`, `cfi/analyst/tools.py`)
 

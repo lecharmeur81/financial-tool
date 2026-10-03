@@ -14,6 +14,7 @@ from cfi.api.middleware import REQUEST_ID_HEADER, request_context_middleware
 from cfi.api.routes import (
     analyst,
     anomaly,
+    brief,
     derivatives,
     divergence,
     health,
@@ -114,4 +115,5 @@ def create_app(
     app.include_router(anomaly.router)
     app.include_router(rotation.router)
     app.include_router(analyst.router)
+    app.include_router(brief.router)
     return app

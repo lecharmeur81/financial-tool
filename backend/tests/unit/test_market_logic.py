@@ -172,7 +172,16 @@ def test_schedule_covers_native_datasets_on_the_right_queues() -> None:
     schedule = beat_schedule(["coingecko"])
     assert "latest:coingecko:market.market_cap.usd" in schedule
     assert schedule["backfill:round"]["options"]["queue"] == "backfill"
-    assert beat_schedule([]) == {}
+    # The Daily Market Brief (Phase 22) is scheduled unconditionally — it reads existing
+    # intelligence rather than ingesting from any provider, so it has no provider list to be
+    # empty. With every ingestion provider list empty, "brief:daily" is the only entry left.
+    assert beat_schedule([]) == {
+        "brief:daily": {
+            "task": "brief.generate",
+            "schedule": beat_schedule([])["brief:daily"]["schedule"],
+            "options": {"queue": "ai", "expires": 3600},
+        }
+    }
     with pytest.raises(ValueError, match="unknown market provider"):
         scheduled_ingestions(["nope"])
 

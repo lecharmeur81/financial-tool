@@ -2599,3 +2599,72 @@ place (ADR-0068) — this is a structural refinement of three existing fields' i
 unit+API tests plus these 15 all pass (833/833), ruff/format/mypy strict all clean. The previously reported
 limitation is unchanged and not re-attempted here: the five DB-backed `ai.*` integration tests still have not
 been executed against a real PostgreSQL/TimescaleDB instance.
+
+## ADR-0070 — Phase 22: Daily Market Brief — a second, independent artifact over the same
+evidence, sharing Phase 21's budget ceiling by additively widening `ai.usage`
+
+**Status:** Accepted (implemented 2026-10-03)
+
+**Context.** The user's Phase 22 spec asks for a Daily Market Brief: an orchestration and presentation layer
+over every existing intelligence domain (market data through capital rotation) plus the Phase 21 AI Analyst,
+answering "what materially changed since the previous brief" as decision support, never a prediction. The
+spec is explicit that this must not rebuild Phase 21, redesign `AnalystResponse`, add a new tool, or create a
+parallel scheduling/logging system — and that change detection must never call something a "meaningful
+change" without a defined comparison basis. Two design questions needed a decision: (1) how the brief's own
+Claude-call usage shares Phase 21's existing monthly budget ceiling without a second usage table or a second
+budget check, and (2) how "what changed since the previous brief" is computed without inventing a second,
+parallel calculation path alongside the 14 existing analyst tools.
+
+**Decision.**
+
+1. **`ai.usage` is additively widened, not duplicated (migration `0008`).** `interpretation_id` becomes
+   nullable and a new nullable `brief_id` column is added, with a CHECK constraint requiring exactly one of
+   the two to be set. `AnalystRepository.monthly_cost_usd` — the exact query Phase 21 already uses to enforce
+   `Settings.ai_monthly_budget_usd` — sums `ai.usage.cost_usd` for the current month with no filter on either
+   owning column, so once the brief's own usage rows carry `brief_id`, that unmodified query already includes
+   them. This mirrors ADR-0068's own precedent (additively extending `RequestSpec` with `headers`/`json_body`
+   for a new caller without changing existing behavior) rather than introducing a parallel `ai.brief_usage`
+   table and a parallel budget check that could drift out of sync with the real one.
+
+2. **Change detection diffs two already-persisted snapshots — never a live recomputation.** `ai.brief` is new
+   (queued → running → completed/failed, mirroring `ai.interpretation`'s own shape) and carries
+   `previous_brief_id`, resolved once when a brief is queued (the most recent `completed` brief, if any).
+   `cfi.brief.changes.compute_changes` diffs the current `cfi.analyst.snapshot.Snapshot`'s own fields against
+   that previous brief's stored `ai.snapshot.payload` (already immutable and hashed, ADR-0041) — the field_id
+   namespace used for grounding is reused unchanged as the change-detection key, so no second identification
+   scheme was invented. When no previous `completed` brief exists, `comparison_basis="none"` and the validator
+   (`cfi.brief.validator`) rejects any `change_id` cited anywhere in the response: per the spec's own words,
+   nothing may be called a meaningful change without a defined comparison basis.
+
+3. **The brief is its own schema and prompt/validator layer, not a patch onto `AnalystResponse`.**
+   `cfi.brief.schema.BriefResponse` has exactly the 15 sections the spec lists, in that order;
+   `BriefEvidenceItem` extends Phase 21's `field_ids` grounding with `change_ids`. The brief's banned-language
+   set (`cfi.brief.universe.BANNED_PATTERNS`) is Phase 21's own set (`cfi.analyst.universe.BANNED_PATTERNS`)
+   plus patterns Phase 21 never needed — explicit long/short position directives, position-sizing
+   instructions, a price target asserted as certain — because Phase 21 has no "position" concept at all. The
+   brief's own `BRIEF_PROMPT_VERSION`/`BRIEF_ANALYST_VERSION` are independent of Phase 21's
+   `PROMPT_VERSION`/`RESPONSE_SCHEMA_VERSION`: two different artifacts over the same evidence, each
+   independently versioned and reproducible, matching the spec's explicit instruction not to redesign
+   `AnalystResponse`.
+
+4. **Scheduling reuses the existing Celery beat infrastructure with one new crontab entry, not a new
+   framework.** Every existing beat-schedule entry is interval-based ("every N seconds"), which fits
+   ingestion but not "once a day at a fixed time" — `cfi.worker.schedule.brief_entries` adds the first
+   crontab-based entry (`celery.schedules.crontab`, already a transitive dependency via `celery[redis]`) to
+   the same `beat_schedule()` dict every other domain's entries already merge into, on the existing `ai`
+   queue. The `brief.generate` task doubles as both the scheduled, self-contained daily job (queues and runs
+   its own row when called with no argument) and the API-triggered worker step (`POST /brief/generate` queues
+   first, for a stable `brief_id`, then calls the same task with that row's id) — one task, not two, mirroring
+   `analyst.analyze`'s own queued-then-run split (ADR-0068) in both directions.
+
+**Consequences.** New package `cfi.brief` (`universe`, `schema`, `changes`, `prompts`, `validator`,
+`repository`, `service`); new `ai.brief` table and additive `ai.usage` columns (migration `0008`); new
+`brief.generate` Celery task and `brief:daily` crontab beat entry; new `POST /brief/generate`, `GET
+/brief/{brief_id}`, `GET /brief/latest` API routes. No change to any Phase 5-21 service, to `AnalystResponse`,
+to the 14-tool catalog, or to `cfi.analyst.validator`/`cfi.analyst.prompts` — this is a new, additive layer,
+not a modification of Phase 21. One existing unit test (`test_schedule_covers_native_datasets_on_the_right_
+queues`) was updated: `beat_schedule([])` is no longer `{}`, since the daily brief does not depend on any
+ingestion provider list and is now always scheduled. The previously reported limitation is unchanged and not
+re-attempted here: the DB-backed `ai.*` integration tests (now including `test_brief_service.py` and the new
+`test_worker.py` cases) are written and exercised on Windows but have not been executed against a real
+PostgreSQL/TimescaleDB instance in this sandbox.

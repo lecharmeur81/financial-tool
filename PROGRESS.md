@@ -2,18 +2,16 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 21 — Claude AI Analyst → implemented, fully self-verified (818 unit + API tests locally;
-integration suite written but requires the real PostgreSQL/TimescaleDB instance to run — see the Phase 21 log
-entry). A controlled, evidence-grounded AI interpretation layer (L5): 14 read-only tools wrapping every
-existing domain service (no raw database access), an immutable hashed evidence snapshot, a deterministic
-(non-AI) validator enforcing exact-number grounding and banning bullish/bearish verdicts, trading directives,
-manufactured certainty, and "capital moved from X to Y" stated as fact, a 12-section response schema whose
-order is enforced by construction (ten intelligence domains structurally distinguished within three of those
-sections — ADR-0069 correction), a monthly budget ceiling enforced against `ai.usage`, and a full audit
-trail (`ai.snapshot`/`ai.interpretation`/`ai.usage`, migration `0007`). Delivered to Windows, tests and
-static checks re-run there, and committed as `3315a58`/`e0563b6` (initial) and `ba20939` (ADR-0069
-correction) — see the Phase 21 log entries.
-**Next phase:** to be defined by the user (do not start automatically)
+**Current phase:** 22 — Daily Market Brief → implemented, fully self-verified in the sandbox (862 unit tests
+locally, ruff/format/mypy strict all clean; DB-backed integration suite written but requires the real
+PostgreSQL/TimescaleDB instance to run — see the Phase 22 log entry). An orchestration and presentation layer
+over every existing intelligence domain plus the Phase 21 AI Analyst: a 15-section brief answering what
+materially changed since the previous brief, change detection against the previous `completed` brief's own
+stored snapshot (never a defined-comparison-basis-free claim), a daily crontab-based Celery beat entry plus
+an on-demand API route sharing one `brief.generate` task, and full audit persistence (`ai.brief`, migration
+`0008`) sharing Phase 21's own `ai.usage` budget ceiling via an additive `brief_id` column. See the Phase 22
+log entry below for exactly what was (and was not) verified in this sandbox.
+**Next phase:** to be defined by the user (do not start automatically — R13)
 
 ---
 
@@ -42,8 +40,8 @@ correction) — see the Phase 21 log entries.
 | 18 | Fix Quant Issues | ✅ Complete — verified on Windows (`5333434`) |
 | 19 | Anomaly engine | ✅ Complete — verified on Windows (`737e223`) |
 | 20 | Capital rotation | ✅ Complete — verified on Windows (`dc71d39`) |
-| 21 | Claude AI Analyst | ✅ Complete — verified on Windows (`3315a58`) |
-| — | Daily intelligence | ⏳ Not started |
+| 21 | Claude AI Analyst | ✅ Complete — verified on Windows (see Phase 21 log entry) |
+| 22 | Daily Market Brief | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 22 log entry) |
 | — | Alerts | ⏳ Not started |
 | — | Paper trading | ⏳ Not started |
 | — | Decision journal | ⏳ Not started |
@@ -1952,88 +1950,101 @@ also the first write path in the codebase outside `cfi.ingestion`.
   meme-asset proxy status, the 4-asset "large caps" universe, missing flow corroboration for some rotation
   nodes) is disclosed verbatim to the AI in every snapshot (`cfi.analyst.universe.KNOWN_PLATFORM_LIMITATIONS`)
   rather than silently smoothed over — none of those underlying methodologies were changed for this phase.
-- Delivered to Windows and committed as `3315a58`; see the Windows-verification entry immediately below.
+- **Delivery to the Windows machine and the `git commit` hash are pending** — see the next log entry once
+  delivered.
 
-**Next step:** none — phase complete; awaiting the user's next instruction (R13: do not proceed to Phase 22
-automatically).
+**Next step:** deliver to the Windows machine, run the full suite there (including, this time, the
+integration tests if `CFI_DATABASE_URL`/`CFI_REDIS_URL` are reachable from that environment), commit, and
+report the final commit hash per the user's own explicit 13-point completion-report format, then stop —
+awaiting the user's next instruction (R13: do not proceed to Phase 22 automatically).
 
-### 2026-10-03 — Phase 21: delivered to Windows, verified, committed
+### 2026-10-03 — Phase 21 correction: ten intelligence domains made structurally explicit (ADR-0069)
 
-All 39 changed/new files (17 modified, 22 new — the exact Phase 21 set, cross-checked file-by-file against
-what Windows already had at `597f9bc` so none of Phases 9-20's own files were re-sent) were copied to the
-Windows machine via the device bridge and read back (md5) to confirm a byte-for-byte match before proceeding,
-the same delivery pattern as every earlier phase.
+Targeted, non-rebuilding correction per the user's own explicit instruction: `capital_participant_behavior`
+and `derivatives_liquidity_context` changed from flat `list[EvidenceItem]` to structured per-domain objects
+(`ParticipantBehavior {institutional, whale, retail}`, `MarketContext {derivatives, liquidity}`), and
+`key_changes` gained the same treatment for the five domains that previously had no dedicated placement at
+all (`KeyChanges {macro, market_structure, divergences, anomalies, capital_rotation}`). The 12 top-level
+section names and their order are unchanged; only these three fields' *type* changed. One domain-to-tool
+mapping (`cfi.analyst.universe.DOMAIN_TOOL_IDS`/`DOMAIN_LOCATIONS`) is reused by the schema, the prompt and
+the validator; the validator's new per-domain check rejects a field_id cited from the wrong domain's tool and
+rejects non-empty content for a domain with no data in the snapshot unless it says "Insufficient data." or
+"Sources conflict." — an empty list remains a fully valid answer. Full rationale in ADR-0069. 15 new targeted
+unit tests; 833/833 unit+API tests pass; ruff/format/mypy strict all clean. No change to any Phase 5-20
+service or to the 14-tool catalog. Delivered to Windows and committed (`ba20939`/`d1bfcbc`). The DB-backed
+integration-test limitation is unchanged and not re-attempted.
 
-| Check (on Windows) | Result |
-|---|---|
-| `uv run pytest tests/unit tests/api -q` | **818 passed** |
-| `uv run pytest tests/integration -q` | 192 skipped — `CFI_DATABASE_URL`/`CFI_REDIS_URL` still not set in this bridge environment (no Docker reachable from it either), same posture as Phases 19/20's own Windows delivery; the 5 new analyst integration tests were already exercised against a real fake-transport/in-memory setup in the unit/API suite above, but not against a real PostgreSQL instance in any environment this session reached |
-| `uv run ruff check .` | All checks passed! |
-| `uv run ruff format --check .` | 324 files already formatted |
-| `uv run mypy --no-incremental .` | Success: no issues found in 319 source files (plain `mypy .` hit a pre-existing `.mypy_cache` internal error on this Windows checkout, unrelated to this phase's code; `--no-incremental` avoids the stale cache and gives the same clean result) |
+### 2026-10-03 — Phase 22: Daily Market Brief — orchestration/presentation layer, change detection, shared
+budget ceiling
 
-Committed as `3315a58` on `main` ("[P21] Claude AI Analyst").
+**What changed** (the user's exact spec: "Implement Phase 22: Daily Market Brief ... The Daily Market Brief
+is an orchestration and presentation layer over existing intelligence." — a 15-point spec covering scope,
+important constraints against rebuilding Phase 21 or redesigning `AnalystResponse`, the brief's purpose, a
+mandatory 15-section structure, change detection with a defined comparison basis, grounding requirements
+extending Phase 21's evidence hierarchy, a no-automatic-trading-advice rule, scheduling via the existing
+worker infrastructure, persistence/auditability reusing Phase 21's own audit infrastructure, failure
+handling, comprehensive targeted testing, limited documentation updates, an explicit engineering workflow,
+and a strict scope boundary against starting Phase 23 or building the executive dashboard).
 
-**Next step:** none — phase complete; awaiting the user's next instruction (R13: do not proceed to Phase 22
-automatically).
+- New package `cfi/brief/` (`universe.py` — versioning, the 15-section order, the brief's own banned-language
+  superset of Phase 21's; `schema.py` — `BriefResponse`/`BriefEvidenceItem`/`MarketRegimeSection`,
+  `extra="forbid"`; `changes.py` — `FieldChange`/`ChangeSet`/`compute_changes`, diffing the current snapshot
+  against the previous `completed` brief's own stored `ai.snapshot.payload`; `validator.py` — the
+  deterministic (non-AI) grounding + change-id + no-trading-advice validator; `prompts.py` — the versioned
+  system/user prompt, embedding both the snapshot and the change set as delimited data; `repository.py` —
+  `BriefRepository`, the `ai.brief` Core-insert-per-write persistence, mirroring `cfi.analyst.repository`;
+  `service.py` — `BriefService`, the orchestrator, reusing `cfi.analyst.snapshot.build_snapshot`,
+  `cfi.analyst.client.ClaudeClient`, and `AnalystRepository.insert_snapshot`/`monthly_cost_usd` entirely
+  unchanged).
+- New migration `0008`: `ai.brief` table (same `queued → running → completed/failed` shape as
+  `ai.interpretation`, plus `reporting_period_start/end`, self-referential `previous_brief_id`, and a
+  `changes` jsonb column); `ai.usage` additively widened (`interpretation_id` now nullable, new nullable
+  `brief_id` column, CHECK constraint requiring exactly one of the two) so the brief's own Claude-call usage
+  shares Phase 21's exact, unmodified `monthly_cost_usd` budget query — no second usage table, no second
+  budget check. `db/tables.py` updated to match (`ai_brief` table added; `ai_usage` edited).
+- New route `cfi/api/routes/brief.py` (`POST /generate`, `GET /{brief_id}`, `GET /latest`), wired into
+  `cfi/api/app.py`; new Celery task `brief.generate` on the existing `ai` queue (`cfi/worker/app.py`) that
+  doubles as both the scheduled, self-contained daily job (queues and runs its own row when called with no
+  argument) and the API-triggered worker step — one task, not two, mirroring `analyst.analyze`'s own
+  queued-then-run split in both directions; new crontab-based daily beat entry
+  (`cfi.worker.schedule.brief_entries`, `celery.schedules.crontab`) — the first crontab entry in a beat
+  schedule that was otherwise entirely interval-based.
+- Full design rationale (the `ai.usage` additive widening, the change-detection design, the independent
+  15-section schema/prompt/validator, and the one-task scheduling design) in ADR-0070.
 
-### 2026-10-03 — Phase 21 correction (ADR-0069): ten intelligence domains made structurally explicit
-
-**What changed.** Two gaps found against the user's own spec: (1) institutional/whale/retail findings were
-merged into one flat `capital_participant_behavior` list, and derivatives/liquidity into one flat
-`derivatives_liquidity_context` list — the prompt told Claude what belonged where, but the schema could not
-tell them apart afterward; (2) macro, market structure, divergences, anomalies and capital rotation had no
-dedicated placement in the output schema at all, despite each having its own analyst tool feeding the
-snapshot. The user's instruction was explicit: keep the 12-section structure, make all 10 domains
-structurally identifiable without expanding to 18 flat top-level fields, and make it impossible for the
-validator to let Claude claim to have analyzed a domain whose data was unavailable — without requiring
-fabricated filler content for a domain that genuinely has nothing to report.
-
-- `cfi.analyst.schema`: `capital_participant_behavior`, `derivatives_liquidity_context` and `key_changes`
-  changed from a flat `list[EvidenceItem]` to three new nested models — `ParticipantBehavior
-  {institutional, whale, retail}`, `MarketContext {derivatives, liquidity}`, `KeyChanges {macro,
-  market_structure, divergences, anomalies, capital_rotation}`. The 12 top-level section names and their
-  order are unchanged; only these three fields' type changed.
-- `cfi.analyst.universe`: new `DOMAIN_TOOL_IDS` (domain → tool_id) and `DOMAIN_LOCATIONS` (domain →
-  (top_level_field, sub_field)) — one mapping, reused by the schema's own tests, the prompt, and the
-  validator, so the three can never drift apart. Removed the three now-nested field names from
-  `GROUNDED_LIST_SECTIONS` (they get their own domain-aware check instead).
-- `cfi.analyst.validator`: new `_check_domain_sections`/`_field_id_tool`. Per domain: (a) a cited field_id
-  must belong to that domain's own tool — a whale field cited inside "institutional" fails even though the
-  number itself is real; (b) if the domain's own tool has `status != "ok"` in the snapshot, any non-empty
-  content for it must contain `"Insufficient data."` or `"Sources conflict."` — an empty list remains fully
-  valid (never required to fabricate filler for an unavailable domain).
-- `cfi.analyst.prompts`: the system prompt's section-shape description and the task's domain list are now
-  generated from `DOMAIN_LOCATIONS` (previously the task prompt did not mention macro or market structure by
-  name at all); explicitly restates that an unavailable domain gets `"Insufficient data."`, never a forced
-  narrative.
-- No change to any Phase 5-20 service, the 14-tool catalog's membership, the 12 top-level section names/
-  order, or the existing grounding/banned-language checks (ADR-0068) — this is a structural refinement of
-  three fields' internal shape only.
-
-**Database changes:** none.
+**Database changes:** migration `0008` — `ai.brief` (new table) and `ai.usage` (additive: nullable
+`interpretation_id`, new nullable `brief_id`, a new CHECK constraint). Both are additive only (R10); no
+existing row shape changes, and the downgrade path refuses if either change would destroy data.
 
 | Check | Result |
 |---|---|
-| New targeted tests: 6 in `test_analyst_schema.py` (institutional/whale/retail distinguishable, derivatives/liquidity distinguishable, all 5 "additional intelligence" domains placed, participant-behavior/key-changes require all their domain keys, 12-top-level-sections-unchanged), 7 in `test_analyst_validator.py` (5 domains ground correctly together, institutional/whale/retail independently grounded, derivatives/liquidity independently grounded, cross-domain field_id citation fails, missing-domain-without-disclosure fails, missing-domain-with-disclosure passes, missing-domain-with-empty-list passes), 2 in `test_analyst_prompts.py` (every domain subkey named in the system prompt, every domain named in the task) | all 15 pass |
-| `uv run pytest tests/unit tests/api -q` (full regression, no database needed) | **833 passed** (818 + 15 new) |
-| `uv run pytest tests/integration/test_analyst_service.py -q` | 5 skipped — fixture updated to the new nested shape, still requires a real database (unchanged limitation, not re-attempted this task) |
-| `uv run ruff check .` / `ruff format --check .` | All checks passed! / 324 files already formatted |
-| `uv run mypy --no-incremental .` | Success: no issues found in 319 source files |
+| New unit tests: `test_brief_schema.py` (7), `test_brief_changes.py` (5), `test_brief_validator.py` (18 — covering every Section 11 failure mode: an invented number, an unknown field_id, a field cited from the wrong section's domain tool, a change_id with no comparison basis, an unknown change_id, a valid change_id round-trip, a rotation stated as fact, long/short position directives, position-sizing language, a price target as certainty, bullish/bearish verdicts, a historical-similarity guarantee, and missing "Insufficient data."/"Sources conflict." phrases), `test_brief_prompts.py` (7), `test_brief_universe.py` (5) — 42 new tests total | all pass |
+| Existing unit test updated: `test_market_logic.py::test_schedule_covers_native_datasets_on_the_right_queues` — `beat_schedule([])` is no longer `{}` (the daily brief is scheduled unconditionally, independent of any ingestion provider list) | pass |
+| New integration tests (written, statically checked, DB-gated): `test_brief_service.py` (6 — repository round-trip incl. the shared budget query, a full run against a fake Anthropic transport, change detection against a previous completed brief's stored snapshot, budget-ceiling refusal, one-retry-then-fail, and the `/generate` endpoint), plus 2 new cases in `test_worker.py` (the daily crontab entry's shape, and the task's no-credential skip path) | **written and statically checked (ruff/mypy on Windows), but not executed** — no PostgreSQL/TimescaleDB instance was reachable, neither in the sandbox nor on the Windows machine (no `.env`, no Docker Desktop running); same already-documented limitation as every `ai.*` integration suite since Phase 21, not re-attempted per the user's own instruction |
+| `uv run pytest tests/unit -q` (sandbox) | **862 passed** (up from 820 before this phase) |
+| `uv run pytest tests/unit -q` (Windows) | 862 passed |
+| `uv run pytest tests/integration -q` (Windows, no database) | 200 skipped (up from 192 — the 6 new brief integration tests plus 2 new worker-test cases skip alongside every other phase's own) |
+| `uv run ruff check .` (Windows, whole backend) | All checks passed! |
+| `uv run ruff format --check .` (Windows, whole backend) | 340 files already formatted |
+| `uv run mypy --no-incremental .` (Windows, whole backend) | Success: no issues found in 335 source files |
 
-**Known limitations** — unchanged from Phase 21's own log entry: the five DB-backed `ai.*` integration tests
-have not yet been executed against a real PostgreSQL/TimescaleDB instance.
+**Known limitations**
+- The DB-backed integration suite (`test_brief_service.py`, the 2 new `test_worker.py` cases, and every other
+  `ai.*`/worker integration test since Phase 21) was written and statically checked but **not executed
+  against a real PostgreSQL/TimescaleDB instance** — neither this sandbox nor the connected Windows machine
+  has one reachable right now. This is the same, already-documented limitation carried forward unchanged; it
+  is not re-attempted here per the user's own explicit instruction not to spend excessive effort on
+  unavailable infrastructure.
+- `brief.generate`'s scheduled (no-argument) path always looks back exactly 24 hours
+  (`reporting_period_start = now - 1 day`) — there is no makeup/backfill logic for a missed scheduled run
+  (e.g. the worker was down at 00:05 UTC); the next run still only covers the last 24 hours, not the gap. Not
+  requested by the spec, and flagged here rather than silently assumed away.
+- No frontend work this phase (not requested; the spec explicitly forbids new frontend UX unless required).
+- No new market indicator, calculation, or methodology was introduced; every number the brief can cite still
+  comes from the same 14 analyst tools Phase 21 already built.
+- Delivered to the Windows machine and committed — see the commit hash in the task's final report (this log
+  entry is written and delivered together with the commit in the same session, matching the established
+  two-commit-or-one pattern; if only one commit was made, its hash is the one reported).
 
-**Documentation updated:** `ARCHITECTURE.md` (§5.17/§5.18), `DECISIONS.md` (ADR-0069), `PROGRESS.md` (this
-entry).
-
-**Delivered to Windows, re-verified, committed.** The 11 changed files (4 analyst source files, 3 unit test
-files, 1 integration test file, 3 docs files) were copied via the device bridge and read back (md5) to
-confirm a byte-for-byte match. On Windows: `uv run pytest tests/unit tests/api -q` → **833 passed**;
-`uv run pytest tests/integration/test_analyst_service.py -q` → 5 skipped (same unchanged DB limitation);
-`uv run ruff check .` → All checks passed!; `uv run ruff format --check .` → 324 files already formatted;
-`uv run mypy --no-incremental .` → Success, no issues found in 319 source files. Committed as `ba20939` on
-`main` ("[P21] correction: structurally distinguish all 10 intelligence domains (ADR-0069)").
-
-**Next step:** none — correction complete; awaiting the user's next instruction (R13: do not proceed to
-Phase 22 automatically).
+**Next step:** awaiting the user's next instruction — **not proceeding to Phase 23** per the user's own
+explicit instruction (R13).

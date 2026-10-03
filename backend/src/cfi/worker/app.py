@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from celery import Celery, signals
@@ -17,6 +17,8 @@ from celery import Celery, signals
 from cfi.analyst.client import anthropic_capabilities
 from cfi.analyst.repository import AnalystRepository
 from cfi.analyst.service import AnalystService
+from cfi.brief.repository import BriefRepository
+from cfi.brief.service import BriefService
 from cfi.core.config import get_settings
 from cfi.core.logging import configure_logging, get_logger
 from cfi.core.time import utc_now
@@ -332,6 +334,70 @@ def analyst_analyze_task(analysis_id: str, as_of: str, knowledge_time: str) -> d
         finally:
             await http.aclose()
         return {"analysis_id": analysis_id}
+
+    return rt.run(go())
+
+
+@app.task(name="brief.generate", time_limit=180, soft_time_limit=150)
+def brief_generate_task(brief_id: str | None = None) -> dict[str, Any]:
+    """Generate one Daily Market Brief (Phase 22). Reached two ways, both ending up here exactly
+    like the analyst's own queued-then-run split (Section 13, ADR-0068; Section 8: reuse the
+    existing worker infrastructure, no new scheduling framework):
+
+    - the daily crontab entry (``cfi.worker.schedule.brief_entries``) calls this with **no**
+      argument at all — a fully self-contained periodic job, since nothing is polling a specific
+      id yet — so it creates its own queued ``ai.brief`` row (resolving the previous ``completed``
+      brief as its change-detection comparison basis, Section 5) before running it;
+    - the ``POST /brief/generate`` API route instead creates the queued row itself first (so it
+      can return a stable ``brief_id`` immediately) and calls this with that row's ``uuid``.
+
+    Skipped (not failed) only when the Anthropic API key is not configured at all — mirroring
+    ``analyst_analyze_task`` exactly, including resolving an already-queued row to ``failed`` with
+    an explicit error rather than leaving it stuck in ``queued`` forever (R3: no silent gap)."""
+    rt = runtime()
+    now = utc_now()
+
+    async def ensure_queued() -> uuid.UUID:
+        if brief_id is not None:
+            return uuid.UUID(brief_id)
+        repo = BriefRepository(rt.engine())
+        previous = await repo.latest_completed_brief()
+        previous_db_id = int(previous["id"]) if previous else None
+        _db_id, new_uuid = await repo.create_queued_brief(
+            now=now,
+            reporting_period_start=now - timedelta(days=1),
+            reporting_period_end=now,
+            previous_brief_id=previous_db_id,
+        )
+        return new_uuid
+
+    parsed_id = rt.run(ensure_queued())
+
+    if not settings.anthropic_api_key:
+        log.warning("brief_skipped_no_credential", brief_id=str(parsed_id))
+
+        async def mark_not_configured() -> None:
+            repo = BriefRepository(rt.engine())
+            db_id = await repo.brief_id_for_uuid(parsed_id)
+            if db_id is not None:
+                await repo.mark_failed(
+                    db_id,
+                    now=utc_now(),
+                    error="provider_not_configured: Anthropic API key is not configured.",
+                )
+
+        rt.run(mark_not_configured())
+        return {"skipped": "Anthropic API key not configured", "brief_id": str(parsed_id)}
+
+    async def go() -> dict[str, Any]:
+        engine = rt.engine()
+        http = ProviderHttpClient(anthropic_capabilities(settings))
+        try:
+            svc = BriefService(engine, settings, http=http)
+            await svc.run_brief(parsed_id, as_of=now, knowledge_time=now, now=utc_now())
+        finally:
+            await http.aclose()
+        return {"brief_id": str(parsed_id)}
 
     return rt.run(go())
 

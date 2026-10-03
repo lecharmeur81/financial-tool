@@ -583,6 +583,92 @@ API POST /analyst/analyze                              Celery "ai" queue, task a
 - **Display:** AI text is visually distinct from data; each cited number links back to its snapshot
   `field_id` and from there to the underlying tool result.
 
+### 5.18a Daily Market Brief — Phase 22
+
+The Daily Market Brief is an **orchestration and presentation layer over every existing
+intelligence domain, including the Phase 21 AI Analyst above** — it does not rebuild Phase 21,
+redesign `AnalystResponse`, add a 15th tool, or change any Phase 5–20 methodology. It is a second,
+independent artifact over the same evidence, answering a narrower question: *what materially
+changed since the previous brief, what evidence supports and contradicts that, what regime is the
+market in, and what should be monitored next* — decision support, never a prediction or a trading
+signal.
+
+```
+Celery beat, daily crontab (00:05 UTC)        POST /brief/generate
+  "brief:daily" → brief.generate (no args)       → ai.brief row inserted, status=queued
+       │                                               (previous `completed` brief resolved as
+       ▼                                               the change-detection comparison basis)
+  brief.generate creates its own queued row                  │
+  (resolves the previous `completed` brief too)               ▼
+       │                                          brief.generate(brief_id) runs that row
+       ▼
+  cfi.analyst.snapshot.build_snapshot — the SAME 14-tool snapshot Phase 21 already builds
+  (no new data access path; the brief adds no 15th tool)
+       │
+       ▼
+  cfi.brief.changes.compute_changes(current_snapshot, previous_brief's stored snapshot payload)
+  → ChangeSet(comparison_basis="previous_brief" | "none", changes=[FieldChange(change_id, ...)])
+       │
+       ▼
+  Prompt (cfi.brief.prompts): versioned system prompt + task + delimited SNAPSHOT + delimited
+  CHANGE SET → Claude (cfi.analyst.client.ClaudeClient, reused unchanged)
+       │
+       ▼
+  Deterministic validator (cfi.brief.validator; no model call) → pass: store ai.brief (completed)
+  · fail: retry once with the validator's own errors → still failing: store failed, nothing
+  silently reinterpreted
+       │
+       ▼
+  GET /brief/{brief_id} or /brief/latest
+```
+
+- **Reuse, not rebuild:** `build_snapshot`, `ClaudeClient`/`parse_json_response`, and
+  `AnalystRepository.insert_snapshot`/`monthly_cost_usd` are called unchanged from
+  `cfi.brief.service.BriefService`. Only what Phase 21 genuinely does not have is new: the
+  15-section `BriefResponse` schema (`cfi.brief.schema`), change detection (`cfi.brief.changes`),
+  the brief's own prompt/validator, and `ai.brief` persistence.
+- **15 required sections, in this exact order** (the user's own Phase 22 spec, Section 4):
+  Executive Summary, Market Regime, Institutional Activity, Whale Activity, Retail Activity,
+  Derivatives & Liquidity, Macro, Market Structure, Divergences & Anomalies, Capital Rotation,
+  Historical Context, Contradicting Evidence, Risks & Uncertainties, What to Monitor, Data
+  Quality — enforced by construction (`BriefResponse`'s Pydantic field order), same discipline as
+  `AnalystResponse`.
+- **Change detection has a defined comparison basis or it says nothing changed.** `ChangeSet` is
+  computed by diffing the current snapshot's own fields against the *previous completed brief's*
+  stored `ai.snapshot.payload` — never a live re-run of anything, never a second calculation path.
+  When no previous completed brief exists, `comparison_basis="none"` and the validator rejects any
+  `change_id` cited anywhere in the response: nothing may be called a "meaningful change" without
+  a defined basis for comparison (Section 5).
+- **Grounding extends, never loosens, Phase 21's own discipline.** Every `BriefEvidenceItem` reuses
+  the `field_ids` grounding `EvidenceItem` already has, plus `change_ids` (each must resolve to a
+  real `FieldChange` or be rejected); the brief's banned-language set
+  (`cfi.brief.universe.BANNED_PATTERNS`) is Phase 21's own set plus patterns Phase 21 never needed
+  because it has no "position" concept at all: explicit long/short position directives,
+  position-sizing instructions, and a price target asserted as a certainty (Section 7).
+- **Scheduling reuses the existing Celery beat infrastructure — no new scheduling framework.** One
+  crontab-based entry (`cfi.worker.schedule.brief_entries`, the first crontab entry in a schedule
+  that was otherwise entirely interval-based) fires `brief.generate` once daily on the existing
+  `ai` queue; the same task also runs on demand from `POST /brief/generate`, exactly mirroring
+  `analyst.analyze`'s own queued-then-worker-runs split (ADR-0068).
+- **Persistence shares, not duplicates, Phase 21's audit infrastructure.** `ai.brief` is a new
+  table (same queued → running → completed/failed shape as `ai.interpretation`, plus
+  `reporting_period_start/end`, a self-referential `previous_brief_id`, and a `changes` jsonb
+  column recording the computed `ChangeSet` itself for auditability). `ai.usage` is additively
+  widened (migration 0008): `interpretation_id` becomes nullable and a new nullable `brief_id`
+  column is added, with a CHECK constraint requiring exactly one of the two — so a brief's own
+  Claude-call usage is summed by the exact same, unmodified `AnalystRepository.monthly_cost_usd`
+  query that already enforces Phase 21's monthly budget ceiling, never a second usage-logging
+  table or a second budget check.
+- **Reproducibility (Section 8):** every brief is reproducible from its `ai.brief.uuid` (the
+  `brief_id`), its `snapshot_id` (linking to the immutable, hashed `ai.snapshot.payload`),
+  `prompt_version` (`cfi.brief.universe.BRIEF_PROMPT_VERSION`), `analyst_version`
+  (`BRIEF_ANALYST_VERSION` — this layer's own version id, independent of Phase 21's), `model`, and
+  `created_at`/`updated_at`.
+- **Fails safely (Section 10):** the monthly budget check, snapshot build, Claude call, and
+  validator retry all follow `AnalystService.run_analysis`'s own error-recording convention exactly
+  — an expected failure (budget exceeded, persistently ungrounded output) is caught and recorded
+  `failed` with its own error text; nothing is ever silently defaulted or fabricated.
+
 ### 5.19 Alert architecture — ADR-0035
 
 - **Rule-based alerts on L1–L4 and data-quality events only** — never on AI text (R6).

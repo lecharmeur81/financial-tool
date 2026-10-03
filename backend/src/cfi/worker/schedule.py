@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from celery.schedules import crontab
+
 from cfi.derivatives.sources import sources_for as derivative_sources_for
 from cfi.domain.datasets import DatasetSpec
 from cfi.institutional.sources import sources_for
@@ -174,6 +176,23 @@ def market_structure_entries(provider_ids: list[str]) -> dict[str, dict[str, Any
     }
 
 
+def brief_entries() -> dict[str, dict[str, Any]]:
+    """Phase 22, Section 8: generate one Daily Market Brief per day using this project's existing
+    worker/beat infrastructure — no new scheduling framework. This is the first crontab-based
+    entry in this schedule (every other entry here is interval-based, since ingestion only needs
+    "every N seconds"); a daily brief is naturally a fixed time of day instead. The task itself
+    (``brief.generate``, ``cfi.worker.app``) is skipped, not failed, when no Anthropic API key is
+    configured — the same "credential not configured" posture ``analyst_analyze_task`` already
+    uses, so an unconfigured platform does not spam failures into ``ai.brief`` every day."""
+    return {
+        "brief:daily": {
+            "task": "brief.generate",
+            "schedule": crontab(hour=0, minute=5),  # once daily, 00:05 UTC
+            "options": {"queue": "ai", "expires": 3600},
+        }
+    }
+
+
 def beat_schedule(
     provider_ids: list[str],
     institutional_provider_ids: list[str] | None = None,
@@ -191,6 +210,7 @@ def beat_schedule(
     schedule.update(retail_entries(retail_provider_ids or []))
     schedule.update(macro_entries(macro_provider_ids or []))
     schedule.update(market_structure_entries(market_structure_provider_ids or []))
+    schedule.update(brief_entries())
     for item in scheduled_ingestions(provider_ids):
         schedule[f"latest:{item.provider_id}:{item.dataset_id}"] = {
             "task": "market.ingest_latest",
