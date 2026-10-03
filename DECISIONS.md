@@ -614,7 +614,9 @@ a notification adapter (in-app first).
 ---
 
 ## ADR-0036 — Decision journal and paper trading
-**Status:** Proposed
+**Status:** Accepted (paper trading half implemented, Phase 24, ADR-0072 — a single consolidated
+`usr.paper_trade` table rather than the four-table sketch below; decision journal half remains
+proposed)
 
 **Decision.** Append-only, versioned journal entries linked to snapshots, interpretations, user hypotheses, and invalidation conditions; paper trading
 uses the backtest execution-and-cost model with point-in-time prices; no live execution component and no trading-enabled keys.
@@ -2748,3 +2750,96 @@ alternative the spec's "do not introduce unnecessary new infrastructure" calls f
 reduction, not a silent gap. As in every prior phase, the DB-backed integration tests
 (`test_alerts_service.py`, the new `test_worker.py` cases) are written and exercised on Windows but have not
 been executed against a real PostgreSQL/TimescaleDB instance in this sandbox.
+
+---
+
+## ADR-0072 — Phase 24: Paper trading — a single consolidated table instead of the four-table
+sketch, entry always priced "as of now," and flat (non-participation-scaled) slippage only
+
+**Status:** Accepted (implemented 2026-10-03)
+
+**Context.** ADR-0036 ("Decision journal and paper trading," Phase 2 planning) sketched "simulated
+accounts, orders, fills, positions, and PnL using the same execution and cost model as
+backtesting." The Phase 24 spec asks for a single flat "Core paper-trading record" per trade
+(entry and exit fields together), decision-time market-context capture by reusing the Phase 21/22
+snapshot infrastructure, a clear `observed price → simulated execution price → calculated P&L`
+pipeline, correct leverage handling that does not confuse exposure with actual P&L, and no
+look-ahead. Four design questions needed a decision before writing any code: (1) one table or
+ADR-0036's four; (2) what "now" means for pricing a decision, given this platform has no
+authentication/account layer and no live order book; (3) how to model slippage without inventing a
+position-sizing scheme this phase was not asked to build; and (4) how to reference a user/account,
+given no such table exists anywhere in this schema.
+
+**Decision.**
+
+1. **One consolidated `usr.paper_trade` table, not ADR-0036's four (account/order/fill/position).**
+   The spec's own "Core paper-trading record" lists entry *and* exit fields together as a single
+   record's attributes, not a multi-row order-matching sequence — and this platform has no
+   exchange order book or multi-fill execution model that a separate `order`/`fill` split would
+   actually represent. A single row per trade, carrying both legs, is the smallest structure that
+   satisfies every field the spec lists (same precedent as ADR-0071 deliberately omitting a
+   separate `alert_rule` table: the planned sketch and the specified requirement are not always
+   the same shape, and the requirement governs).
+
+2. **A paper trade's entry is always priced "as of now," at creation time — there is no backdated
+   entry.** The spec requires the decision-time snapshot to "preserve, where available" market
+   context and explicitly forbids using future information when building it. The simplest way to
+   make that true by construction, rather than by validation, is to never accept a user-supplied
+   entry timestamp at all: `create_trade` reads the observed price and builds the snapshot at the
+   moment of the call, using the same real clock for both. This is a live paper-trading log of
+   decisions made now, not a backdated backtest of a hypothetical past entry — Phase 16's
+   `cfi.backtest.engine` already covers historical replay, and duplicating that capability here
+   was not asked for (CLAUDE.md R13).
+
+3. **Slippage is flat (`cfi.backtest.costs.slipped_price` with no `participation_fraction`) — no
+   participation-scaled market-impact modelling.** ADR-0061 added a participation-scaled slippage
+   term to the backtest engine specifically because that engine sizes each position against its
+   own computed liquidity cap. A paper trade's `notional` is simply whatever the user specifies,
+   with no equivalent sizing-against-liquidity step in this phase's scope — applying the
+   participation-scaled term without that context would mean inventing a liquidity-cap
+   relationship this phase was never asked to build. Flat slippage is a disclosed, honest
+   simplification (documented in DATA_DICTIONARY.md §5p and ARCHITECTURE.md §7a), not a silent
+   omission, and it reproduces `cost_model_v1`'s original flat model exactly for both cost-model
+   versions (the coefficient is simply inert when no fraction is supplied).
+
+4. **No user/account reference field.** Direct inspection of `cfi/db/tables.py` (not assumption,
+   R7) confirms no `usr.app_user` or equivalent table exists anywhere in this schema — no
+   authentication/account phase has been built through Phase 23. The spec's own instruction ("Do
+   not require fields that the existing project architecture does not support") is explicit
+   permission to omit this field rather than invent a placeholder account system; this is recorded
+   as a genuine limitation, not a silent gap.
+
+**Alternatives considered.** The four-table account/order/fill/position model (rejected: no
+order-matching engine exists to populate separate order/fill rows meaningfully, and it would not
+have been the "smallest robust solution," CLAUDE.md R7). A user-suppliable backdated entry
+timestamp with as-of validation (rejected: validation can be gotten wrong; never accepting the
+field at all makes look-ahead structurally impossible, and a genuine historical-backtest need is
+already served by Phase 16). Participation-scaled slippage reusing the backtest engine's own
+sizing logic (rejected for this phase: would require inventing a liquidity-cap-vs-notional
+relationship the spec did not ask for; flat slippage is simpler, fully reproducible from the
+stored `cost_model_version` alone, and honestly disclosed as a limitation).
+
+**Trade-offs.** No historical/backdated paper trades are possible in this phase (by design — see
+point 2). Slippage does not scale with trade size relative to market liquidity, so a very large
+simulated notional is not penalised more heavily than a small one (see point 3). No per-user
+attribution of trades is possible until an authentication phase exists (see point 4) — every
+trade currently belongs to the single, implicit user of this platform.
+
+**Future implications.** If an authentication phase is ever built, `usr.paper_trade` gains a
+nullable `user_id` column (additive, R10) rather than a schema rewrite. If participation-scaled
+sizing is ever wanted for paper trades, it is a second, additive call into
+`cfi.backtest.costs.liquidity_cap` from `cfi.paper.service`, not a redesign of the P&L pipeline.
+The Decision Journal half of ADR-0036 remains unbuilt and is expected to reference
+`usr.paper_trade.id` the same way it already plans to reference `ai.snapshot.id`/
+`ai.interpretation.id`.
+
+**Consequences.** New package `cfi.paper` (`universe`, `pnl`, `stats`, `repository`, `service`);
+new `usr.paper_trade` table (migration `0010`); new `GET /paper/trades`, `GET
+/paper/trades/{id}`, `POST /paper/trades`, `POST /paper/trades/{id}/close`, `POST
+/paper/trades/{id}/cancel`, `GET /paper/positions`, `GET /paper/performance` API routes, all
+running inline in the API request (no new Celery task or queue — no AI call and no periodic sweep
+is needed here, unlike `analyst`/`brief`/`alerts`). No change to any Phase 5-23 service,
+methodology, or schema. As in every prior phase, the DB-backed integration tests
+(`test_paper_service.py`, `test_paper_api.py`) are written but have not been executed against a
+real PostgreSQL/TimescaleDB instance in this sandbox (the same environment limitation as every
+prior phase).

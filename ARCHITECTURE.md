@@ -905,6 +905,72 @@ explained by late data or revisions; unexpected ones are bugs). Dependency lockf
 - **Paper trading:** simulated accounts, orders, fills, positions, and PnL using the **same execution and cost model** as backtesting (§5.16),
   with fills priced from point-in-time market data plus latency and slippage. Every paper order can link to a journal entry.
 - **No live execution:** the platform holds no trading-enabled keys and has no order-routing component (ADR-0007).
+- **Status: paper trading implemented, Phase 24 (ADR-0072) — see §7a below. Decision journal remains proposed, not built.**
+
+### 7a. Paper trading implementation — Phase 24 (ADR-0072)
+
+Simulation only — **no exchange connection, no order-routing endpoint, no trading credential or
+API key anywhere in this code** (Phase 24 "Important constraints" / "Security / safety"). A single
+consolidated table (`usr.paper_trade`) rather than ADR-0036's original four-table account/order/
+fill/position sketch: the Phase 24 spec's own "Core paper-trading record" asks for one flat record
+per trade with entry and exit together, and this platform has no order-matching engine that a
+multi-table order/fill model would actually serve (ADR-0072 documents the deviation — same
+precedent as Phase 23 omitting a separate `alert_rule` table).
+
+```
+POST /paper/trades                         cfi.paper.service.PaperTradingService.create_trade
+  │                                               │
+  │                                               ▼
+  │                                  Adapters.price_close(asset, now) → observed price
+  │                                  (cfi.divergence.metrics.window_reading, window_days=0)
+  │                                               │
+  │                                               ▼
+  │                                  cfi.backtest.costs.slipped_price → simulated execution price
+  │                                  (long entry=buy; short entry=sell — always adverse)
+  │                                               │
+  │                                               ▼
+  │                                  cfi.analyst.snapshot.build_snapshot (the SAME 14-tool
+  │                                  snapshot Phases 21-23 already build) → AnalystRepository.
+  │                                  insert_snapshot (ai.snapshot row, unchanged)
+  │                                               │
+  │                                               ▼
+  │                        AlertRepository.list_alerts(status="active") (relevant alerts, read-only)
+  │                        BriefRepository.latest_completed_brief() (market brief reference, read-only)
+  │                                               │
+  │                                               ▼
+  │                                  cfi.paper.repository.PaperTradeRepository.insert_trade
+  │                                  (usr.paper_trade, status="open")
+  ▼
+POST /paper/trades/{id}/close | /cancel         close_trade / cancel_trade
+GET  /paper/trades | /trades/{id}               list_trades / get_trade
+GET  /paper/positions                           open_positions — live unrealized P&L, never persisted
+GET  /paper/performance                         performance_stats (cfi.paper.stats, pure function)
+```
+
+- **No worker task.** Unlike `analyst`/`brief`/`alerts`, create/close/cancel run inline in the API
+  request: no AI call, no periodic sweep, only a database write plus a handful of already-cheap
+  reads — queuing a Celery task would be unnecessary new infrastructure (R13).
+- **No look-ahead by construction:** a trade's entry is always priced "as of now" at creation time
+  (there is no backdated entry) — this is a live decision log, not a historical backtest, which
+  Phase 16 already covers.
+- **P&L (`cfi.paper.pnl`, pure, DB-free):** `gross_pnl` from the two *observed* prices;
+  `slippage_cost`/`fees_total` itemised separately; `net_pnl = gross_pnl - slippage_cost -
+  fees_total`; `return_pct` on margin (`notional / leverage`) — leverage changes the return, never
+  the dollar P&L, which depends only on the actual simulated notional (spec: "without confusing
+  leveraged exposure with actual P&L"). No participation-scaled slippage is applied (a documented
+  limitation — modelling liquidity impact needs the backtest engine's own position-sizing context,
+  which does not naturally apply to an arbitrary user-specified notional).
+- **Unrealized P&L** (`GET /paper/positions`) is computed live, "as if closed now", through the
+  identical `calculate_pnl` function as a real close — never persisted, so it can never go stale.
+- **Lifecycle:** `open → closed | cancelled`, both terminal; every other transition rejected.
+- **No user/account reference.** No `usr.app_user` or equivalent table exists anywhere in this
+  schema (no authentication phase has been built) — a genuine, disclosed limitation, not an
+  invented placeholder (Phase 24 spec: "Do not require fields that the existing architecture does
+  not support").
+- **Performance statistics** (`cfi.paper.stats`, pure function over live rows, never a separately
+  maintained counter) explicitly never project future performance — every response carries a
+  disclaimer string to that effect (spec: "Do not present these statistics as evidence of future
+  profitability").
 
 ---
 

@@ -1623,6 +1623,80 @@ status:            implemented (periodic-sweep evaluation only; event-driven eva
 
 ---
 
+## 5p. Paper trading (implemented in Phase 24)
+
+Simulation only — no exchange connection, no order-routing, no trading credential anywhere in this
+code. One consolidated table rather than ADR-0036's original four-table account/order/fill/position
+sketch (ADR-0072; ARCHITECTURE.md §7a). Simulated performance is never evidence of future results.
+
+### `usr.paper_trade` (`cfi/db/tables.py::paper_trade`, migration `0010`)
+
+One row per simulated trade; the entry fields are set once at creation and never altered
+afterward (historical integrity — "Do not allow later information to alter the original decision
+context"); only the exit/closing fields and `status`/`updated_at` are written by a later close or
+cancel.
+
+| Field | Unit | Description |
+|---|---|---|
+| `id` (bigint, PK) / `uuid` (unique) | — | Internal identity / the `trade_id` returned to callers |
+| `created_at`, `updated_at` | — | Lifecycle timestamps |
+| `asset` | — | One of `cfi.market.universe.ASSET_SYMBOLS` (`BTC`/`ETH`/`SOL`/`XRP`) — the platform's only priced assets |
+| `direction` | — | `long` \| `short` |
+| `status` | — | `open` \| `closed` \| `cancelled` (lifecycle; `open → closed`/`cancelled`, both terminal) |
+| `entry_time` | timestamptz | Always the trade's creation time — there is no backdated entry (no look-ahead by construction) |
+| `entry_price_observed` | USD | The observed market price at entry (`cfi.divergence.adapters.Adapters.price_close`, via `window_reading(window_days=0)`) — never a real exchange fill |
+| `entry_price_execution` | USD | The simulated execution price after slippage (`cfi.backtest.costs.slipped_price`) — always worse than `entry_price_observed` (long buys pay more; short sells receive less) |
+| `entry_price_source` | — | Free-text description of the price source (Coinbase daily close via the reused adapter) |
+| `notional` | USD | The simulated position's exposure/size — what quantity/P&L are actually computed from (never confused with margin or leverage) |
+| `leverage` | ratio | Defaults to 1 (no leverage) if not supplied |
+| `margin` | USD | `notional / leverage` — the capital actually at risk; `return_pct` is computed on this, not on `notional` |
+| `stop_loss`, `take_profit` | USD | As specified by the user; informational only — nothing in this phase automatically triggers a close from these (no autonomous trading, per spec) |
+| `exit_time` | timestamptz | Set only on close; `null` for `open`/`cancelled` |
+| `exit_price_observed`, `exit_price_execution` | USD | Analogous to the entry fields, computed at close time; `null` until then; `null` forever for a `cancelled` trade (a cancellation is not a market exit) |
+| `exit_price_source` | — | Analogous to `entry_price_source` |
+| `cost_model_version` | — | Which `cfi.backtest.costs.PARAMETER_SETS` version priced this trade's slippage/fees — reproducible from this field alone |
+| `gross_pnl` | USD | Price-move result from the two *observed* prices, before any cost |
+| `slippage_cost` | USD | Dollar cost of execution slippage on both legs — always ≥ 0 |
+| `fees_total` | USD | Proportional fee on both legs (`cfi.backtest.costs.apply_fee`) |
+| `realized_pnl` | USD | Net P&L: `gross_pnl - slippage_cost - fees_total` |
+| `return_pct` | % | `realized_pnl / margin * 100` |
+| `max_favorable_move_pct`, `max_adverse_move_pct` | % | Largest favorable/adverse price excursion over the holding period, relative to `entry_price_observed`, where the price history to compute it was available (`null` otherwise — missing is first-class, R3) |
+| `strategy_tag`, `notes` | — | Free-text user context; never read by this service to make a decision |
+| `decision_snapshot_id` | — | FK to `ai.snapshot.id` — the SAME immutable 14-tool snapshot Phases 21-23 already build, captured at creation time (market state, institutional/whale/retail/derivatives/liquidity/macro/market-structure/divergence/anomaly/rotation/regime/data-quality) |
+| `market_brief_id` | — | FK to `ai.brief.id` — the latest *completed* Daily Market Brief at decision time, if any (`BriefRepository.latest_completed_brief`) |
+| `relevant_alert_ids` (jsonb array) | — | UUIDs of every `usr.alert_event` row `active` at decision time (capped at `cfi.paper.universe.RELEVANT_ALERTS_LIMIT`) — contextual evidence only; never auto-converted into a trade |
+
+**No user/account reference:** no `usr.app_user` or equivalent table exists anywhere in this
+schema (no authentication phase has been built through Phase 23) — omitted rather than invented,
+per the Phase 24 spec's own instruction not to require fields the existing architecture does not
+support.
+
+### P&L methodology (`cfi/paper/pnl.py`, pure functions)
+
+`Observed market price → simulated execution price → calculated P&L`, exactly in that order. See
+ARCHITECTURE.md §7a for the full pipeline diagram and `cfi/paper/pnl.py`'s own module docstring for
+the complete derivation. No participation-scaled slippage is applied (flat `slippage_bps` only) —
+a documented limitation, not an oversight: modelling liquidity impact meaningfully needs the
+backtest engine's own position-sizing context (ADR-0061), which does not naturally apply to an
+arbitrary user-specified notional.
+
+### Performance statistics (`cfi/paper/stats.py::performance_stats`, pure function)
+
+`total_trades`, `open_trades`, `closed_trades`, `cancelled_trades`, `winning_trades`,
+`losing_trades`, `win_rate`, `gross_pnl`, `net_pnl`, `average_win`, `average_loss`,
+`profit_factor`, `expectancy`, `max_drawdown` (largest peak-to-trough decline of the cumulative
+realized-P&L curve, trades ordered by `exit_time`) — computed live over current rows every call,
+never a separately maintained counter that could drift (R3). The API response for this endpoint
+carries a disclaimer string: simulated performance is never evidence of future profitability.
+
+```
+metric:            Paper trading (usr.paper_trade, simulation only, no worker task)
+owner_phase:       24 (2026-10-03)
+status:            implemented (Decision journal half of ADR-0036 remains proposed, not built)
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.

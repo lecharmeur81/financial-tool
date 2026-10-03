@@ -26,6 +26,7 @@ from cfi.api.routes import (
     market,
     market_structure,
     meta,
+    paper,
     regime,
     retail,
     rotation,
@@ -118,4 +119,5 @@ def create_app(
     app.include_router(analyst.router)
     app.include_router(brief.router)
     app.include_router(alerts.router)
+    app.include_router(paper.router)
     return app

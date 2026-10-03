@@ -2,16 +2,18 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 23 — Alerts → implemented, fully self-verified in the sandbox AND on Windows (893 unit
-tests on both, ruff/format/mypy strict all clean on both; DB-backed integration suite written but requires
-the real PostgreSQL/TimescaleDB instance to run — see the Phase 23 log entry). A fully deterministic rule
-engine (no AI/Claude component) over 11 alert types spanning every Phase 5-20 domain plus regime change,
-reading the same 14-tool evidence snapshot Phases 21/22 already build, with pure dedup/cooldown/re-arm logic
-(`cfi.alerts.lifecycle.decide`), full audit persistence (`usr.alert_event`, migration `0009`, implementing
-ADR-0035's own pre-existing table name), and a 15-minute periodic-sweep Celery beat entry plus an in-app
-API (list/get/evaluate/acknowledge/resolve) — no new scheduling framework, no new external channel. See the
-Phase 23 log entry below for exactly what was (and was not) verified, and for the two disclosed scope
-reductions (no event-driven evaluation, no email/Telegram delivery — ADR-0035's "channels need approval").
+**Current phase:** 24 — Paper Trading → implemented, self-verified in the sandbox (928 unit tests, up from
+893; ruff/format/mypy strict all clean; DB-backed integration suite written but requires the real
+PostgreSQL/TimescaleDB instance to run — see the Phase 24 log entry). Simulation-only paper trading: a
+single consolidated `usr.paper_trade` table (migration `0010`), reusing the same observed-price adapter
+(`cfi.divergence.adapters.Adapters.price_close`) and versioned cost model (`cfi.backtest.costs`) as
+backtesting, the same immutable 14-tool evidence snapshot Phases 21-23 already build (captured at decision
+time), deterministic long/short P&L with leverage handled correctly (dollar P&L independent of leverage,
+return% on margin), live unrealized P&L for open positions, and a full API (create/list/get/close/cancel/
+positions/performance) running inline with no new worker task. No exchange connection, no trading
+credential, no real execution pathway anywhere in the new code. See the Phase 24 log entry below for the
+honest design deviations from ADR-0036's original four-table sketch (ADR-0072) and for what was (and was
+not) verified.
 **Next phase:** to be defined by the user (do not start automatically — R13)
 
 ---
@@ -44,7 +46,7 @@ reductions (no event-driven evaluation, no email/Telegram delivery — ADR-0035'
 | 21 | Claude AI Analyst | ✅ Complete — verified on Windows (see Phase 21 log entry) |
 | 22 | Daily Market Brief | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 22 log entry) |
 | 23 | Alerts | ✅ Complete — self-verified in sandbox AND on Windows (see Phase 23 log entry) |
-| — | Paper trading | ⏳ Not started |
+| 24 | Paper trading | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 24 log entry) |
 | — | Decision journal | ⏳ Not started |
 | — | Executive dashboard | ⏳ Not started |
 | — | Security + AI + stress testing | ⏳ Not started |
@@ -2167,3 +2169,123 @@ table holds data.
 
 **Next step:** awaiting the user's next instruction — **not proceeding to Phase 24** per the user's
 own explicit instruction (R13).
+
+### 2026-10-03 — Phase 24: Paper Trading — simulation only, one consolidated table, reusing the
+backtest cost model and the Phase 21-23 evidence snapshot (ADR-0072)
+
+**What changed** (the user's exact spec: "## Phase 24 — Paper Trading … Build a paper-trading
+simulation layer on top of the completed Phases 5-23 … This is simulation only … Do NOT execute
+real trades … Do not modify completed quantitative methodologies … Create the required backend
+endpoints … Do NOT start Phase 25"):
+
+- New package `cfi.paper`:
+  - `universe.py` — fixed vocabulary: `STATUS_VALUES` (`open`/`closed`/`cancelled`),
+    `DIRECTION_VALUES` (`long`/`short`), `VALID_TRANSITIONS` (`open → closed|cancelled`, both
+    terminal), `RELEVANT_ALERTS_LIMIT`, reuses `cfi.market.universe.ASSET_SYMBOLS` and
+    `cfi.backtest.costs.CURRENT_VERSION` unchanged.
+  - `pnl.py` — pure, database-free deterministic calculations: `execution_side`/`execution_price`
+    (the observed → simulated-execution-price step, reusing `cfi.backtest.costs.slipped_price`
+    unchanged, with the long/short → buy/sell leg mapping worked out explicitly), `current_price`
+    (reuses `cfi.divergence.metrics.window_reading` with `window_days=0`, confirmed by reading its
+    full body that this collapses to "the latest known value at or before `as_of`"),
+    `calculate_pnl` (gross P&L from the two observed prices; slippage and fees itemised
+    separately; net = gross − slippage − fees; return% on margin so leverage changes the return,
+    never the dollar P&L), `max_favorable_adverse` (holding-period excursion, `None` when no
+    price history is available — missing is first-class, never guessed).
+  - `stats.py` — `performance_stats`, a pure function over already-persisted rows (never a
+    separately maintained counter): total/open/closed/cancelled/winning/losing trade counts, win
+    rate, gross/net P&L, average win/loss, profit factor, expectancy, max drawdown (largest
+    peak-to-trough decline of the cumulative realized-P&L curve).
+  - `repository.py` — `PaperTradeRepository`, Core insert/update-per-write style identical to
+    `AlertRepository`/`AnalystRepository` (R13: no parallel pattern).
+  - `service.py` — `PaperTradingService`: `create_trade` (validates asset/direction/notional/
+    leverage/cost-model-version, reads the observed price, derives the execution price, builds
+    and inserts the SAME 14-tool evidence snapshot Phases 21-23 already build via
+    `cfi.analyst.snapshot.build_snapshot`/`AnalystRepository.insert_snapshot`, captures currently
+    `active` alerts and the latest completed brief as contextual-only references, inserts the
+    trade as `open`), `close_trade`/`cancel_trade` (lifecycle transitions, rejecting anything not
+    currently `open`), `get_trade`/`list_trades`, `open_positions` (live "as if closed now"
+    unrealized P&L through the identical `calculate_pnl`, never persisted),
+    `performance_stats`. Every "now" is an optional parameter (defaults to the real clock,
+    overridable for tests) — the same convention `AlertService.evaluate`/`BriefService` already
+    use.
+- `cfi/db/tables.py` — added `paper_trade` table in the `usr` schema (bigint identity + uuid
+  convention, matching every other new table since Phase 21).
+- `backend/migrations/versions/20261003_0010_paper_trading.py` — new migration: `usr.paper_trade`
+  table, additive only, FKs to `ai.snapshot`/`ai.brief`.
+- `backend/src/cfi/api/routes/paper.py` — new file: `POST /paper/trades`, `GET /paper/trades`,
+  `GET /paper/trades/{trade_id}`, `POST /paper/trades/{trade_id}/close`, `POST
+  /paper/trades/{trade_id}/cancel`, `GET /paper/positions`, `GET /paper/performance` — all run
+  inline in the API request (no Celery task: no AI call and no periodic sweep is needed, unlike
+  `analyst`/`brief`/`alerts`).
+- `backend/src/cfi/api/app.py` — added `paper` import and `app.include_router(paper.router)`.
+- `backend/tests/unit/test_paper_pnl.py`, `test_paper_stats.py`, `test_paper_universe.py` — all
+  new (35 tests total, all pure/database-free), including a source-level guard
+  (`test_paper_package_contains_no_real_execution_pathway`) that scans every module in
+  `cfi.paper` for exchange/order/credential tokens.
+- `backend/tests/integration/test_paper_service.py`, `test_paper_api.py` — new, DB-gated, written
+  but not executed (reuse the same Coinbase-fake harness Phase 19's anomaly suite already uses to
+  seed real daily bars).
+- `backend/tests/integration/conftest.py` — added `"usr.paper_trade"` to `DATA_TABLES`.
+- `ARCHITECTURE.md` — added `### 7a Paper trading implementation — Phase 24 (ADR-0072)`; updated
+  §7's closing line to note implementation status.
+- `DATA_DICTIONARY.md` — added `## 5p. Paper trading (implemented in Phase 24)`.
+- `DECISIONS.md` — added `## ADR-0072`; updated ADR-0036's status line to "Accepted (paper
+  trading half implemented, Phase 24; decision journal half remains proposed)".
+- `PROGRESS.md` — this entry; updated the phase table and header.
+
+**Tests run and results**
+
+| Test | Result |
+|---|---|
+| New unit tests: `test_paper_pnl.py` (23 — long/short execution-price direction, `current_price`'s `window_days=0` reuse, winning/losing long and short trades, the long/short mirror-image check, fee scaling with notional, zero-fee reconciliation, cost-model-v1-vs-v2 inertness without a participation fraction, leverage changing return% but never dollar P&L, a zero-margin guard, max favorable/adverse movement for long/short and its missing-data cases), `test_paper_stats.py` (6 — empty portfolio, status-count splits, all-winning, mixed win/loss profit-factor/expectancy, a hand-checked max-drawdown curve, all-losing), `test_paper_universe.py` (6 — fixed vocabulary, valid/terminal transitions, no self-transitions, the no-real-execution source scan) — 35 new tests total | all pass |
+| New integration tests (written, statically checked, DB-gated): `test_paper_service.py` (16 — entry persistence and the decision snapshot, long and short realized P&L with exact cost reconciliation, the long/short mirror check against real seeded prices, leverage changing return% not dollar P&L, cancel recording no exit/P&L, closing/cancelling an already-closed trade rejected, an unknown asset rejected before any price lookup, missing market data raising `InsufficientDataError` rather than fabricating a price, live unrealized P&L never persisted, historical integrity of the entry fields across a close, and performance stats reflecting real closed trades), `test_paper_api.py` (6 — full create/list/get/close round trip through the real API, invalid direction/notional rejected with 422, an unknown trade returning 404, and a cancel round trip including the second-cancel rejection) | **written and statically checked (ruff/mypy), but not executed** — no PostgreSQL/TimescaleDB instance is reachable in this sandbox; same already-documented limitation as every DB-backed suite since Phase 21 |
+| `uv run pytest tests/unit -q` | **928 passed** (up from 893 before this phase) |
+| `uv run pytest tests/integration/test_paper_service.py tests/integration/test_paper_api.py -q` (no database) | 18 skipped (confirms every new module imports and collects cleanly) |
+| `uv run ruff check .` | All checks passed! |
+| `uv run ruff format --check .` | 365 files already formatted |
+| `uv run mypy` (strict; src, tests, migrations) | Success: no issues found in 360 source files |
+| Alembic migration chain (`ScriptDirectory`, no DB connection needed) | head is `0010`, `0010 → 0009 → … → 0001 → None` — unbroken |
+
+**Known limitations**
+
+- The DB-backed integration suite (`test_paper_service.py`, `test_paper_api.py`, and every other
+  `ai.*`/`usr.*` integration test since Phase 21) was written and statically checked but **not
+  executed against a real PostgreSQL/TimescaleDB instance** — none is reachable in this sandbox.
+  Same, already-documented limitation carried forward unchanged.
+- **One consolidated `usr.paper_trade` table, not the four-table account/order/fill/position
+  sketch** in ADR-0036's original Phase 2 planning (see ADR-0072 for the full reasoning) — the
+  Phase 24 spec's own "Core paper-trading record" asks for one flat record per trade, and this
+  platform has no order-matching engine a separate order/fill split would actually represent.
+- **No user/account reference field.** No `usr.app_user` or equivalent table exists anywhere in
+  this schema — confirmed by direct inspection, not assumption (R7) — so this field was omitted
+  entirely rather than invented, per the spec's own instruction not to require fields the existing
+  architecture does not support. Every trade currently belongs to the platform's single implicit
+  user.
+- **A trade's entry is always "as of now" at creation time — no backdated entry is possible.**
+  This makes look-ahead structurally impossible rather than relying on validation, but means this
+  phase cannot log a hypothetical trade against a past date; Phase 16's backtest engine already
+  covers historical replay and was not duplicated here.
+- **Flat slippage only — no participation-scaled market-impact modelling.** ADR-0061's
+  participation-scaled slippage term depends on the backtest engine's own position-sizing-against-
+  liquidity-cap context, which has no equivalent step in this phase's scope; applying it without
+  that context would mean inventing a relationship the spec did not ask for. Documented, not
+  silent.
+- Stop-loss/take-profit are recorded fields only — nothing in this phase automatically triggers a
+  close from them (no autonomous trading, per the spec's own "Important constraints").
+- Maximum favorable/adverse movement is `None` whenever the daily close history available through
+  `cfi.divergence.adapters.Adapters.price_close`'s own loaded span does not fully cover a trade's
+  holding period (e.g. a trade held longer than that adapter's lookback) — a disclosed, first-class
+  missing state, never a guessed figure.
+- No frontend work this phase (not requested; the spec explicitly forbids unrelated frontend work
+  unless the Phase 24 specification requires it, which it does not).
+- No Decision Journal was built (explicitly out of scope this phase — "Do NOT build the Decision
+  Journal yet").
+- No existing market indicator, calculation, methodology, or Phase 5-23 service was modified; every
+  price this phase uses comes from the same adapter Phase 13 already built, and every cost
+  parameter comes from the same versioned model Phase 16 already built.
+- Delivered to the Windows machine and verified there before the commit named in this session's
+  final report.
+
+**Next step:** awaiting the user's next instruction — **not proceeding to Phase 25** per the
+user's own explicit instruction (R13).
