@@ -18,6 +18,9 @@ describe("navigation", () => {
       "Liquidity",
       "Analytics",
       "Alerts",
+      "Daily Brief",
+      "Paper Trading",
+      "Decision Journal",
       "Settings",
     ]);
   });

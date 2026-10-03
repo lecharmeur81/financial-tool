@@ -1045,6 +1045,86 @@ GET  /journal/stats                             stats — descriptive counts/ave
 
 ---
 
+### 7c. Executive Dashboard implementation — Phase 26 (ADR-0074)
+
+The first screen that answers "what is happening now, what changed, where are the signals, what
+should I investigate" — a decision-support interface over Phases 5–25, never a trading system.
+The frontend had already built real pages for 4 of ~17 backend domains (`/market`, `/flows`,
+`/whales`, `/derivatives`); everything else — the dashboard route itself, `/alerts`, `/liquidity`,
+`/analytics`, `/settings` — was a `PagePlaceholder` stub, and `regime`/`retail`/`macro`/
+`market_structure`/`divergence`/`anomaly`/`rotation`/`brief`/`alerts`/`paper`/`journal` had no
+frontend client code at all despite full backend APIs existing since their own phases.
+
+```
+app/page.tsx (Executive Dashboard, Server Component, await connection() ⇒ always dynamic)
+  │
+  ├─ 12 required sections, each its own component under components/dashboard/, each fetching
+  │  exactly once server-side (Promise.all) and rendering at one or two levels of detail:
+  │
+  │  1  RegimeSection            ← lib/regime.ts            (/api/v1/regime/current)
+  │  2  MarketOverviewSection    ← lib/market.ts fetchSummary + lib/market-structure.ts
+  │  3  IntelligenceOverviewSection  (compact tiles — institutional/whale/retail/liquidity/
+  │                                   derivatives/rotation; reuses the SAME fetch results as
+  │                                   sections 6-8, never a second fetch or calculation)
+  │  4  DivergenceSection        ← lib/divergence.ts        (/api/v1/divergence/matrix)
+  │  5  AnomalySection           ← lib/anomaly.ts           (/api/v1/anomaly/scan)
+  │  6  RotationSection          ← lib/rotation.ts          (/api/v1/rotation/matrix)
+  │  7  ParticipantsSection      ← institutional/whale/retail, kept visually distinct
+  │  8  DerivativesLiquiditySection
+  │  9  MacroSection             ← lib/macro.ts             (/api/v1/macro/overview)
+  │  10 AlertsSection            ← lib/alerts.ts            (/api/v1/alerts/) — per-row <details>
+  │                                  disclosure is the "navigation to alert details" (no new route)
+  │  11 BriefSection             ← lib/brief.ts             (/api/v1/brief/latest) — summary only,
+  │                                  links to /brief for the complete 12-section response
+  │  12 JournalPaperSection      ← lib/paper.ts + lib/journal.ts — links to /paper, /journal
+  │
+  └─ Every section takes its data as a prop (ApiResult or already-unwrapped), renders
+     `Unavailable`/"Insufficient data." on anything not `ok`, and never recomputes a score,
+     divergence, anomaly band, or rotation hypothesis — only the existing backend's own output.
+```
+
+- **One new backend endpoint, deliberately minimal — `GET /api/v1/market/summary`
+  (ADR-0074).** The spec's own test (`only create new backend endpoints if the dashboard
+  genuinely requires data that cannot reasonably be obtained from existing endpoints`): no
+  existing public HTTP route combined price/24h-change/7d-change/volume/realized-volatility per
+  asset in one call, but the exact calculation already existed as the internal
+  `cfi.analyst.tools.get_market_data` function (the same tool the AI Analyst snapshot calls).
+  The new route is a pure pass-through to that function — zero new calculation, same envelope,
+  same fields — reused verbatim rather than duplicated (R13).
+- **Overview/detail dual rendering, not duplicate fetching.** Institutional, whale, retail,
+  liquidity, derivatives and rotation data is each fetched exactly once per request in
+  `app/page.tsx` and handed to both a compact tile (section 3) and its fuller card (sections 6-8)
+  as props — one backend call per domain, two renderings, never two fetches.
+- **No new pages for domains without one.** Regime, divergence, anomaly, rotation,
+  market-structure and liquidity-overview have no page of their own; the dashboard section is
+  their presentation for now ("Do not create unnecessary duplicate pages"). Three new minimal
+  pages were added because the spec names them explicitly as needing "access to the complete X"
+  or "navigation to alert details": `/brief` (the full 12-section `AnalystResponse`), `/paper`
+  (trade history, open positions, performance), `/journal` (decisions, review stats). `/alerts`
+  was rewritten from its placeholder into a real list, reusing `AlertsSection`.
+- **Dynamic rendering, not a build-time snapshot (R3).** `app/page.tsx`, `/alerts`, `/brief`,
+  `/paper` and `/journal` all call `await connection()` before fetching (the same pattern already
+  used by `/settings`) so Next.js renders them at request time; without it, Next statically
+  prerendered these pages at build time because none of them read `searchParams`; it never
+  touches a cache lifetime, so freshness is reported exactly as the backend states it, not frozen
+  as of the build.
+- **Confidence is confidence in the classification, never a probability of direction.**
+  `RegimeSection` always renders `confidence_semantic_note` verbatim next to the number, the
+  spec's own explicit wording requirement.
+- **Observed vs. inferred stays structurally separate everywhere rotation appears.**
+  `RotationSection` and the rotation tile in `IntelligenceOverviewSection` only ever call a
+  rotation hypothesis "inferred — not confirmed"; `observed_capital_flow` (each node's own
+  reading) is shown as its own field, never merged into the hypothesis text.
+- **Participants are not merged into one sentiment indicator.** `ParticipantsSection` renders
+  institutional/whale/retail as three separate tiles with their own evidence-class note, per the
+  spec's explicit "do not merge" instruction.
+- **`loading.tsx` is the first client-visible loading state in this codebase.** Every other page
+  awaits its data directly server-side with no loading UI (`frontend/AGENTS.md`); Next's
+  `loading.js` convention now wraps every route in a `<Suspense>` fallback automatically, shown
+  only while a page's `await`s are in flight, and it deliberately shows no numbers.
+
+---
+
 ## 8. Repository layout — ADR-0015, ADR-0045
 
 ```

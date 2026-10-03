@@ -2,17 +2,19 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 25 — Decision Journal → implemented, self-verified in the sandbox (957 unit tests, up
-from 928; ruff/format/mypy strict all clean; DB-backed integration suite written but requires the real
-PostgreSQL/TimescaleDB instance to run — see the Phase 25 log entry). Completes ADR-0036: a single
-consolidated `usr.decision_journal` table (migration `0011`), reusing the same immutable 14-tool evidence
-snapshot Phases 21-24 already build (captured at decision time, never rebuilt afterward), a repository
-whose own API shape makes hindsight protection structural (decision-time columns and outcome columns are
-disjoint, written by different methods, never both by the same one), descriptive-only review/statistics
-(no ranking, no "best strategy"), and a full API (create/list/get/update-notes/record-outcome/cancel/
-link-unlink-paper-trade/review/stats) running inline with no new worker task. No automatic decision
-generation, no trading advice, no real execution pathway anywhere in the new code. See the Phase 25 log
-entry below for the hindsight-protection design and for what was (and was not) verified.
+**Current phase:** 26 — Executive Dashboard → implemented, self-verified in the sandbox. Backend: one new
+pass-through endpoint (`GET /api/v1/market/summary`, reusing `cfi.analyst.tools.get_market_data` verbatim),
+2 new integration tests (DB-gated, written but not executed); unit suite unchanged at 957 passing;
+ruff/format/mypy strict all clean. Frontend: the Executive Dashboard page (`app/page.tsx`) rewritten from its
+placeholder into 12 required sections, each reusing its domain's existing API output unchanged — regime,
+market overview, a compact capital-flow/intelligence overview, divergences, anomalies, capital rotation,
+institutional/whale/retail (kept visually distinct), derivatives & liquidity, macro, alerts, daily brief, and
+decision journal/paper trading; 12 new `lib/<domain>.ts` API clients and 12 new `components/dashboard/*`
+section components; `/alerts` rewritten into a real list, `/brief`, `/paper`, `/journal` created as new
+pages, `loading.tsx` added. Frontend suite: 98 tests passing (up from 73); `pnpm lint`/`format:check`/
+`typecheck`/`build` all clean. No trading recommendation, no new quantitative methodology, no modification
+to any Phase 5-25 backend service — see the Phase 26 log entry below for the full design and for what was
+(and was not) verified.
 **Next phase:** to be defined by the user (do not start automatically — R13)
 
 ---
@@ -47,7 +49,7 @@ entry below for the hindsight-protection design and for what was (and was not) v
 | 23 | Alerts | ✅ Complete — self-verified in sandbox AND on Windows (see Phase 23 log entry) |
 | 24 | Paper trading | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 24 log entry) |
 | 25 | Decision journal | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 25 log entry) |
-| — | Executive dashboard | ⏳ Not started |
+| 26 | Executive dashboard | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 26 log entry) |
 | — | Security + AI + stress testing | ⏳ Not started |
 | — | Production | ⏳ Not started |
 | — | Real-time intelligence | ⏳ Not started |
@@ -2417,4 +2419,99 @@ Phase 26"):
   final report.
 
 **Next step:** awaiting the user's next instruction — **not proceeding to Phase 26** per the
+user's own explicit instruction (R13).
+
+### 2026-10-03 — Phase 26: Executive Dashboard — 12 required sections over Phases 5-25, one
+pass-through endpoint, overview/detail dual rendering, dynamic rendering throughout
+
+**What changed** (the user's exact spec: "## Phase 26 — Executive Dashboard … Build the main
+Executive Dashboard that brings together the intelligence already completed in Phases 5-25 … Do
+NOT start Phase 27 … Do NOT add buy/sell recommendations … Do NOT duplicate backend calculations
+in the frontend"):
+
+- Inspected the existing frontend architecture first (R7): Next.js 16 App Router, async Server
+  Components awaiting data directly server-side (no client-side loading state anywhere), a
+  `lib/<domain>.ts` client convention per backend domain, and a shared CSS design system
+  (`globals.css`). Found only 4 of ~17 backend domains had a real frontend page; everything else,
+  including the dashboard route itself, was a `PagePlaceholder` stub or had no frontend code at
+  all.
+- **One new backend endpoint**, `backend/src/cfi/api/routes/market.py::summary` — `GET
+  /api/v1/market/summary`, a pure pass-through to the existing `cfi.analyst.tools.
+  get_market_data` function (the same tool the Phase 21 AI Analyst already calls). Two new
+  integration tests in `test_market_api.py` (DB-gated, written but not executed in this sandbox —
+  same known limitation as every prior phase). Verified: `ruff check`/`ruff format --check`/
+  `mypy` all clean; unit suite unchanged at 957 passing; app import smoke-tested (no circular
+  import).
+- **Twelve new frontend API client modules** under `frontend/src/lib/`: `regime.ts`, `retail.ts`
+  (defines the shared `DomainScore` type that `macro`/`market-structure`/`liquidity` all reuse,
+  since their backend `_score()` methods share an identical shape), `macro.ts`,
+  `market-structure.ts`, `liquidity.ts`, `divergence.ts`, `anomaly.ts`, `rotation.ts`, `brief.ts`
+  (the full 12-section `AnalystResponse` schema), `alerts.ts`, `paper.ts`, `journal.ts`, plus a
+  `fetchSummary` addition to the existing `market.ts`. Every type was read directly from the
+  corresponding backend route/service source (R7) rather than assumed.
+- **Twelve new dashboard section components** under `frontend/src/components/dashboard/`
+  (`RegimeSection`, `MarketOverviewSection`, `IntelligenceOverviewSection`, `DivergenceSection`,
+  `AnomalySection`, `RotationSection`, `ParticipantsSection`, `DerivativesLiquiditySection`,
+  `MacroSection`, `AlertsSection`, `BriefSection`, `JournalPaperSection`) plus a shared
+  `Unavailable`/`InsufficientData` pair. Each takes its data as a prop, shows `Insufficient data.`
+  rather than fabricating a value, and reuses its domain's existing calculation/score/band
+  unchanged — no divergence logic, anomaly reinterpretation, or rotation hypothesis is computed
+  in the frontend.
+- `frontend/src/app/page.tsx` rewritten from its `PagePlaceholder` stub into the real Executive
+  Dashboard: ~19 domain fetches in one `Promise.all`, each result passed to its section(s).
+  `frontend/src/app/alerts/page.tsx` rewritten from its placeholder into a real list reusing
+  `AlertsSection`. Three new pages: `app/brief/page.tsx` (the complete 12-section brief),
+  `app/paper/page.tsx` (trade history, open positions, performance), `app/journal/page.tsx`
+  (decisions, review stats). `app/loading.tsx` added — the first client-visible loading state in
+  this codebase.
+- `app/page.tsx`, `/alerts`, `/brief`, `/paper`, `/journal` all call `await connection()` before
+  fetching (same pattern as `/settings`) so Next.js renders them at request time; confirmed by
+  `pnpm build` output changing from `○ (Static)` to `ƒ (Dynamic)` for all five after adding it —
+  without this, the dashboard would have been frozen as of the production build (R3 violation).
+- `frontend/src/lib/navigation.ts`/`navigation.test.ts` updated: three new nav items (`/brief`,
+  `/paper`, `/journal`), and `plannedPhase` corrected for `/` (24→26) and `/alerts` (21→23).
+- New test file `components/dashboard/dashboard-components.test.tsx` (24 tests: ok/insufficient-
+  data/API-failure/empty-state cases per section, following the existing synthetic-fixture, no-
+  fetch-mocking convention) and `app/loading.test.tsx` (1 test). Frontend suite: **98 tests
+  passing (up from 73)**. `pnpm lint` / `pnpm format:check` / `pnpm typecheck` / `pnpm build` all
+  clean.
+
+**Tests run:** Backend — `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`,
+`uv run pytest tests/unit -q` (957 passed), `uv run pytest tests/integration/test_market_api.py -q`
+(9 skipped — no `CFI_DATABASE_URL`/`CFI_REDIS_URL` in this sandbox, same known limitation as every
+prior phase; the spec explicitly says not to spend time on this). Frontend — `pnpm lint`, `pnpm
+format:check`, `pnpm typecheck`, `pnpm test` (98 passed), `pnpm build` (production build succeeds,
+all five request-time pages confirmed dynamic).
+
+**Documentation updated:**
+
+- `ARCHITECTURE.md` — added `### 7c. Executive Dashboard implementation — Phase 26 (ADR-0074)`.
+- `DECISIONS.md` — added `## ADR-0074 — Phase 26: Executive Dashboard — one thin pass-through
+  endpoint, overview/detail dual rendering, and no new pages for domains the dashboard section
+  already serves`.
+- `PROGRESS.md` — this entry; phase table row added; header updated.
+- No `DATA_DICTIONARY.md` change: no new field, metric, or score was introduced — `/market/
+  summary` serves fields that already exist in `DATA_DICTIONARY.md` via the analyst tool's own
+  envelope.
+
+**Known limitations:**
+
+- DB-backed integration tests for the new `/market/summary` endpoint are written but not executed
+  against a real PostgreSQL/TimescaleDB instance in this sandbox — the same, already-documented
+  environment limitation as every prior phase. The spec explicitly says not to spend time solving
+  this.
+- Regime, divergence, anomaly, rotation, market-structure, and liquidity-overview have no
+  dedicated page of their own — only their dashboard section. This is a deliberate scope decision
+  (ADR-0074), not an oversight; a future phase can add dedicated pages reusing the client modules
+  already built here without new backend work.
+- `IntelligenceOverviewSection`'s per-domain tiles use BTC as the representative asset for whale
+  and derivatives scores (the whale and derivatives APIs are per-asset, with no all-assets
+  overview endpoint, unlike institutional's `/overview`) — consistent with how `/whales` and
+  `/derivatives` already default to BTC.
+- Not delivered to or verified on the Windows machine yet in this session; delivery/commit remains
+  pending, same posture as Phases 22, 24, and 25 at this point in their own sessions.
+- No existing market indicator, calculation, methodology, or Phase 5-25 backend service was
+  modified; every section reuses its domain's existing API output unchanged.
+
+**Next step:** awaiting the user's next instruction — **not proceeding to Phase 27** per the
 user's own explicit instruction (R13).

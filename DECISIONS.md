@@ -2937,3 +2937,100 @@ Phase 5-24 service, methodology, or schema — `cfi.paper`, `cfi.alerts`, `cfi.b
 tests (`test_journal_service.py`, `test_journal_api.py`) are written but have not been executed
 against a real PostgreSQL/TimescaleDB instance in this sandbox (the same environment limitation as
 every prior phase).
+
+## ADR-0074 — Phase 26: Executive Dashboard — one thin pass-through endpoint, overview/detail
+dual rendering, and no new pages for domains the dashboard section already serves
+
+**Status:** Accepted (implemented 2026-10-03)
+
+**Context.** Phase 26 asks for a single Executive Dashboard page that brings together Phases
+5-25, built strictly from existing backend services and APIs: "Reuse existing backend services,
+APIs, schemas, calculations, snapshots, alerts, briefs, paper trading, and decision journal,"
+"Prefer existing APIs. Only create new backend endpoints if the dashboard genuinely requires data
+that cannot reasonably be obtained from existing endpoints," and "Do not create unnecessary
+duplicate pages." Direct inspection (R7) of `frontend/src/app` found the frontend far behind the
+backend: only 4 of ~17 backend domains (`market`, `institutional`→`/flows`, `whales`,
+`derivatives`) had a real page; `/`, `/alerts`, `/liquidity`, `/analytics`, `/settings` were
+`PagePlaceholder` stubs, and `regime`/`retail`/`macro`/`market_structure`/`divergence`/`anomaly`/
+`rotation`/`brief`/`alerts`/`paper`/`journal` had no frontend client code at all. Three design
+questions needed a decision before writing any frontend code: (1) does the "Market Overview"
+section (price/change/volume/volatility/market-cap per asset) require a new backend endpoint; (2)
+how to avoid duplicate fetches/calculations between the compact "Intelligence Overview" tiles and
+the fuller per-domain sections further down the same page; (3) which domains without an existing
+page get a new one, versus being served only by their dashboard section.
+
+**Decision.**
+
+1. **Exactly one new backend endpoint, `GET /api/v1/market/summary`, as a pure pass-through to
+   the existing `cfi.analyst.tools.get_market_data` function** — the same tool the Phase 21 AI
+   Analyst snapshot already calls. No public HTTP route combined price/24h-change/7d-change/
+   volume/realized-volatility per asset in one response before this; the calculation itself
+   already existed and is reused verbatim (R13), zero new logic, same envelope and field shapes
+   the analyst tool already returns.
+2. **Overview/detail dual rendering, not duplicate fetching.** Institutional, whale, retail,
+   liquidity, derivatives and rotation data is each fetched exactly once per page request in
+   `app/page.tsx` via `Promise.all`, and the same already-fetched result is passed as a prop to
+   both the compact tile in `IntelligenceOverviewSection` (section 3) and the fuller card further
+   down the page (sections 6-8) — one backend call per domain per page load, two renderings.
+3. **No new page for a domain that has never had one, unless the spec explicitly asks for
+   "access to the complete X" or "navigation to details."** Regime, divergence, anomaly,
+   rotation, market-structure, and liquidity-overview get a dashboard section and nothing else —
+   the section is their presentation for this phase, consistent with "do not create unnecessary
+   duplicate pages" and "the smallest robust dashboard." Three new pages were built because the
+   spec names them by requirement, not by convenience: `/brief` (full 12-section `AnalystResponse`
+   — the Daily Brief section explicitly needs "access to the complete brief"), `/paper` and
+   `/journal` (the spec says the dashboard section should "link to the underlying detailed pages
+   ... rather than duplicate all functionality," which presupposes those pages exist). `/alerts`
+   was rewritten from its placeholder into a real list because "Provide navigation to the alert
+   details" is explicit; that navigation is an inline `<details>` disclosure per row, reusing the
+   same pattern already established for whale/institutional score components, rather than a
+   fourth new route (`/alerts/{id}`) this phase does not need.
+4. **`app/page.tsx`, `/alerts`, `/brief`, `/paper` and `/journal` all call `await connection()`
+   before fetching**, the same pattern `/settings` already established, so Next.js renders them
+   at request time. Without it, a production build statically prerenders these pages at build
+   time — verified directly: `pnpm build` marked all five as `○ (Static)` before this call was
+   added, and `ƒ (Dynamic)` after — which would silently freeze every dashboard section's
+   freshness as of the build, a direct violation of "Do not present stale data as current" (R3).
+
+**Alternatives considered.** Building a dedicated page for every domain the dashboard surfaces
+(rejected: the spec explicitly forbids unnecessary duplicate pages, and nothing beyond the
+dashboard section currently needs one). A second new backend endpoint aggregating multiple
+domains' overviews into one dashboard-specific payload (rejected: every domain already has its
+own `/overview` or equivalent read-only endpoint; a combined endpoint would duplicate routing
+logic the API layer already provides via `Promise.all` on the frontend, for no genuine need).
+Leaving the five dashboard-adjacent pages statically rendered and relying on `AutoRefresh`'s
+client-side `router.refresh()` alone to keep them current (rejected: the first server-rendered
+HTML a person or a crawler sees would still be the build-time snapshot, and "stale" freshness
+badges the backend reports would be wrong until the first refresh fired).
+
+**Trade-offs.** The dashboard's first screen performs roughly 19 parallel backend calls per
+request (one per domain/section); each is cheap and already-tested, and `cache: "no-store"` plus
+`await connection()` mean no response is ever served from a stale cache, at the cost of a slightly
+heavier page load than a single aggregated endpoint would give. Domains without their own page
+(regime, divergence, anomaly, rotation, market structure, liquidity overview) have no deep-link
+target beyond the dashboard itself — acceptable for this phase's "smallest robust dashboard"
+mandate, revisitable if a future phase asks for dedicated pages.
+
+**Future implications.** If a later phase asks for a dedicated page for any of the domains
+currently served only by a dashboard section, that page reuses the same `lib/<domain>.ts` client
+module already built this phase — no new backend work. If a future phase adds authentication or
+per-user dashboards, the same `Promise.all` fetch shape in `app/page.tsx` extends naturally per
+user rather than needing a redesign.
+
+**Consequences.** One new backend endpoint (`GET /api/v1/market/summary`, `backend/src/cfi/api/
+routes/market.py`) with two new integration tests (`test_market_api.py`); backend unit suite
+unchanged at 957 passing. Ten new frontend `lib/<domain>.ts` client modules (`regime`, `retail`,
+`macro`, `market-structure`, `liquidity`, `divergence`, `anomaly`, `rotation`, `brief`, `alerts`,
+`paper`, `journal` — twelve total, several reusing a shared `DomainScore` type from `retail.ts`
+since `macro`/`market_structure`/`liquidity`/`retail`'s backend `_score()` methods share an
+identical shape); twelve new `components/dashboard/*` section components plus a shared
+`Unavailable`/`InsufficientData` pair; `app/page.tsx` rewritten from its `PagePlaceholder` stub
+into the real Executive Dashboard; `app/alerts/page.tsx` rewritten into a real list;
+`app/brief/page.tsx`, `app/paper/page.tsx`, `app/journal/page.tsx` created; `app/loading.tsx`
+created (the first client-visible loading state in this codebase, otherwise every page awaits
+its data directly server-side). `navigation.ts`/`navigation.test.ts` updated for the three new
+nav items and the dashboard's `plannedPhase`. New component test file
+`components/dashboard/dashboard-components.test.tsx` plus `app/loading.test.tsx`. Frontend suite:
+98 tests passing (up from 73), `pnpm lint`/`format:check`/`typecheck`/`build` all clean. No change
+to any Phase 5-25 service, methodology, score, or schema — every section reuses its domain's
+existing API output unchanged.

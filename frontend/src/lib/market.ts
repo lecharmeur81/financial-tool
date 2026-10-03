@@ -185,6 +185,36 @@ export const fetchCatalog = (f?: typeof fetch) => getJson<Catalog>("/api/v1/mark
 export const fetchOverview = (f?: typeof fetch) =>
   getJson<Overview>("/api/v1/market/overview", {}, f);
 
+// --------------------------------------------------------------------------- summary (Phase 26)
+
+/** One analyst-tool field: a value plus the unit/category needed to display it honestly. */
+export type SummaryField = {
+  value: string | null;
+  unit: string;
+  evidence_category: string;
+  direction?: "up" | "down" | "flat" | null;
+  timestamp?: string | null;
+  source?: string;
+};
+
+export type AssetSummary = {
+  price_close: SummaryField;
+  change_24h_pct: SummaryField;
+  change_7d_pct: SummaryField;
+  volume_24h: SummaryField;
+  realized_volatility_30d: SummaryField;
+};
+
+export type Summary = {
+  tool_id: "get_market_data";
+  status: "ok" | "unavailable";
+  data: { as_of: string; assets: Record<string, AssetSummary> } | null;
+  error: { error_code: string; detail: string } | null;
+};
+
+/** Thin pass-through to the same tool the AI Analyst uses (Phase 21) — no new calculation. */
+export const fetchSummary = (f?: typeof fetch) => getJson<Summary>("/api/v1/market/summary", {}, f);
+
 export const fetchBars = (
   params: { asset: string; timeframe: string; venue: string; limit?: number },
   f?: typeof fetch,

@@ -8,11 +8,12 @@ No signals, scores or recommendations are produced here.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
+from cfi.analyst.tools import get_market_data
 from cfi.api.params import aware
 from cfi.core.config import Settings
 from cfi.core.errors import ServiceUnavailableError
@@ -251,3 +252,25 @@ async def overview(
     as_of: Annotated[datetime | None, Query(description="Point-in-time view")] = None,
 ) -> OverviewResponse:
     return OverviewResponse(**await _service(request).overview(_as_of(as_of)))
+
+
+@router.get("/summary")
+async def summary(
+    request: Request,
+    as_of: Annotated[datetime | None, Query(description="Point-in-time view")] = None,
+) -> dict[str, Any]:
+    """Per-asset latest close, 24h/7d change and direction, daily volume, and realized
+    volatility — for every tracked asset at once (Phase 26 "Market Overview").
+
+    Reuses ``cfi.analyst.tools.get_market_data`` verbatim: the exact function the AI Analyst's
+    own evidence snapshot already calls (Phase 21), exposed here as its own lightweight read so
+    the Executive Dashboard does not need to run a full AI analysis just to show a price and its
+    change. No new calculation is introduced — this is the one genuinely missing read (no
+    existing endpoint combines price, 24h change and volatility in one call) permitted under the
+    Phase 26 spec's own "only create new backend endpoints if genuinely required" instruction.
+    """
+    resolved = _as_of(as_of)
+    engine = getattr(request.app.state, "engine", None)
+    if engine is None:
+        raise ServiceUnavailableError("Database connection is not available.")
+    return await get_market_data(engine, as_of=resolved, knowledge_time=resolved)

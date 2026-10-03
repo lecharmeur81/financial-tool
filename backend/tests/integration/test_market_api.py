@@ -207,3 +207,31 @@ async def test_errors_are_explicit(market: MarketHarness, test_settings: Setting
     assert status == 200
     assert body["freshness"]["status"] == "no_data"
     assert "No 1h data stored yet for this instrument." in body["warnings"]
+
+
+async def test_summary_reuses_the_analyst_tool_verbatim(
+    market: MarketHarness, test_settings: Settings
+) -> None:
+    """Phase 26: ``GET /market/summary`` is a thin pass-through to ``cfi.analyst.tools.
+    get_market_data`` — same envelope, same fields, no new calculation."""
+    await backfill_step(
+        market.ctx, ADAPTERS["coinbase"], ohlcv_dataset("usd", "1d"), "BTC", depth_days=280
+    )
+    status, body = get(test_settings, "/api/v1/market/summary", as_of=iso(NOW))
+    assert status == 200
+    assert body["tool_id"] == "get_market_data"
+    assert body["status"] == "ok"
+    btc = body["data"]["assets"]["BTC"]
+    assert btc["price_close"]["value"] is not None
+    assert btc["change_24h_pct"]["unit"] == "pct"
+    assert btc["volume_24h"]["evidence_category"] == "observed_data"
+    assert btc["realized_volatility_30d"]["unit"] == "annualized_ratio"
+
+
+async def test_summary_is_honest_about_untracked_data(test_settings: Settings) -> None:
+    """No bars seeded — every asset's fields are `None`, never a fabricated price (R3)."""
+    status, body = get(test_settings, "/api/v1/market/summary")
+    assert status == 200
+    assert body["status"] == "ok"
+    for asset in body["data"]["assets"].values():
+        assert asset["price_close"]["value"] is None

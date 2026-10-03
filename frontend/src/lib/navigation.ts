@@ -15,7 +15,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: "Dashboard",
     description:
       "Executive overview: market regime, capital-flow divergences, key changes, and data quality.",
-    plannedPhase: "24",
+    plannedPhase: "26",
   },
   {
     href: "/market",
@@ -62,7 +62,28 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/alerts",
     label: "Alerts",
     description: "Rule-based alerts on metrics, signals, regimes, and data-quality events.",
-    plannedPhase: "21",
+    plannedPhase: "23",
+  },
+  {
+    href: "/brief",
+    label: "Daily Brief",
+    description:
+      "The latest AI Analyst Daily Market Brief: summary, evidence, contradicting evidence, regime, key changes, risks, scenarios, invalidation conditions, and data quality.",
+    plannedPhase: "22",
+  },
+  {
+    href: "/paper",
+    label: "Paper Trading",
+    description:
+      "Simulated trades only — open positions, performance, and trade history. No real execution.",
+    plannedPhase: "24",
+  },
+  {
+    href: "/journal",
+    label: "Decision Journal",
+    description:
+      "Your own recorded decisions — thesis, decision-time evidence, and later outcomes. Descriptive review only, never a ranking.",
+    plannedPhase: "25",
   },
   {
     href: "/settings",
