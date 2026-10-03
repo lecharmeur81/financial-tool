@@ -9,8 +9,8 @@ existing domain service (no raw database access), an immutable hashed evidence s
 (non-AI) validator enforcing exact-number grounding and banning bullish/bearish verdicts, trading directives,
 manufactured certainty, and "capital moved from X to Y" stated as fact, a 12-section response schema whose
 order is enforced by construction, a monthly budget ceiling enforced against `ai.usage`, and a full audit
-trail (`ai.snapshot`/`ai.interpretation`/`ai.usage`, migration `0007`). Delivered to Windows and committed —
-see the Phase 21 log entry below.
+trail (`ai.snapshot`/`ai.interpretation`/`ai.usage`, migration `0007`). Delivered to Windows, tests and
+static checks re-run there, and committed as `3315a58` — see the Phase 21 log entry below.
 **Next phase:** to be defined by the user (do not start automatically)
 
 ---
@@ -40,7 +40,7 @@ see the Phase 21 log entry below.
 | 18 | Fix Quant Issues | ✅ Complete — verified on Windows (`5333434`) |
 | 19 | Anomaly engine | ✅ Complete — verified on Windows (`737e223`) |
 | 20 | Capital rotation | ✅ Complete — verified on Windows (`dc71d39`) |
-| 21 | Claude AI Analyst | ✅ Complete — verified on Windows (see Phase 21 log entry) |
+| 21 | Claude AI Analyst | ✅ Complete — verified on Windows (`3315a58`) |
 | — | Daily intelligence | ⏳ Not started |
 | — | Alerts | ⏳ Not started |
 | — | Paper trading | ⏳ Not started |
@@ -1950,10 +1950,27 @@ also the first write path in the codebase outside `cfi.ingestion`.
   meme-asset proxy status, the 4-asset "large caps" universe, missing flow corroboration for some rotation
   nodes) is disclosed verbatim to the AI in every snapshot (`cfi.analyst.universe.KNOWN_PLATFORM_LIMITATIONS`)
   rather than silently smoothed over — none of those underlying methodologies were changed for this phase.
-- **Delivery to the Windows machine and the `git commit` hash are pending** — see the next log entry once
-  delivered.
+- Delivered to Windows and committed as `3315a58`; see the Windows-verification entry immediately below.
 
-**Next step:** deliver to the Windows machine, run the full suite there (including, this time, the
-integration tests if `CFI_DATABASE_URL`/`CFI_REDIS_URL` are reachable from that environment), commit, and
-report the final commit hash per the user's own explicit 13-point completion-report format, then stop —
-awaiting the user's next instruction (R13: do not proceed to Phase 22 automatically).
+**Next step:** none — phase complete; awaiting the user's next instruction (R13: do not proceed to Phase 22
+automatically).
+
+### 2026-10-03 — Phase 21: delivered to Windows, verified, committed
+
+All 39 changed/new files (17 modified, 22 new — the exact Phase 21 set, cross-checked file-by-file against
+what Windows already had at `597f9bc` so none of Phases 9-20's own files were re-sent) were copied to the
+Windows machine via the device bridge and read back (md5) to confirm a byte-for-byte match before proceeding,
+the same delivery pattern as every earlier phase.
+
+| Check (on Windows) | Result |
+|---|---|
+| `uv run pytest tests/unit tests/api -q` | **818 passed** |
+| `uv run pytest tests/integration -q` | 192 skipped — `CFI_DATABASE_URL`/`CFI_REDIS_URL` still not set in this bridge environment (no Docker reachable from it either), same posture as Phases 19/20's own Windows delivery; the 5 new analyst integration tests were already exercised against a real fake-transport/in-memory setup in the unit/API suite above, but not against a real PostgreSQL instance in any environment this session reached |
+| `uv run ruff check .` | All checks passed! |
+| `uv run ruff format --check .` | 324 files already formatted |
+| `uv run mypy --no-incremental .` | Success: no issues found in 319 source files (plain `mypy .` hit a pre-existing `.mypy_cache` internal error on this Windows checkout, unrelated to this phase's code; `--no-incremental` avoids the stale cache and gives the same clean result) |
+
+Committed as `3315a58` on `main` ("[P21] Claude AI Analyst").
+
+**Next step:** none — phase complete; awaiting the user's next instruction (R13: do not proceed to Phase 22
+automatically).
