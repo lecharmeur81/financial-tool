@@ -2,8 +2,10 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 28 — Security Corrections → implemented, tested, synced and committed on
-Windows (`8a6ceaf`) (see the Phase 28 log entry below). Builds directly on Phase 27's
+**Current phase:** 32 — Production Readiness Assessment → verified against the authoritative
+Windows repo; one fail-secure gap found and fixed (`3831532`); see the Phase 29-32 log entry
+at the end of this file and the Phase 32 report delivered in chat for the full verdict. Phase 28
+(Security Corrections) → implemented, tested, synced and committed on Windows (`8a6ceaf`). Builds directly on Phase 27's
 read-only Security Audit (same date), which found no critical blockers but no authentication, no rate
 limiting, production docs left open, and several missing production headers. Phase 28 adds: API-key
 authentication (`X-API-Key`, fail-secure in production) on all mutating/AI-triggering routes; `slowapi`
@@ -2694,3 +2696,78 @@ hardening" (git runs on the user's machine per C5).
 
 **Next step:** awaiting the user's next instruction — **not proceeding to Phase 29** per the user's
 own explicit instruction (R13).
+
+---
+
+### 2026-10-04 — Phases 29-32: stress test, fixes, and production-readiness assessment
+
+Phases 29 (security/architecture audit), 30 (full-system stress test), and 31 (fixes for Phase 30's
+findings) were carried out in a cloud sandbox copy of this repository in a prior session segment of
+this same conversation. Their detailed findings and fixes are recorded in that conversation's own
+transcript and summary rather than re-derived here; this entry focuses on what Phase 32 itself
+verified and changed against the **authoritative Windows repository**.
+
+**Phase 32 discovery — sandbox/authoritative sync gap:** verifying "are Phase 31's fixes present in
+the authoritative repository" (the phase's own first instruction) found that this repository was
+still at `2430902` (Phase 28) — **Phase 31's fixes had never been synced from the sandbox**. Synced
+the 5 changed/new Phase 31 files (`backend/src/cfi/db/engine.py`, `backend/src/cfi/api/routes/
+analyst.py`, `backend/tests/integration/test_json_datetime_serialization.py`, `backend/tests/
+integration/test_error_sanitization.py`, `backend/tests/api/test_analyst_api.py`), verified
+byte-for-byte (MD5) against the sandbox, ran the full backend suite (985 passed), ruff, ruff format,
+and mypy on Windows, then committed: `8e3367e` — "[P31] fix JSON datetime serialization (F-1) and
+bound analyst question length (F-4)".
+
+**Phase 32 finding and fix — blank `CFI_API_KEY` defeats fail-secure startup check (production
+blocker, fixed):** `compose.prod.yaml` inherits `CFI_API_KEY: ${CFI_API_KEY:-}` from the base
+compose file's shared anchor. An operator who deploys with `compose.prod.yaml` but forgets to set
+`CFI_API_KEY` in their `.env` gets the literal empty string as the container's env value, not an
+absent variable. `Settings` parsed that into `SecretStr("")`, which is not `None`, so (a) the
+fail-secure startup check (`_api_key_required_in_production`) did not trigger even though no real
+key was configured, and (b) `cfi.api.auth.require_api_key`'s `secrets.compare_digest(supplied, "")`
+would then accept a **blank** `X-API-Key` header, authenticating every mutating/AI-trigger endpoint
+with no real key at all — silently defeating ADR-0075's documented fail-secure intent. Verified
+empirically before fixing (`Settings(environment="production", ..., api_key="")` constructed
+without error) and after (same input now raises `"CFI_API_KEY must be set"`). Fixed with a single
+`mode="before"` field validator on `Settings.api_key` (`backend/src/cfi/core/config.py`) that
+normalizes a blank/whitespace-only value to `None` — the one point both the startup check and the
+per-request check already trust. Added 3 regression tests to `backend/tests/api/test_security.py`.
+Full backend unit + API suite (988 tests), `ruff check`, `ruff format --check`, and `mypy` (379
+files) all re-run and passed on the authoritative Windows repo after the sync. Committed: `3831532`
+— "[P32] fail-secure: treat a blank CFI_API_KEY as unset".
+
+**Verification performed (no other code changes):** migration head (`0011`, no gap); no destructive
+DDL in any migration's `upgrade()` (all `DROP`/`TRUNCATE` calls live only in `downgrade()`); no
+hardcoded secrets; `.gitignore`/`.env.example` correct; CORS/docs-gating/rate-limiting/RFC 9457
+error handling/security headers all confirmed in code; Celery JSON serialization still enforced;
+Celery beat schedule present (daily brief, 00:05 UTC); all 20 provider adapters declare an explicit
+`timeout_seconds` and `RateLimitSpec` via the shared adapter base (R8); AI monthly budget ceiling
+(`ai_monthly_budget_usd`, default $20) enforced with an explicit refusal before any Claude call; no
+order/broker-execution code found anywhere under `paper/` (simulated only); both backend and
+frontend Dockerfiles confirmed non-root (`USER cfi`) with no dev/reload server in their runtime
+targets. No paid Anthropic API call was made at any point in this phase.
+
+**Known limitations (documented, not fixed, per the phase's explicit instruction):**
+
+- The unresolved paper/journal point-in-time price-lookup issue from Phase 31 remains open and was
+  not investigated further.
+- No multi-user/tenant model exists (ADR-0075 prerequisite, unchanged).
+- `slowapi`'s rate limiter remains in-memory/per-process (unchanged, documented since Phase 28).
+- Docker live-runtime testing (`docker compose up`, container restart behavior) could not be
+  performed from this session: the device bridge's shell has no `docker` CLI available (confirmed
+  via `which docker` → not found; this shell is a sandboxed Linux environment bridged to the
+  Windows machine, not a direct Windows terminal with Docker Desktop on `PATH`).
+- The frontend production build/typecheck/lint/test suite was not re-executed against the
+  authoritative Windows repo in this phase: `pnpm install` over the remote device bridge was
+  extremely slow on file-write/extraction (same bottleneck already documented in the Phase 28 log
+  entry above — raw network throughput to the npm registry tested fine via a direct `curl`, so the
+  slowness is bridge file I/O, not bandwidth); the frontend was instead verified statically this
+  phase (CSP/security headers in `next.config.ts`, no hardcoded dev API URLs or client-exposed
+  secrets in `src/`, server-only `API_INTERNAL_URL` access pattern, non-root Docker runtime image).
+  A leftover `.pnpm-store/` and `frontend/node_modules/` from this attempt were removed.
+
+**Git commits this phase:** `8e3367e` (Phase 31 sync, see above), `3831532` (Phase 32 fail-secure
+fix, see above).
+
+**Next step:** awaiting the user's next instruction — not proceeding to another phase automatically
+(R13). See the Phase 32 report delivered in chat for the full 10-section verification and the final
+production-readiness verdict.
