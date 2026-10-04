@@ -3235,8 +3235,8 @@ alerts, Phase 21 Analyst, Phase 24 paper trading, Phase 28 security, the ingesti
 scheduling stack, etc.) were verified unaffected by the full unit+API re-run (1012 passed) and by
 reading, not guessing, every file this phase touched before changing it.
 
-**Git commit:** pending — git runs on the user's machine per C5; the exact commands and the
-resulting hash are recorded once the user (or this session, on their behalf) runs them.
+**Git commit:** `dc9f009` — "[P35] real-time intelligence: change-detection events, idempotent
+persistence, gated AI triggers" (git runs on the user's machine per C5).
 
 **Next step:** awaiting the user's review. Per the phase's explicit final instruction, **not**
 proceeding to Phase 36 or any further phase automatically (R13).
