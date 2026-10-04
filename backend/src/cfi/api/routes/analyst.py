@@ -13,11 +13,13 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from cfi.analyst.repository import AnalystRepository
 from cfi.analyst.universe import RESPONSE_SECTIONS, TOOLS
+from cfi.api.auth import require_api_key
+from cfi.api.limiter import AI_TRIGGER_LIMIT, limiter
 from cfi.api.params import resolve_query_times
 from cfi.core.errors import NotFoundError, ServiceUnavailableError
 from cfi.core.time import utc_now
@@ -85,7 +87,8 @@ async def catalog() -> dict[str, Any]:
     }
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
+@router.post("/analyze", response_model=AnalyzeResponse, dependencies=[Depends(require_api_key)])
+@limiter.limit(AI_TRIGGER_LIMIT)
 async def analyze(
     request: Request,
     body: AnalyzeRequest,

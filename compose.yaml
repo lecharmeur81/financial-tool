@@ -25,6 +25,14 @@ x-backend-env: &backend-env
   CFI_PROVIDER_BLOCKCHAIR_API_KEY: ${CFI_PROVIDER_BLOCKCHAIR_API_KEY:-}
   # Derivatives (Phase 8): Binance USDⓈ-M, OKX and Deribit public data, no key.
   CFI_DERIVATIVE_PROVIDERS: ${CFI_DERIVATIVE_PROVIDERS:-binance_futures,okx_derivatives,deribit}
+  # API authentication (Phase 28, ADR-0075): optional in development (empty = auth disabled, same
+  # as before this phase); `compose.prod.yaml` requires it be set (CFI_ENVIRONMENT=production
+  # fails fast at startup — see cfi.core.config.Settings — if this is still empty).
+  CFI_API_KEY: ${CFI_API_KEY:-}
+  # Optional least-privilege runtime DB role (Phase 28, ADR-0075); empty = api/worker use the same
+  # role as migrations, exactly as before this phase. See DECISIONS.md ADR-0075 for the production
+  # role-separation recipe.
+  CFI_DATABASE_URL_RUNTIME: ${CFI_DATABASE_URL_RUNTIME:-}
 
 x-backend-build: &backend-build
   context: ./backend

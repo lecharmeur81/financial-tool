@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cfi import __version__
@@ -47,6 +47,19 @@ class Settings(BaseSettings):
     health_check_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
 
     cors_origins: list[str] = Field(default_factory=list)
+
+    # API key authentication (Phase 28, Priority 1). Optional in development/test (the frontend
+    # only ever issues GETs, which are never protected) but required in production — see
+    # ``_api_key_required_in_production`` below, which fails the app at startup rather than
+    # serving unauthenticated mutating traffic (R3/R9: fail secure, never a silent gap).
+    api_key: SecretStr | None = None
+
+    # Database privilege-separation (Phase 28, Priority 6). Optional, additive, opt-in: when
+    # unset, the API/worker use ``database_url`` exactly as before. When set, the API/worker use
+    # this (expected to be a lower-privileged runtime role) for their engine; migrations always
+    # use ``database_url`` (the migration role) regardless, since this field is never read by
+    # ``migrations/env.py``.
+    database_url_runtime: SecretStr | None = None
 
     # Raw payload archive (L0, ADR-0019). Relative paths resolve from the working directory.
     raw_archive_dir: Path = Path("data/raw")
@@ -179,6 +192,27 @@ class Settings(BaseSettings):
         if not url.startswith(("redis://", "rediss://")):
             raise ValueError("CFI_REDIS_URL must start with redis:// or rediss://")
         return value
+
+    @field_validator("database_url_runtime")
+    @classmethod
+    def _database_url_runtime_uses_psycopg(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None:
+            return value
+        url = value.get_secret_value()
+        if not url.startswith("postgresql+psycopg://"):
+            raise ValueError(
+                "CFI_DATABASE_URL_RUNTIME must use the 'postgresql+psycopg://' driver prefix"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _api_key_required_in_production(self) -> Settings:
+        """Fail-secure (R3/R9): a production deployment with no API key configured would serve
+        every mutating endpoint unauthenticated. Refuse to boot instead of serving that traffic —
+        caught here, at settings construction, which runs before the app (or any worker) starts."""
+        if self.environment == "production" and self.api_key is None:
+            raise ValueError("CFI_API_KEY must be set when CFI_ENVIRONMENT=production")
+        return self
 
 
 @lru_cache(maxsize=1)

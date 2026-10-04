@@ -95,6 +95,14 @@ class NotFoundError(CFIError):
     title = "Not found"
 
 
+class UnauthorizedError(CFIError):
+    """Missing or invalid ``X-API-Key`` (Phase 28, Priority 1, ``cfi.api.auth.require_api_key``)."""
+
+    error_code = "unauthorized"
+    http_status = HTTPStatus.UNAUTHORIZED
+    title = "Unauthorized"
+
+
 class InsufficientDataError(CFIError):
     error_code = "insufficient_data"
     http_status = HTTPStatus.UNPROCESSABLE_ENTITY

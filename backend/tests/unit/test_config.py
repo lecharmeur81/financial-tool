@@ -19,6 +19,7 @@ def test_reads_prefixed_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CFI_DATABASE_URL", "postgresql+psycopg://u:p@db:5432/cfi")
     monkeypatch.setenv("CFI_REDIS_URL", "redis://redis:6379/0")
     monkeypatch.setenv("CFI_ENVIRONMENT", "production")
+    monkeypatch.setenv("CFI_API_KEY", "not-a-real-key")
     monkeypatch.setenv("CFI_CORS_ORIGINS", '["http://localhost:3000"]')
     settings = get_settings()
     assert settings.environment == "production"

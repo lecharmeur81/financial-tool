@@ -58,6 +58,12 @@ app = Celery("cfi")
 app.conf.update(
     broker_url=settings.redis_url.get_secret_value(),
     broker_connection_retry_on_startup=True,
+    # Explicit per the Phase 27 security audit (Priority 7): Celery already defaults to JSON, so
+    # this is behaviorally a no-op, but pickle (the historical alternative) can execute arbitrary
+    # code on deserialization, so the safe serializer is pinned instead of left implicit.
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
     task_ignore_result=True,
     task_acks_late=True,
     task_reject_on_worker_lost=True,

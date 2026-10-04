@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from cfi.api.errors import register_exception_handlers
+from cfi.api.limiter import limiter
 from cfi.api.middleware import REQUEST_ID_HEADER, request_context_middleware
 from cfi.api.routes import (
     alerts,
@@ -79,15 +80,26 @@ def create_app(
             await engine.dispose()
             log.info("shutdown")
 
+    # Production docs gating (Phase 28, Priority 3): the interactive docs and the raw OpenAPI
+    # schema are a reconnaissance aid for an attacker and serve no purpose once there is no one
+    # to click through them by hand, so both are disabled in production; every other environment
+    # keeps them at their existing paths.
+    is_production = settings.environment == "production"
     app = FastAPI(
         title=settings.app_name,
         version=settings.version,
         lifespan=lifespan,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        docs_url=None if is_production else "/api/docs",
+        openapi_url=None if is_production else "/api/openapi.json",
         redoc_url=None,
     )
     app.state.settings = settings
+    # Rate limiting (Phase 28, Priority 2): app.state.limiter is slowapi's own convention; the
+    # 429 it raises (slowapi.errors.RateLimitExceeded, a plain fastapi.HTTPException subclass) is
+    # rendered by the StarletteHTTPException handler already registered below — no separate
+    # handler needed, and the response keeps the project's one problem+json shape (ADR-0030)
+    # instead of slowapi's own JSON format.
+    app.state.limiter = limiter
 
     if settings.cors_origins:
         app.add_middleware(

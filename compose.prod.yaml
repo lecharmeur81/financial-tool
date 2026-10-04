@@ -1,0 +1,88 @@
+# Capital Flow Intelligence — production hardening overlay (Phase 28, ADR-0075).
+#
+# Usage: docker compose -f compose.yaml -f compose.prod.yaml up -d --build
+#
+# compose.yaml alone is still the full local development stack, unchanged — nothing here is
+# required (or applied) unless this file is explicitly layered on top of it. This file only
+# changes the five custom-built services (migrate/api/worker/worker-backfill/beat/frontend):
+#   - builds the backend's "runtime" Dockerfile target (prod dependencies only, no test/lint/
+#     type-check tooling baked in) instead of "dev", and tags it separately (cfi-backend:prod)
+#     so it never collides with the cfi-backend:dev image a developer already has built;
+#   - sets CFI_ENVIRONMENT=production, which makes cfi.core.config.Settings fail fast at process
+#     startup if CFI_API_KEY is not set (ADR-0075's "fail securely" requirement — see
+#     backend/src/cfi/core/config.py);
+#   - drops all Linux capabilities and adds them back only where a service genuinely needs one,
+#     sets no-new-privileges, and mounts each service's root filesystem read-only with a small
+#     tmpfs for the one or two paths that still need to be writable at runtime.
+#
+# db/redis are intentionally left untouched here: both already run as their images' own non-root
+# user by default and already write only to their declared named volumes: hardening their
+# filesystem/capabilities further is a separate, lower-priority change (the Phase 27 audit's
+# findings were about the custom-built application images, not the upstream db/redis images) and
+# risks breaking their own entrypoint scripts without the kind of per-image testing this phase's
+# scope doesn't cover.
+
+x-backend-build-prod: &backend-build-prod
+  context: ./backend
+  target: runtime
+
+x-hardening: &hardening
+  security_opt:
+    - "no-new-privileges:true"
+  cap_drop:
+    - "ALL"
+  read_only: true
+
+services:
+  migrate:
+    <<: *hardening
+    build: *backend-build-prod
+    image: cfi-backend:prod
+    environment:
+      CFI_ENVIRONMENT: production
+    tmpfs:
+      - /tmp
+
+  api:
+    <<: *hardening
+    build: *backend-build-prod
+    image: cfi-backend:prod
+    environment:
+      CFI_ENVIRONMENT: production
+    tmpfs:
+      - /tmp
+
+  worker:
+    <<: *hardening
+    build: *backend-build-prod
+    image: cfi-backend:prod
+    environment:
+      CFI_ENVIRONMENT: production
+    tmpfs:
+      - /tmp
+
+  worker-backfill:
+    <<: *hardening
+    build: *backend-build-prod
+    image: cfi-backend:prod
+    environment:
+      CFI_ENVIRONMENT: production
+    tmpfs:
+      - /tmp
+
+  beat:
+    <<: *hardening
+    build: *backend-build-prod
+    image: cfi-backend:prod
+    environment:
+      CFI_ENVIRONMENT: production
+    tmpfs:
+      # celery beat's schedule file (compose.yaml's --schedule /tmp/celerybeat-schedule) — must
+      # stay writable even under read_only: true.
+      - /tmp
+
+  frontend:
+    <<: *hardening
+    image: cfi-frontend:prod
+    tmpfs:
+      - /tmp

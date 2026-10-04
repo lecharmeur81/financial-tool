@@ -13,11 +13,13 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from cfi.alerts.repository import AlertRepository
 from cfi.alerts.universe import STATUS_VALUES
+from cfi.api.auth import require_api_key
+from cfi.api.limiter import MUTATION_LIMIT, limiter
 from cfi.core.errors import NotFoundError, ServiceUnavailableError
 from cfi.core.time import utc_now
 from cfi.worker.client import send_task
@@ -78,7 +80,8 @@ def _to_status(row: dict[str, Any]) -> AlertStatus:
     )
 
 
-@router.post("/evaluate", response_model=EvaluateResponse)
+@router.post("/evaluate", response_model=EvaluateResponse, dependencies=[Depends(require_api_key)])
+@limiter.limit(MUTATION_LIMIT)
 async def evaluate(request: Request) -> EvaluateResponse:
     send_task(request.app.state.settings, "alerts.evaluate", args=(), queue="ingest")
     return EvaluateResponse(status="queued")
@@ -104,7 +107,12 @@ async def get_alert(request: Request, alert_id: uuid.UUID) -> AlertStatus:
     return _to_status(row)
 
 
-@router.post("/{alert_id}/acknowledge", response_model=AlertStatus)
+@router.post(
+    "/{alert_id}/acknowledge",
+    response_model=AlertStatus,
+    dependencies=[Depends(require_api_key)],
+)
+@limiter.limit(MUTATION_LIMIT)
 async def acknowledge(request: Request, alert_id: uuid.UUID) -> AlertStatus:
     repo = _repo(request)
     changed = await repo.set_status(alert_id, status="acknowledged", now=utc_now())
@@ -116,7 +124,12 @@ async def acknowledge(request: Request, alert_id: uuid.UUID) -> AlertStatus:
     return _to_status(row)
 
 
-@router.post("/{alert_id}/resolve", response_model=AlertStatus)
+@router.post(
+    "/{alert_id}/resolve",
+    response_model=AlertStatus,
+    dependencies=[Depends(require_api_key)],
+)
+@limiter.limit(MUTATION_LIMIT)
 async def resolve(request: Request, alert_id: uuid.UUID) -> AlertStatus:
     repo = _repo(request)
     changed = await repo.set_status(alert_id, status="resolved", now=utc_now())

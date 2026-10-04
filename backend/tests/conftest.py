@@ -7,6 +7,7 @@ from collections.abc import Iterator
 import pytest
 from pydantic import SecretStr
 
+from cfi.api.limiter import limiter
 from cfi.core.config import Settings, get_settings
 
 TEST_DATABASE_URL = "postgresql+psycopg://user:not-a-real-password@localhost:5432/cfi_test"
@@ -30,3 +31,14 @@ def _clear_settings_cache() -> Iterator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter() -> Iterator[None]:
+    """The rate limiter (Phase 28, Priority 2) is one process-wide instance shared by every
+    ``create_app()`` call (slowapi decorators are applied once, at route-module import time), so
+    its in-memory hit counters must be reset between tests or one test's requests would count
+    against another's limit."""
+    limiter.reset()
+    yield
+    limiter.reset()

@@ -3034,3 +3034,119 @@ nav items and the dashboard's `plannedPhase`. New component test file
 98 tests passing (up from 73), `pnpm lint`/`format:check`/`typecheck`/`build` all clean. No change
 to any Phase 5-25 service, methodology, score, or schema — every section reuses its domain's
 existing API output unchanged.
+
+## ADR-0075 — Phases 27-28: security audit findings and the corrections implemented for them
+
+**Status:** Accepted (audit 2026-10-03, corrections implemented 2026-10-03)
+
+**Context.** Phase 27 was a read-only security audit against 32 categories the user specified.
+Headline finding: **no authentication or rate limiting existed anywhere in the API** — every
+endpoint, including paper-trade/journal/alert writes and the two routes that trigger paid
+Anthropic calls, was open to any network caller. Secondary findings: `/api/docs`/`openapi.json`
+always enabled regardless of environment; no CSP/HSTS/Permissions-Policy on the frontend (CSP was
+already tracked as a gap, see ADR-0028); all backend services ran Docker's `dev` build target with
+no capability-dropping/read-only-root hardening; one shared Postgres role for both migrations and
+runtime app traffic; Celery's JSON serializer relied on an implicit default rather than an
+explicit one; and one High-severity *dev-only* dependency advisory (`braces` ≤3.0.3, pulled in
+transitively through `eslint-config-next`). Everywhere the project's own R2/R3/R6/R9 rules applied
+— parameterized SQL, no shell/eval anywhere, path-traversal guards, secret redaction in logs,
+non-root containers, loopback-only ports, a read-only AI tool boundary with a deterministic output
+validator — the audit found those controls already correctly implemented; Phase 28 did not touch
+any of them.
+
+**Decision.**
+
+1. **API-key authentication, not JWT/sessions.** The application is explicitly single-user and
+   local-first (R13: no unneeded complexity) — a shared `X-API-Key` header compared with
+   `secrets.compare_digest` is the smallest robust mechanism, not a user/session model this app
+   doesn't need yet. `Settings.api_key` is optional; a `model_validator` makes `Settings`
+   construction itself fail when `environment == "production"` and no key is set, so a production
+   process refuses to start rather than quietly serving unauthenticated traffic — fail-secure at
+   startup, not at request time. In development, an unset key leaves every route exactly as open
+   as it already was (keeps the existing local workflow working with zero new required config).
+2. **Only mutating + AI-triggering routes are protected — every `GET` stays open.** The frontend
+   is 100% read-only (confirmed again directly: zero POSTs anywhere in `frontend/src`), so it
+   never needs the key and the key is never exposed to, bundled into, or reachable from it
+   (satisfies "never expose secrets to the frontend" trivially — there's no code path that could).
+   Protecting GETs too would require threading the key through every server-side `fetch` in the
+   dashboard for no security benefit (nothing sensitive is mutated by a GET) and was rejected as
+   unneeded complexity.
+3. **In-process `slowapi` rate limiting, not a new service.** A Redis-backed or reverse-proxy rate
+   limiter would be the right call for a multi-instance deployment, but none exists yet (R13); an
+   in-memory, per-process, per-IP limiter is the smallest correct fix for today's single-instance
+   deployment, documented in code as the thing to swap out if that ever changes.
+   `analyst.analyze`/`brief.generate` get 5/hour (they trigger paid, budget-tracked Anthropic
+   calls); other protected mutating routes get 30/minute. Celery tasks are untouched — the limiter
+   only wraps the FastAPI HTTP layer.
+4. **Docker hardening via a second compose file (`compose.prod.yaml`), layered on top of
+   `compose.yaml`, never replacing it.** The existing `docker compose up --build` dev workflow is
+   byte-for-byte unchanged (verified with `docker compose config`, with and without the overlay).
+   Only `docker compose -f compose.yaml -f compose.prod.yaml up -d --build` switches the backend's
+   existing (already-present, previously-unused) `runtime` Dockerfile target in, retags images
+   `:prod`, sets `CFI_ENVIRONMENT=production`, and adds `no-new-privileges`, `cap_drop: [ALL]`, and
+   a read-only root filesystem (plus a small `/tmp` tmpfs for Celery beat's schedule file and
+   similar) to every custom-built service. `db`/`redis` were deliberately left as-is: both already
+   run as their own image's non-root user and write only to their declared volumes, and hardening
+   third-party images further without per-image testing this phase doesn't have budget for was
+   judged lower priority than closing the application-layer gaps.
+5. **Database privilege separation: additive config only, no role-creation SQL shipped.** A
+   restricted runtime Postgres role is a real production recommendation, but creating one requires
+   operator-specific decisions (schema grants, role name, rotation policy) this phase shouldn't
+   hardcode. `Settings.database_url_runtime` is optional and purely additive — unset, every
+   service behaves exactly as before this phase. When an operator sets it, the API/worker's
+   runtime engine uses it while Alembic migrations always use `database_url` directly, so a
+   restricted runtime role can never execute DDL even by accident. **Production recipe** (not
+   automated — run once per deployment, with the actual production password instead of the
+   placeholder):
+   ```sql
+   CREATE ROLE cfi_runtime WITH LOGIN PASSWORD 'replace-with-a-random-value';
+   GRANT CONNECT ON DATABASE cfi TO cfi_runtime;
+   GRANT USAGE ON ALL SCHEMAS IN DATABASE cfi TO cfi_runtime;  -- adjust to the actual schema list
+   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA obs, calc, sig, usr, ai TO cfi_runtime;
+   ALTER DEFAULT PRIVILEGES IN SCHEMA obs, calc, sig, usr, ai
+     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO cfi_runtime;
+   -- then: CFI_DATABASE_URL_RUNTIME=postgresql+psycopg://cfi_runtime:...@db:5432/cfi
+   ```
+6. **Celery serializer pinned explicitly** (`task_serializer`/`accept_content`/
+   `result_serializer` = `"json"`) — Celery already defaulted to JSON, so this is a no-behavior-
+   change hardening of an implicit default into an explicit one (closes the "a future Celery
+   version or copy-pasted config could silently reintroduce pickle" latent risk the audit flagged).
+7. **`braces` dependency advisory: documented, not patched.** Verified directly (`npm view
+   braces@latest version` → still `3.0.3`, matching the advisory's own "Patched versions: <0.0.0")
+   — no fixed version exists upstream yet. Re-confirmed the exposure is dev-only: `braces` reaches
+   this project only through `eslint-config-next`'s own dependency chain (a devDependency), and the
+   frontend's production Docker image (`frontend/Dockerfile`, `runtime` stage) copies only
+   `.next/standalone`, `.next/static` and `public` — no `node_modules`, no ESLint, no `braces` ever
+   ships in the running container. Accepted as a non-runtime risk; re-check `pnpm audit` when a
+   patched `braces`/`micromatch` ships.
+8. **No user/tenant model added.** Alerts, paper trades, and journal decisions still have no
+   `user_id`/ownership column — explicitly out of scope per this phase's own instructions. This is
+   now a **recorded requirement**, not a silently-dropped item: ownership/multi-tenancy checks
+   become mandatory the moment this system is exposed to more than one user or caller that
+   shouldn't see each other's trades/decisions/alerts — a future phase must add both at once, not
+   auth-without-ownership or ownership-without-auth.
+
+**Alternatives considered.** JWT/OAuth2 with a user table (rejected: R13, this is a single-user
+local app, not a multi-tenant product yet — tracked as mandatory future work in point 8, not
+dropped). A reverse-proxy (nginx/Traefik) doing auth+rate-limiting in front of the stack (a
+legitimate production pattern, and compatible with everything here — compose.prod.yaml doesn't
+preclude adding one — but out of scope: this phase's job was to close the applic
+ation-layer gap that exists with or without a future proxy, not to design the production ingress
+topology). Hardening `db`/`redis`'s own containers in this same pass (deferred — see point 4).
+Forcing the `braces` fix by overriding `micromatch`/`fast-glob` to an unreleased or unrelated major
+version (rejected: no patched `braces` exists, and forcing a major bump of `fast-glob`/
+`eslint-config-next`'s own transitive tree risked breaking `eslint` itself for a dev-only,
+non-runtime advisory).
+
+**Trade-offs.** The in-memory rate limiter resets on every process restart and doesn't coordinate
+across multiple instances — acceptable for today's single-instance deployment, explicitly flagged
+in code as the thing to revisit first if this is ever horizontally scaled. The API key is a single
+shared secret (no per-caller revocation, no scopes) — appropriate for single-user use, not for
+multiple distinct callers who shouldn't be able to impersonate each other (another reason point 8
+is recorded as a hard prerequisite for multi-tenancy, not an afterthought).
+
+**Consequences.** `CFI_API_KEY` must be set before any production deployment (the app now refuses
+to boot without it when `CFI_ENVIRONMENT=production`); local development is unaffected unless a
+developer opts in by setting it themselves. Production deployment now requires the two-file compose
+invocation (`-f compose.yaml -f compose.prod.yaml`) to get the runtime target and container
+hardening — a plain `docker compose up` still works exactly as it always has, for development.

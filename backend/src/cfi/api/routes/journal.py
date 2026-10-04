@@ -15,9 +15,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
+from cfi.api.auth import require_api_key
+from cfi.api.limiter import MUTATION_LIMIT, limiter
 from cfi.core.errors import DataValidationError, NotFoundError, ServiceUnavailableError
 from cfi.journal.service import (
     OUTCOME_VALUES,
@@ -193,7 +195,8 @@ def _to_review_response(review: DecisionReview) -> DecisionReviewResponse:
     )
 
 
-@router.post("/decisions", response_model=DecisionStatus)
+@router.post("/decisions", response_model=DecisionStatus, dependencies=[Depends(require_api_key)])
+@limiter.limit(MUTATION_LIMIT)
 async def create_decision(request: Request, body: CreateDecisionRequest) -> DecisionStatus:
     svc = _service(request)
     row = await svc.create_decision(
@@ -244,7 +247,12 @@ async def get_decision(request: Request, decision_id: uuid.UUID) -> DecisionStat
     return _to_status(row)
 
 
-@router.patch("/decisions/{decision_id}/notes", response_model=DecisionStatus)
+@router.patch(
+    "/decisions/{decision_id}/notes",
+    response_model=DecisionStatus,
+    dependencies=[Depends(require_api_key)],
+)
+@limiter.limit(MUTATION_LIMIT)
 async def update_notes(
     request: Request, decision_id: uuid.UUID, body: UpdateNotesRequest
 ) -> DecisionStatus:
@@ -252,7 +260,12 @@ async def update_notes(
     return _to_status(row)
 
 
-@router.post("/decisions/{decision_id}/outcome", response_model=DecisionStatus)
+@router.post(
+    "/decisions/{decision_id}/outcome",
+    response_model=DecisionStatus,
+    dependencies=[Depends(require_api_key)],
+)
+@limiter.limit(MUTATION_LIMIT)
 async def record_outcome(
     request: Request, decision_id: uuid.UUID, body: RecordOutcomeRequest
 ) -> DecisionStatus:
@@ -278,13 +291,23 @@ async def record_outcome(
     return _to_status(row)
 
 
-@router.post("/decisions/{decision_id}/cancel", response_model=DecisionStatus)
+@router.post(
+    "/decisions/{decision_id}/cancel",
+    response_model=DecisionStatus,
+    dependencies=[Depends(require_api_key)],
+)
+@limiter.limit(MUTATION_LIMIT)
 async def cancel_decision(request: Request, decision_id: uuid.UUID) -> DecisionStatus:
     row = await _service(request).cancel_decision(decision_id)
     return _to_status(row)
 
 
-@router.post("/decisions/{decision_id}/paper-trade", response_model=DecisionStatus)
+@router.post(
+    "/decisions/{decision_id}/paper-trade",
+    response_model=DecisionStatus,
+    dependencies=[Depends(require_api_key)],
+)
+@limiter.limit(MUTATION_LIMIT)
 async def link_paper_trade(
     request: Request, decision_id: uuid.UUID, body: LinkPaperTradeRequest
 ) -> DecisionStatus:
@@ -292,7 +315,12 @@ async def link_paper_trade(
     return _to_status(row)
 
 
-@router.delete("/decisions/{decision_id}/paper-trade", response_model=DecisionStatus)
+@router.delete(
+    "/decisions/{decision_id}/paper-trade",
+    response_model=DecisionStatus,
+    dependencies=[Depends(require_api_key)],
+)
+@limiter.limit(MUTATION_LIMIT)
 async def unlink_paper_trade(request: Request, decision_id: uuid.UUID) -> DecisionStatus:
     row = await _service(request).unlink_paper_trade(decision_id)
     return _to_status(row)

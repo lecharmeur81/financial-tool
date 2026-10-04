@@ -14,9 +14,11 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
+from cfi.api.auth import require_api_key
+from cfi.api.limiter import AI_TRIGGER_LIMIT, limiter
 from cfi.brief.repository import BriefRepository
 from cfi.core.errors import NotFoundError, ServiceUnavailableError
 from cfi.core.time import utc_now
@@ -79,7 +81,8 @@ def _to_status(row: dict[str, Any]) -> BriefStatus:
     )
 
 
-@router.post("/generate", response_model=GenerateResponse)
+@router.post("/generate", response_model=GenerateResponse, dependencies=[Depends(require_api_key)])
+@limiter.limit(AI_TRIGGER_LIMIT)
 async def generate(request: Request) -> GenerateResponse:
     """Queue one Daily Market Brief covering the 24 hours ending now. The previous ``completed``
     brief (if any) becomes this brief's change-detection comparison basis (Section 5) — resolved

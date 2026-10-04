@@ -58,7 +58,9 @@ async def handle_http_exception(request: Request, exc: Exception) -> JSONRespons
     assert isinstance(exc, StarletteHTTPException)  # noqa: S101
     status = exc.status_code
     title = HTTPStatus(status).phrase if status in HTTPStatus._value2member_map_ else "HTTP error"
-    code = {404: "not_found", 405: "method_not_allowed"}.get(status, f"http_{status}")
+    code = {404: "not_found", 405: "method_not_allowed", 429: "rate_limit_exceeded"}.get(
+        status, f"http_{status}"
+    )
     return _problem_response(
         request, status=status, title=title, detail=str(exc.detail), error_code=code
     )

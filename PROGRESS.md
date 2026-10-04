@@ -2,20 +2,20 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 26 — Executive Dashboard → implemented, verified in the sandbox AND on Windows
-(`926d4ad`). Backend: one new pass-through endpoint (`GET /api/v1/market/summary`, reusing
-`cfi.analyst.tools.get_market_data` verbatim), 2 new integration tests (DB-gated, written but not executed —
-no `CFI_DATABASE_URL`/`CFI_REDIS_URL` on either machine); unit suite unchanged at 957 passing on both;
-ruff/format/mypy strict all clean on both. Frontend: the Executive Dashboard page (`app/page.tsx`) rewritten from its
-placeholder into 12 required sections, each reusing its domain's existing API output unchanged — regime,
-market overview, a compact capital-flow/intelligence overview, divergences, anomalies, capital rotation,
-institutional/whale/retail (kept visually distinct), derivatives & liquidity, macro, alerts, daily brief, and
-decision journal/paper trading; 12 new `lib/<domain>.ts` API clients and 12 new `components/dashboard/*`
-section components; `/alerts` rewritten into a real list, `/brief`, `/paper`, `/journal` created as new
-pages, `loading.tsx` added. Frontend suite: 98 tests passing (up from 73); `pnpm lint`/`format:check`/
-`typecheck`/`build` all clean. No trading recommendation, no new quantitative methodology, no modification
-to any Phase 5-25 backend service — see the Phase 26 log entry below for the full design and for what was
-(and was not) verified.
+**Current phase:** 28 — Security Corrections → implemented and tested in the sandbox; sync/commit/
+re-verification on Windows pending (see the Phase 28 log entry below). Builds directly on Phase 27's
+read-only Security Audit (same date), which found no critical blockers but no authentication, no rate
+limiting, production docs left open, and several missing production headers. Phase 28 adds: API-key
+authentication (`X-API-Key`, fail-secure in production) on all mutating/AI-triggering routes; `slowapi`
+rate limiting (tight limits on `/analyst/analyze` and `/brief/generate`); production gating of
+`/api/docs`/`/api/openapi.json`; CSP/HSTS/Permissions-Policy response headers; a Docker Compose
+production-hardening overlay (`compose.prod.yaml`: runtime target, capability dropping, read-only
+filesystem); additive DB runtime-role plumbing (`CFI_DATABASE_URL_RUNTIME`, opt-in, no-op unless set);
+explicit Celery JSON serializer pinning; and documentation of the one unpatched dev-only `braces`
+advisory. No existing functionality, quantitative methodology, or intelligence engine was changed; no
+multi-user/ownership model was added (explicitly deferred — see ADR-0075). 11 new backend tests (981
+passing total), 5 new frontend tests (103 passing total); ruff/mypy/ruff format and pnpm lint/typecheck/
+test/build all clean.
 **Next phase:** to be defined by the user (do not start automatically — R13)
 
 ---
@@ -51,11 +51,12 @@ to any Phase 5-25 backend service — see the Phase 26 log entry below for the f
 | 24 | Paper trading | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 24 log entry) |
 | 25 | Decision journal | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 25 log entry) |
 | 26 | Executive dashboard | ✅ Complete — verified in sandbox AND on Windows (`926d4ad`) (see Phase 26 log entry) |
-| — | Security + AI + stress testing | ⏳ Not started |
+| 27 | Security audit (read-only) | ✅ Complete — report delivered, zero code changes (see Phase 27 log entry) |
+| 28 | Security corrections | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 28 log entry) |
 | — | Production | ⏳ Not started |
 | — | Real-time intelligence | ⏳ Not started |
 
-Phases 0–14 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them.
+Phases 0–14 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them. Phases 27-28 (security audit and corrections) were issued and numbered directly by the user, out of the original guide's order.
 
 ---
 
@@ -2522,3 +2523,166 @@ all five request-time pages confirmed dynamic).
 
 **Next step:** awaiting the user's next instruction — **not proceeding to Phase 27** per the
 user's own explicit instruction (R13).
+
+---
+
+### 2026-10-03 — Phase 27: Security Audit — read-only, 32 categories, zero code changes
+
+**What changed:** Nothing in the application. Per the user's explicit instruction this phase was
+**read-only**: six parallel inspection passes covered authentication/authorization, CORS/CSRF,
+injection (SQL/command), SSRF, path traversal, XSS, Next.js/FastAPI framework security, Docker
+configuration, secrets/env-var handling, logging and error-leakage, DB/Redis/Celery security,
+external-API and provider security, the Anthropic/AI integration (prompt injection, tool-authorization
+boundaries, hallucination/data-integrity risk per R6), rate limiting, resource exhaustion, dependency
+vulnerabilities, unsafe deserialization, file-upload/input validation, paper-trading safety, alert/
+journal/brief API manipulation, Docker network exposure, and production-config risks.
+
+**Tools run directly (not just agent self-report):** `ruff check .` and `ruff check . --select S`
+(backend, both clean), `pnpm lint` (frontend, clean), `pnpm audit` (1 High: `braces` ≤3.0.3, dev-only),
+`pip-audit` via `uvx` against an exported lockfile (clean), manual `grep`/`Read` verification of the
+"no authentication exists anywhere" finding and the CORS configuration in `api/app.py`, and verification
+that `httpx2` (an unusual-looking dependency name) is a legitimate, hash-pinned PyPI package, not a
+typosquat.
+
+**Headline findings** (full detail in the delivered audit report, not duplicated here): no
+authentication on any endpoint, including the AI-triggering and mutating ones; no application-level
+rate limiting; `/api/docs`/`/api/openapi.json` open in all environments; missing CSP/HSTS/
+Permissions-Policy headers; backend Docker always builds the `dev` target; DB migration and runtime
+credentials are the same role; Celery's serializer was left at its library default rather than pinned;
+one dev-only `braces` advisory with no patched version upstream. No critical/production-blocking
+finding; no prompt-injection or tool-authorization-boundary vulnerability found in the Phase 21 AI
+Analyst integration (grounded-snapshot design holds).
+
+**Documentation:** none updated — a read-only audit changes no architecture or decisions; its findings
+became the Phase 28 remediation plan (ADR-0075).
+
+**Known limitations:** audit was static/code-level plus the scans listed above; no dynamic penetration
+test or fuzzing was performed (out of scope for this phase as specified).
+
+**Git commit:** none — no files were changed.
+
+**Next step:** Phase 28 (Security Corrections), issued by the user immediately after this report.
+
+---
+
+### 2026-10-03 — Phase 28: Security Corrections — API-key auth, rate limiting, production
+hardening, zero functional/methodology changes (ADR-0075)
+
+**What changed** (the user's 8 numbered priorities, using the Phase 27 audit as source of truth):
+
+1. **API authentication** (`backend/src/cfi/api/auth.py`, new) — a single environment-configured
+   `CFI_API_KEY`, checked via `X-API-Key` header with `secrets.compare_digest` (constant-time).
+   `Settings.api_key: SecretStr | None = None` (`core/config.py`); a `model_validator(mode="after")`
+   makes the process **refuse to start** if `CFI_ENVIRONMENT=production` and no key is configured
+   (fail-secure, per the user's explicit requirement) — this is enforced once at startup, not
+   per-request. Applied via `Depends(require_api_key)` to all 14 mutating/AI-triggering routes:
+   alerts (evaluate/acknowledge/resolve), paper (create/close/cancel trade), journal (create/update/
+   record-outcome/cancel/link/unlink decision), analyst (`/analyze`), brief (`/generate`). No GET
+   route was touched. In development, an unset key leaves auth disabled exactly as before this phase
+   (backward compatible, zero workflow disruption). No key is hardcoded anywhere.
+2. **Rate limiting** (`backend/src/cfi/api/limiter.py`, new) — `slowapi` (new dependency,
+   `pyproject.toml`/`uv.lock`), in-memory/per-process, keyed by client IP. `AI_TRIGGER_LIMIT = "5/hour"`
+   applied to `/analyst/analyze` and `/brief/generate`; `MUTATION_LIMIT = "30/minute"` applied to the
+   other 12 mutating routes above. Exceeding a limit returns HTTP 429 through the existing RFC 9457
+   problem-details error shape (`error_code="rate_limit_exceeded"`, mapped in `api/errors.py`'s
+   existing `StarletteHTTPException` handler — no new handler). Celery tasks call application code
+   directly, never through the rate-limited HTTP routes, so background ingestion/scheduling is
+   unaffected.
+3. **Production API docs** — `app.py` now sets `docs_url=None, openapi_url=None` when
+   `settings.environment == "production"`; unchanged (open) in development.
+4. **Security headers** (`frontend/next.config.ts`) — added a strict `Content-Security-Policy`
+   (`default-src 'self'`, `script-src 'self'` with no `unsafe-eval`/inline-script, `object-src 'none'`,
+   `frame-ancestors 'none'`, etc. — verified safe beforehand by confirming `lightweight-charts`, the
+   only charting library, is npm-bundled rather than CDN-loaded, and that no `style jsx`/inline-style
+   usage exists requiring a looser `style-src`) and a restrictive `Permissions-Policy`
+   (camera/microphone/geolocation/payment/usb all denied), sent unconditionally; `Strict-Transport-
+   Security` (`max-age=63072000; includeSubDomains; preload`) sent only when
+   `NODE_ENV === "production"` (meaningless over plain-HTTP local dev). Pre-existing headers
+   (`X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`) kept unchanged.
+5. **Docker hardening** — new `compose.prod.yaml` overlay (`docker compose -f compose.yaml -f
+   compose.prod.yaml up -d --build`), applied only when explicitly layered on top of the base file:
+   builds the backend's pre-existing (previously unused) `runtime` Dockerfile target instead of `dev`,
+   tagged separately (`cfi-backend:prod`/`cfi-frontend:prod`, never colliding with the dev images);
+   sets `CFI_ENVIRONMENT=production` (triggering the Priority 1 fail-secure check); adds
+   `security_opt: [no-new-privileges:true]`, `cap_drop: [ALL]`, `read_only: true` root filesystem with
+   a scoped `tmpfs:/tmp` where a service needs it writable (e.g. Celery beat's schedule file). `db`/
+   `redis` deliberately left unhardened in this pass (documented reasoning in the overlay file's
+   header comment and in ADR-0075) — out of this phase's scope. Verified with `docker compose -f
+   compose.yaml -f compose.prod.yaml config` (confirms the merge: target/image/hardening/env all
+   present) and `docker compose -f compose.yaml config` (confirms the base dev file is completely
+   unaffected by the overlay's existence) in the sandbox, which has a working `docker` CLI.
+6. **Database privilege separation** — purely additive, opt-in config: `Settings.
+   database_url_runtime: SecretStr | None = None` (`core/config.py`, validated to require the
+   `postgresql+psycopg://` scheme when set); `db/engine.py`'s `create_engine()` now does `url =
+   settings.database_url_runtime or settings.database_url` — defaults to today's behavior (same role
+   for migrations and runtime) unless explicitly overridden. `migrations/env.py` was deliberately left
+   untouched, always using the full-privilege `database_url`, so a misconfigured runtime role can
+   never silently break migrations. The actual production recipe (exact `CREATE ROLE`/`GRANT` SQL for
+   a `cfi_runtime` role with `SELECT, INSERT, UPDATE, DELETE` but no DDL) is documented in
+   `DECISIONS.md` ADR-0075 rather than implemented as code, per the user's "document the production
+   configuration" instruction.
+7. **Celery** — `worker/app.py`'s existing `app.conf.update(...)` now explicitly sets
+   `task_serializer="json"`, `accept_content=["json"]`, `result_serializer="json"`.
+8. **Dependency (`braces`)** — confirmed via `npm view braces versions --json` / `npm view
+   braces@latest version` that no patched release exists anywhere upstream yet (matching the GHSA
+   advisory's own "Patched versions: <0.0.0"); re-confirmed (already established in Phase 27) that the
+   frontend's production Docker image never ships `node_modules`/devDependencies. Documented as a
+   dev-only, non-runtime, currently-unpatchable advisory — no code change possible or needed.
+
+**Explicitly not done, per the user's instruction:** no multi-user/ownership/`user_id` model was
+added. The application remains single-user/local with no user accounts. **This is recorded in
+`ARCHITECTURE.md` §7d and `DECISIONS.md` ADR-0075 as a mandatory prerequisite before any future
+multi-tenancy work.**
+
+**Tests added:** `backend/tests/api/test_security.py` (new, 10 tests — unauthenticated requests
+rejected on protected routes, authenticated requests succeed, rate limiting triggers and returns 429,
+docs disabled in production/available in development, security headers present); `backend/tests/unit/
+test_worker_app.py` (new, 1 test — Celery serializer configuration); `backend/tests/conftest.py`
+updated with an autouse fixture resetting the shared rate-limiter state between tests; `backend/tests/
+unit/test_config.py` fixed (a pre-existing production-environment test now also sets `CFI_API_KEY` so
+it doesn't trip the new fail-secure validator). Frontend: `frontend/src/next-config-headers.test.ts`
+(new, 5 tests — baseline headers kept, CSP correctness, Permissions-Policy, HSTS gated to
+production only via `vi.stubEnv`).
+
+**Tests run:** Backend — `uv run pytest tests/unit tests/api -x -q` → **981 passed** (970 pre-existing
++ 11 new); `uv run ruff check .` → clean; `uv run ruff format --check .` → clean; `uv run mypy` →
+clean (377 source files, strict). Frontend — `pnpm test` → **103 passed** (98 pre-existing + 5 new);
+`pnpm lint` → clean; `pnpm typecheck` → clean; `pnpm format:check` → clean; `pnpm build` → succeeds.
+Docker — `docker compose -f compose.yaml -f compose.prod.yaml config` and `docker compose -f
+compose.yaml config` both verified in the sandbox (see Priority 5 above); a full `docker compose up`
+of either stack was not re-run in this log entry's sandbox pass (see Known limitations).
+
+**Documentation updated:**
+
+- `ARCHITECTURE.md` — added `### 7d. Security layer — Phases 27–28 (ADR-0075)`.
+- `DECISIONS.md` — added `## ADR-0075 — Phases 27-28: security audit findings and the corrections
+  implemented for them`, including the production DB-role-separation SQL recipe and the explicit
+  no-multi-tenancy-yet prerequisite.
+- `.env.example` — added commented `CFI_API_KEY=` and `CFI_DATABASE_URL_RUNTIME=` with explanatory
+  comments.
+- `PROGRESS.md` — this entry; phase table rows added for 27 and 28; header updated.
+- No `DATA_DICTIONARY.md` change: no new field, metric, or score was introduced.
+
+**Known limitations:**
+
+- `slowapi`'s rate-limit storage is in-memory and per-process: correct for this application's current
+  single-instance deployment, but would need a shared backend (e.g. Redis) before any future
+  horizontal scaling to multiple API processes. Documented in `ARCHITECTURE.md` §7d.
+- The Docker production overlay (`compose.prod.yaml`) was validated with `docker compose config`
+  (merge/interpolation correctness) in the sandbox; a full `docker compose -f compose.yaml -f
+  compose.prod.yaml up --build` was not executed end-to-end against live Postgres/Redis in this pass.
+- `db`/`redis` containers were not hardened in this phase (left at their images' own defaults) —
+  deliberate scope decision, documented in both the overlay file and ADR-0075.
+- No multi-user/ownership model exists yet; all protected routes share one application-wide API key.
+  This is acceptable for the current single-user/local application per the user's explicit
+  instruction, not a gap to be silently carried forward — ADR-0075 records it as a hard prerequisite
+  before multi-tenancy.
+- This log entry reflects the sandbox-only pass; sync to the Windows repo, the Windows git commit, and
+  a Windows-side Docker re-verification are recorded as a follow-up once performed (see commit hash
+  note below if already captured).
+
+**Git commit:** see the Phase 28 completion report delivered to the user for the exact hash once the
+Windows-side commit is made (git runs on the user's machine per C5).
+
+**Next step:** awaiting the user's next instruction — **not proceeding to Phase 29** per the user's
+own explicit instruction (R13).

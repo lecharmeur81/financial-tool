@@ -17,9 +17,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 
+from cfi.api.auth import require_api_key
+from cfi.api.limiter import MUTATION_LIMIT, limiter
 from cfi.core.errors import NotFoundError, ServiceUnavailableError
 from cfi.paper.service import PaperTradingService
 from cfi.paper.stats import PerformanceStats
@@ -169,7 +171,8 @@ def _to_stats_response(stats: PerformanceStats) -> PerformanceStatsResponse:
     )
 
 
-@router.post("/trades", response_model=TradeStatus)
+@router.post("/trades", response_model=TradeStatus, dependencies=[Depends(require_api_key)])
+@limiter.limit(MUTATION_LIMIT)
 async def create_trade(request: Request, body: CreateTradeRequest) -> TradeStatus:
     svc = _service(request)
     row = await svc.create_trade(
@@ -229,13 +232,23 @@ async def get_trade(request: Request, trade_id: uuid.UUID) -> TradeStatus:
     return _to_status(row)
 
 
-@router.post("/trades/{trade_id}/close", response_model=TradeStatus)
+@router.post(
+    "/trades/{trade_id}/close",
+    response_model=TradeStatus,
+    dependencies=[Depends(require_api_key)],
+)
+@limiter.limit(MUTATION_LIMIT)
 async def close_trade(request: Request, trade_id: uuid.UUID) -> TradeStatus:
     row = await _service(request).close_trade(trade_id)
     return _to_status(row)
 
 
-@router.post("/trades/{trade_id}/cancel", response_model=TradeStatus)
+@router.post(
+    "/trades/{trade_id}/cancel",
+    response_model=TradeStatus,
+    dependencies=[Depends(require_api_key)],
+)
+@limiter.limit(MUTATION_LIMIT)
 async def cancel_trade(request: Request, trade_id: uuid.UUID) -> TradeStatus:
     row = await _service(request).cancel_trade(trade_id)
     return _to_status(row)

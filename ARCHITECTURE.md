@@ -1125,6 +1125,78 @@ app/page.tsx (Executive Dashboard, Server Component, await connection() ⇒ alwa
 
 ---
 
+### 7d. Security layer — Phases 27–28 (ADR-0075)
+
+Phase 27 was a read-only audit against all 32 categories the user specified (auth, injection
+classes, Docker, secrets, the AI integration boundary, rate limiting, dependencies, …). It found
+one Critical gap (no authentication anywhere) plus several Medium/Low production-hardening items,
+and confirmed the project's R2/R3/R6/R9 controls (parameterized SQL, read-only AI tools, secret
+redaction, non-root containers, loopback-only ports, …) were already sound. Phase 28 closes the
+items the audit flagged as currently exploitable or a clear production blocker, without adding
+anything the single-user/local-first application doesn't need yet (R13):
+
+```
+Request → [rate limiter, in-process] → [require_api_key, mutating/AI routes only] → route handler
+                                              │
+                                   X-API-Key header, constant-time compare
+                                   (cfi.api.auth.require_api_key)
+```
+
+- **API key auth, opt-in in development, mandatory in production.** `Settings.api_key:
+  SecretStr | None` (`core/config.py`) defaults to unset. A `model_validator` on `Settings` fails
+  at construction time — the process refuses to boot — if `environment == "production"` and no
+  key is configured; this is the fail-secure behavior (never a per-request 500 fallback, never a
+  silent open-by-default in production). When a key *is* configured, `cfi.api.auth.require_api_key`
+  checks the `X-API-Key` header with `secrets.compare_digest` (constant-time) and is applied as a
+  dependency only on mutating (POST/PUT/PATCH/DELETE) and AI-triggering routes — alert
+  acknowledge/resolve/evaluate, paper trade create/close/cancel, journal decision
+  create/update/cancel, `analyst.analyze`, `brief.generate`. Every `GET` stays open: the Next.js
+  frontend only ever reads (Phase 27 confirmed zero POSTs anywhere in `frontend/src`), so it never
+  needs this key and the key is never sent to, stored in, or reachable from the frontend.
+- **Rate limiting, in-process, HTTP layer only.** `cfi.api.limiter` registers a `slowapi` limiter
+  keyed by client IP. `analyst.analyze` and `brief.generate` get a tight 5/hour limit (each queues
+  a real, paid Anthropic call against the existing monthly budget ceiling); other protected
+  mutating routes get 30/minute. In-memory storage is a known limitation if this is ever deployed
+  as more than one process — fine for the single-instance deployment this phase targets, called
+  out in code as something a future multi-instance Phase would need to move to a shared (Redis)
+  store. Celery tasks are completely untouched — this only wraps inbound FastAPI routes.
+- **Production API docs gating.** `docs_url`/`openapi_url` (`api/app.py`) are `None` when
+  `environment == "production"`, unchanged (enabled) otherwise — `redoc_url` was already `None`.
+- **Frontend security headers (ADR-0028 closed out).** `next.config.ts` now sends a `self`-only
+  Content-Security-Policy (`script-src 'self'`, no `unsafe-eval`, no third-party script/style/image
+  origins — verified the app loads no CDN scripts and bundles `lightweight-charts` via npm, not a
+  CDN), a restrictive `Permissions-Policy`, and HSTS gated to `NODE_ENV==="production"` (sending it
+  over plain local HTTP would be misleading even though browsers ignore it off-HTTPS). The
+  pre-existing `X-Content-Type-Options`/`Referrer-Policy`/`X-Frame-Options` are unchanged.
+- **Docker hardening via an overlay file, not a change to the dev workflow.**
+  `compose.prod.yaml` layers on top of `compose.yaml` (`docker compose -f compose.yaml -f
+  compose.prod.yaml up -d --build`) and only then: builds the backend's existing `runtime` Docker
+  target instead of `dev` (prod dependencies only — the `runtime` target already existed, it just
+  wasn't used by compose), retags images `:prod` so they never collide with a developer's `:dev`
+  images, sets `CFI_ENVIRONMENT=production`, and adds `no-new-privileges`, `cap_drop: [ALL]`, and
+  a read-only root filesystem (with a small `/tmp` tmpfs for the one or two paths — e.g. Celery
+  beat's schedule file — that still need to write) to every custom-built service. Plain `docker
+  compose up` (no overlay) is byte-for-byte the same dev stack as before this phase — verified via
+  `docker compose config` with and without the overlay. `db`/`redis` are intentionally left
+  unhardened here: both already run as their own image's non-root user and write only to their
+  declared volumes; hardening upstream images further is lower-priority and out of this phase's
+  scope (see ADR-0075 for the full reasoning).
+- **Optional least-privilege runtime DB role, additive only.** `Settings.database_url_runtime:
+  SecretStr | None` — unset (the default) means api/worker use exactly the same role as migrations,
+  identical to every phase before this one. When set, `core/db.py`'s engine uses it instead for the
+  API/worker's runtime connection; migrations always use `database_url` directly regardless, so a
+  restricted runtime role can never run DDL. No role-creation SQL ships with this phase (ADR-0075
+  documents the production recipe); this is additive config plumbing only.
+- **Celery serializer pinned explicitly.** `task_serializer`/`accept_content`/`result_serializer`
+  are now `"json"` by explicit config in `worker/app.py` rather than relying on Celery's implicit
+  default — a documentation-equivalent change, not a behavior change.
+- **No user/tenant model added.** Alerts, paper trades, and journal decisions still have no
+  `user_id`/ownership column — intentionally out of scope (the task explicitly said not to add
+  multi-user complexity). ADR-0075 records that this becomes mandatory, not optional, the moment
+  this system is ever exposed to more than one user, so it isn't silently forgotten later.
+
+---
+
 ## 8. Repository layout — ADR-0015, ADR-0045
 
 ```
