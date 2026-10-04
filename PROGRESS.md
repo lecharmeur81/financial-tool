@@ -3290,7 +3290,7 @@ only), `backend/tests/integration/test_realtime_service.py`,
 `backend/tests/integration/test_intelligence_api.py`. No `src/`, no migration, no other test file
 touched.
 
-**Git commit:** `<pending — see below>`
+**Git commit:** `aec422e` — "[P35] finalize real-time integration test verification" (4 files changed, 196 insertions(+), 22 deletions(-); working tree clean after commit).
 
 **Next step:** awaiting the user's review. Per the phase's explicit final instruction, **not**
 proceeding to Phase 36 or any further phase automatically (R13).
