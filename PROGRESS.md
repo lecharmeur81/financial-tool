@@ -2771,3 +2771,95 @@ fix, see above).
 **Next step:** awaiting the user's next instruction — not proceeding to another phase automatically
 (R13). See the Phase 32 report delivered in chat for the full 10-section verification and the final
 production-readiness verdict.
+
+---
+
+### 2026-10-04 — Phase 33: paper/journal point-in-time price lookup — root-caused to a test
+fixture, not an application defect
+
+**Root cause:** not an application bug. ``PaperTradingService.create_trade``/``close_trade`` and
+``DecisionJournalService.create_decision`` both document, verbatim, that ``now`` always represents
+the real current time ("there is no backdated entry... this call can never use future information
+by construction") — the override parameter exists only to inject a deterministic value for
+testing, never to simulate an arbitrary historical date. ``test_paper_service.py``/
+``test_journal_service.py`` nonetheless called them with `now=NOW-30 days` to simulate a
+historical entry 30 days before the exit.
+
+``cfi.market.queries.MarketQueries.bars`` correctly requires both `available_at <= as_of`
+(real-world point-in-time, R3) **and** `ingested_at <= as_of` (knowledge-time: this system must
+have actually stored the row by `as_of`, not merely have it be true in the world by then).
+``tests.integration.market_support.MarketHarness``'s generic `backfill_step` stamps every bar from
+one bulk backfill with a single `ingested_at` equal to the moment *that job* ran — correct for a
+real deployment (ingestion always precedes the "now" that queries it) but not a faithful stand-in
+for "ingested shortly after this day closed," which is exactly what querying 30 days into that
+same backfilled history needs. Confirmed empirically (direct DB probe): every one of the 280
+seeded bars shared the identical `ingested_at`, dated at the harness's "now," not at each bar's own
+day.
+
+Confirmed this is a test-fixture issue, not an app defect, two ways: (1) Phase 16's own
+`test_backtest_engine.py` already avoids this exact trap by setting `ingested_at = available_at`
+per synthetic bar via direct insert, rather than relying on `MarketHarness`'s bulk backfill: this
+codebase already has an established convention for exactly this case. (2)
+`anomaly/service.py`/`divergence/service.py` already special-case `price_close`/`daily_volume`/
+`realized_volatility` to skip `knowledge_time` entirely (every *other* adapter method takes
+`as_of` and `knowledge_time` as two separate parameters) — confirming OHLCV price lookups were
+never meant to carry a `knowledge_time` distinct from `as_of` the way institutional/whale/
+derivatives data does.
+
+**Fix (test-only, no application code changed):** `_seed_btc()` in both `test_paper_service.py`
+and `test_journal_service.py` now runs `UPDATE obs.market_bar SET ingested_at = available_at`
+immediately after backfilling, matching `test_backtest_engine.py`'s own established convention.
+Look-ahead and knowledge-time protection remain fully enforced — nothing was weakened, the
+simulated ingestion timeline was simply made realistic instead of an artifact of when the test
+happened to call `backfill_step`.
+
+**Tests added:** `backend/tests/integration/test_market_price_point_in_time.py` (new, 6 tests) —
+direct boundary-case coverage against `Adapters.price_close`/`cfi.paper.pnl.current_price`: exact
+matching timestamp, nearest-earlier observation (not a more distant one), an observation
+immediately after `as_of` never used (look-ahead), a UTC vs. non-UTC fixed-offset instant
+agreeing, a bar that is available but not yet *ingested* as of `as_of` never used (the exact gap
+this phase closed), and the no-data `InsufficientDataError` path end-to-end through
+`PaperTradingService`.
+
+**Test results:** `test_paper_service.py` 12/13 pass (1 pre-existing, unrelated failure — see
+below); `test_journal_service.py` 16/17 pass (1 pre-existing, unrelated failure); the 6 new
+boundary tests all pass. Re-run on Windows: `ruff check`/`ruff format --check`, `mypy` (380 files),
+and the full unit+API suite (988 tests) all pass, unaffected, since no application code changed.
+The full integration suite (Postgres/Redis — sandbox only; this bridge has no `psql`/`redis-cli`/
+`docker` to run it directly against the authoritative repo) was also run end to end: 256 passed, 4
+failed — the 2 above plus 2 more, both confirmed pre-existing and unrelated to this fix (see next).
+
+**Discovered separately, NOT fixed, per the phase's explicit scope (report separately rather than
+expand scope):**
+
+- `test_short_trade_is_the_mirror_of_a_long_trade_on_the_same_prices` — a pre-existing `gross_pnl`
+  asymmetry between mirrored long/short trades opened at the identical observed price (confirmed
+  identical and deterministic across both calls via a direct probe). Previously masked because
+  the price-lookup bug raised `InsufficientDataError` before this assertion could ever run.
+  Candidate next investigation: how `quantity` is derived (observed vs. execution price) for the
+  `gross_pnl` component.
+- `test_relevant_alert_ids_capture_active_alerts_at_decision_time` — a pre-existing
+  `CheckViolation`: `severity="medium"` is not a valid `usr.alert_event.severity` value.
+  Independently reproducible with or without this phase's fix; unrelated to price lookups.
+- `test_market_api.py::test_summary_is_honest_about_untracked_data` and
+  `test_regime_api.py::test_current_is_mixed_unclear_when_nothing_is_loaded` fail when run in the
+  same pytest session *after* the paper/journal tests, because those two tests only depend on
+  `test_settings` (not the auto-truncating `db` fixture), so they inherit whatever
+  `obs.market_bar` rows `_seed_btc`'s backfill left in the shared `cfi_test` database. Confirmed
+  pre-existing and independent of this fix by reproducing the same two failures with the
+  `ingested_at` realignment temporarily reverted. A genuine (separate) test-isolation gap: any
+  test that touches only `test_settings` is only safe if nothing else in the same session ever
+  backfills market data first.
+
+**Known limitations:** this bridge has no `psql`/`redis-cli`/`docker`, so the integration suite
+could only be re-run in the cloud sandbox (with a real local Postgres/Redis), not directly against
+this authoritative repo; the unit/API suite, ruff, ruff format, and mypy were all re-run here and
+pass.
+
+**Git commit:** `b4334ec` — "[P33] fix paper/journal point-in-time price lookup test fixture, not
+app code" (git runs on the user's machine per C5).
+
+**Next step:** awaiting the user's next instruction — not proceeding to Phase 34 automatically
+(R13). Two of the three newly-surfaced issues above (the gross_pnl mirror asymmetry and the
+invalid alert severity value) look like reasonable candidates for a future phase; the third (test
+isolation for `test_settings`-only tests) is lower-severity and test-only.
