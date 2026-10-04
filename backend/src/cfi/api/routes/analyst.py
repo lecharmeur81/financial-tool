@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cfi.analyst.repository import AnalystRepository
 from cfi.analyst.universe import RESPONSE_SECTIONS, TOOLS
@@ -41,7 +41,12 @@ KnowledgeTime = Annotated[
 
 
 class AnalyzeRequest(BaseModel):
-    question: str | None = None
+    # Phase 30 finding F-4: an analyst question is a short, free-text prompt, never a document —
+    # 4,000 characters is generous for any genuine question while bounding how much of a single
+    # caller's queued request can end up inside one paid Claude API call (the AI-trigger rate
+    # limit already bounds call *frequency*; this bounds call *size*). This is a request-shape
+    # guard only — it changes no AI/grounding behavior and does not touch the rate limiter.
+    question: str | None = Field(default=None, max_length=4000)
 
 
 class AnalyzeResponse(BaseModel):

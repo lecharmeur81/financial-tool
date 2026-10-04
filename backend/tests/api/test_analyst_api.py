@@ -53,3 +53,45 @@ def test_get_analysis_without_a_database_fails_explicitly(client: TestClient) ->
     response = client.get(f"/api/v1/analyst/{uuid.uuid4()}")
     assert response.status_code == 503
     assert response.json()["error_code"] == "service_unavailable"
+
+
+# --------------------------------------------------------------------------- F-4: question length
+
+
+def test_a_normal_length_question_passes_validation_and_reaches_the_service_layer(
+    client: TestClient,
+) -> None:
+    """A realistic analyst question is well under the 4,000-character limit — the request must
+    pass Pydantic validation and reach the normal (database-dependent) handler, evidenced by the
+    503 "no database" response this no-DB test harness always gives past that point (the same
+    signal ``test_analyze_without_a_database_fails_explicitly`` uses)."""
+    response = client.post(
+        "/api/v1/analyst/analyze",
+        json={"question": "What is driving the divergence between ETF flows and funding rates?"},
+    )
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "service_unavailable"
+
+
+def test_an_oversized_question_is_rejected_with_the_normal_validation_response(
+    client: TestClient,
+) -> None:
+    """A multi-thousand-character question (Phase 30 finding F-4) is rejected by request
+    validation — the same 422 problem-details shape every other validation failure uses — before
+    it ever reaches the service layer or could be queued for a paid Claude API call."""
+    response = client.post("/api/v1/analyst/analyze", json={"question": "x" * 4001})
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error_code"] == "request_validation_error"
+    assert "question" in body["detail"]
+
+
+def test_a_question_at_exactly_the_limit_is_accepted(client: TestClient) -> None:
+    response = client.post("/api/v1/analyst/analyze", json={"question": "x" * 4000})
+    # Rejected only by the (absent) database in this harness, never by validation.
+    assert response.status_code == 503
+
+
+def test_no_question_at_all_is_still_accepted(client: TestClient) -> None:
+    response = client.post("/api/v1/analyst/analyze", json={})
+    assert response.status_code == 503

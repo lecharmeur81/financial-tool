@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
+from functools import partial
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
@@ -10,6 +12,22 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from cfi.core.config import Settings
 
 LAYER_SCHEMAS: tuple[str, ...] = ("ref", "raw", "obs", "calc", "sig", "regime", "ai", "usr", "ops")
+
+# Every JSON/JSONB column (``ai.snapshot.payload``, ``ai.interpretation.response``,
+# ``ai.brief.response``/``changes``, ``usr.decision_journal.relevant_alert_ids``,
+# ``usr.paper_trade.relevant_alert_ids``, ``usr.alert_event.details``/``evidence_field_ids``,
+# ``ops.provider_request.request_params``, ...) can be handed a Python value built from live
+# application data — most commonly a ``cfi.analyst.snapshot.Snapshot.payload()`` dict, whose
+# ``tool_results`` key carries the domain tools' raw output verbatim, including ``datetime``
+# objects that stdlib ``json.dumps`` cannot serialize on its own (Phase 30 finding F-1). This
+# mirrors the convention ``cfi.analyst.prompts.user_prompt()`` already uses when embedding the
+# same snapshot in the Claude prompt (``json.dumps(..., default=str)``) — applied once, here, at
+# the engine level, rather than scattered as an ad-hoc fix in every repository that writes JSON/
+# JSONB (R13: one centralized fix, not N duplicated ones). ``default=str`` only ever widens what
+# can be serialized (datetimes, Decimals, UUIDs, etc. all become their ``str()``); it never
+# changes how an already-JSON-safe value (str/int/float/bool/None/dict/list) is encoded, so this
+# has no effect on any existing, already-passing read or write.
+_JSON_SERIALIZER = partial(json.dumps, default=str)
 
 
 def create_engine(settings: Settings) -> AsyncEngine:
@@ -25,6 +43,7 @@ def create_engine(settings: Settings) -> AsyncEngine:
         pool_timeout=settings.db_pool_timeout_seconds,
         pool_pre_ping=True,
         connect_args={"options": "-c timezone=UTC"},
+        json_serializer=_JSON_SERIALIZER,
     )
 
 
