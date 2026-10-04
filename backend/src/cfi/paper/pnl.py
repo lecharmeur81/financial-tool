@@ -113,7 +113,14 @@ def calculate_pnl(
     real close (persisted) and for a live "if closed now" unrealized-P&L preview on an open
     position (never persisted — see ``cfi.paper.service``); the two call sites share this one
     function so the methodology is identical in both cases (R13: no parallel calculation)."""
-    quantity = notional / entry_price_execution
+    # Position size is derived from the *observed* entry price, not the execution price: the
+    # execution price is direction-dependent (adverse up for a long's "buy" entry, adverse down
+    # for a short's "sell" entry via ``slipped_price``), so sizing off it would make ``quantity``
+    # itself asymmetric between a mirrored long and short even when both observe identical entry
+    # prices — breaking the mirror-symmetry the module docstring promises for ``gross_pnl``
+    # (computed purely from observed prices). Sizing off the observed price keeps ``quantity``
+    # direction-independent, which is what that promise requires.
+    quantity = notional / entry_price_observed
     margin = notional / leverage
 
     sign = Decimal(1) if direction == "long" else Decimal(-1)

@@ -9,6 +9,8 @@ from decimal import Decimal
 from cfi.backtest.costs import COST_MODEL_V1, COST_MODEL_V2
 from cfi.divergence.metrics import SeriesPoint
 from cfi.paper.pnl import (
+    Direction,
+    PnLResult,
     calculate_pnl,
     current_price,
     execution_price,
@@ -158,6 +160,126 @@ def test_long_and_short_are_mirror_images_on_the_same_price_move() -> None:
     long_result = calculate_pnl(direction="long", **kwargs)  # type: ignore[arg-type]
     short_result = calculate_pnl(direction="short", **kwargs)  # type: ignore[arg-type]
     assert long_result.gross_pnl == -short_result.gross_pnl
+
+
+# ---------------------------------------------- Phase 34 Finding 1: long/short mirror asymmetry
+#
+# Root cause: ``calculate_pnl`` sized ``quantity = notional / entry_price_execution``. The
+# execution price is direction-dependent (``slipped_price`` via ``execution_price``: adverse
+# *upward* for a long's "buy" entry, adverse *downward* for a short's "sell" entry), so a long and
+# a short trade with identical *observed* entry/exit prices got different ``quantity`` values —
+# which broke the mirror symmetry the module promises for ``gross_pnl`` (computed purely from
+# observed prices). The test below reproduces the real bug: unlike
+# ``test_long_and_short_are_mirror_images_on_the_same_price_move`` above, which sidesteps the issue
+# entirely by setting ``entry_price_execution == entry_price_observed`` (zero slippage), this uses
+# genuinely slipped, direction-dependent execution prices computed via ``execution_price`` itself —
+# exactly what ``PaperTradingService`` does in production. Fix: size off ``entry_price_observed``.
+
+
+def _realistic_trade(
+    direction: Direction,
+    *,
+    entry_observed: Decimal,
+    exit_observed: Decimal,
+    notional: Decimal = Decimal(10_000),
+) -> PnLResult:
+    """Run ``calculate_pnl`` from identical *observed* prices with genuinely slipped,
+    direction-appropriate execution prices computed via ``execution_price`` itself (not an
+    artificial equal-price shortcut) — exactly what ``PaperTradingService`` does in production,
+    and the realistic scenario Finding 1 was about."""
+    return calculate_pnl(
+        direction=direction,
+        notional=notional,
+        leverage=Decimal(1),
+        entry_price_observed=entry_observed,
+        entry_price_execution=execution_price(
+            entry_observed, direction=direction, leg="entry", params=FLAT
+        ),
+        exit_price_observed=exit_observed,
+        exit_price_execution=execution_price(
+            exit_observed, direction=direction, leg="exit", params=FLAT
+        ),
+        params=FLAT,
+    )
+
+
+def test_mirrored_long_and_short_have_equal_and_opposite_gross_pnl_under_real_slippage() -> None:
+    """The actual bug: with realistic, direction-dependent execution prices (not an artificial
+    equal-price shortcut), a mirrored long and short must still have exactly opposite gross P&L."""
+    entry_observed, exit_observed = Decimal(100), Decimal(120)
+    notional = Decimal(10_000)
+
+    long_result = _realistic_trade(
+        "long", entry_observed=entry_observed, exit_observed=exit_observed, notional=notional
+    )
+    short_result = _realistic_trade(
+        "short", entry_observed=entry_observed, exit_observed=exit_observed, notional=notional
+    )
+    assert long_result.gross_pnl == -short_result.gross_pnl
+    # And matches the spec's explicit formula exactly (quantity from the observed entry price).
+    quantity = notional / entry_observed
+    assert long_result.gross_pnl == quantity * (exit_observed - entry_observed)
+    assert short_result.gross_pnl == quantity * (entry_observed - exit_observed)
+
+
+def test_profitable_long_mirrors_profitable_short_on_the_opposite_price_move() -> None:
+    """A profitable long (price up) and a profitable short (price down by the same amount) on the
+    same observed entry price have equal-magnitude gross P&L."""
+    entry_observed = Decimal(100)
+    long_exit, short_exit = Decimal(120), Decimal(80)
+
+    long_result = _realistic_trade("long", entry_observed=entry_observed, exit_observed=long_exit)
+    short_result = _realistic_trade(
+        "short", entry_observed=entry_observed, exit_observed=short_exit
+    )
+    assert long_result.gross_pnl > 0
+    assert short_result.gross_pnl > 0
+    assert long_result.gross_pnl == short_result.gross_pnl
+
+
+def test_losing_long_mirrors_losing_short_on_the_opposite_price_move() -> None:
+    """A losing long (price down) and a losing short (price up by the same amount) on the same
+    observed entry price have equal-magnitude (negative) gross P&L."""
+    entry_observed = Decimal(100)
+    long_exit, short_exit = Decimal(80), Decimal(120)
+
+    long_result = _realistic_trade("long", entry_observed=entry_observed, exit_observed=long_exit)
+    short_result = _realistic_trade(
+        "short", entry_observed=entry_observed, exit_observed=short_exit
+    )
+    assert long_result.gross_pnl < 0
+    assert short_result.gross_pnl < 0
+    assert long_result.gross_pnl == short_result.gross_pnl
+
+
+def test_zero_price_movement_produces_zero_gross_pnl_for_both_directions() -> None:
+    """No observed price movement at all must yield exactly zero gross P&L, regardless of
+    direction or execution-price slippage on either leg."""
+    flat_price = Decimal(100)
+    for direction in ("long", "short"):
+        result = _realistic_trade(direction, entry_observed=flat_price, exit_observed=flat_price)
+        assert result.gross_pnl == 0
+
+
+def test_fee_and_slippage_cost_behavior_is_unchanged_by_the_quantity_fix() -> None:
+    """Finding 1 only changes which price sizes ``quantity`` — it must not change the existing,
+    already-tested cost model semantics: fees still scale linearly with notional, slippage cost
+    stays non-negative, and the net/gross/slippage/fees reconciliation still holds exactly, now
+    verified under the same realistic asymmetric-execution-price conditions as the bug itself."""
+    entry_observed, exit_observed = Decimal(100), Decimal(110)
+    result = _realistic_trade("long", entry_observed=entry_observed, exit_observed=exit_observed)
+    assert result.slippage_cost > 0
+    assert result.fees_total > 0
+    assert result.net_pnl == result.gross_pnl - result.slippage_cost - result.fees_total
+
+    doubled = _realistic_trade(
+        "long",
+        entry_observed=entry_observed,
+        exit_observed=exit_observed,
+        notional=Decimal(20_000),
+    )
+    assert doubled.fees_total == result.fees_total * 2
+    assert doubled.quantity == result.quantity * 2
 
 
 # ------------------------------------------------------------------ fees

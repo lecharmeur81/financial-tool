@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.api.app import create_app
 from cfi.core.config import Settings
@@ -58,7 +59,15 @@ async def test_catalog_lists_seven_regimes_with_weights_summing_to_one(
         assert total == Decimal(1), f"{regime['regime_id']} weights sum to {total}"
 
 
-async def test_current_is_mixed_unclear_when_nothing_is_loaded(test_settings: Settings) -> None:
+async def test_current_is_mixed_unclear_when_nothing_is_loaded(
+    db: AsyncEngine, test_settings: Settings
+) -> None:
+    """Phase 34 Finding 3: this test's premise ("nothing is loaded") requires an actually-empty
+    database. It previously requested only ``test_settings``, so — unlike every other test in
+    this file, which only checks catalog shape or scoring logic rather than depending on the
+    database being empty — it silently inherited rows left behind by an earlier test's own
+    (non-truncating) seeding fixture when run in the same session. Requesting the auto-truncating
+    ``db`` fixture here restores that premise; the API behavior under test is unchanged."""
     status, body = get(
         test_settings,
         "/api/v1/regime/current",

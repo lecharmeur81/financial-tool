@@ -262,7 +262,11 @@ async def test_relevant_alert_ids_capture_active_alerts_at_decision_time(
     _alert_id, alert_uuid = await alert_repo.insert_alert(
         now=DECISION_AS_OF,
         alert_type="divergence",
-        severity="medium",
+        # Phase 34 Finding 2: "medium" is not one of the DB's canonical severities (migration
+        # 20261003_0009_alerts.py: 'info','notable','elevated','critical' — usr.alert_event's
+        # CHECK constraint rejects anything else). "notable" is what the rule engine itself uses
+        # for an ordinary active alert (cfi.alerts.rules) — no application behavior changes here.
+        severity="notable",
         domain="BTC",
         dedup_key="test-journal-alert-key",
         trigger_condition="test condition",

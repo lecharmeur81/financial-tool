@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.api.app import create_app
 from cfi.core.config import Settings
@@ -228,8 +229,18 @@ async def test_summary_reuses_the_analyst_tool_verbatim(
     assert btc["realized_volatility_30d"]["unit"] == "annualized_ratio"
 
 
-async def test_summary_is_honest_about_untracked_data(test_settings: Settings) -> None:
-    """No bars seeded — every asset's fields are `None`, never a fabricated price (R3)."""
+async def test_summary_is_honest_about_untracked_data(
+    db: AsyncEngine, test_settings: Settings
+) -> None:
+    """No bars seeded — every asset's fields are `None`, never a fabricated price (R3).
+
+    Phase 34 Finding 3: this test's assumption ("no bars seeded") only holds if the database is
+    actually empty. It previously requested only ``test_settings`` — not the auto-truncating
+    ``db`` fixture — so it silently inherited whatever ``obs.market_bar`` rows an earlier test in
+    the same session had left behind (e.g. via ``MarketHarness``'s bulk seeding, which writes
+    through its own engine and is never asked to clean up after itself). Requesting ``db`` here
+    forces the pre-test truncation this test's own premise requires, with no change to the API
+    behavior being tested."""
     status, body = get(test_settings, "/api/v1/market/summary")
     assert status == 200
     assert body["status"] == "ok"
