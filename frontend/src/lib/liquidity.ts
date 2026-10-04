@@ -53,3 +53,40 @@ export type LiquidityOverview = {
 
 export const fetchLiquidityOverview = (f?: typeof fetch): Promise<ApiResult<LiquidityOverview>> =>
   getJson<LiquidityOverview>("/api/v1/liquidity/overview", {}, f);
+
+// --------------------------------------------------------------------------- history (Phase 36)
+
+export type SupplyHistoryPoint = { time: string; value: string | null; quality_status: string };
+
+export type SupplyHistory = {
+  subject: string;
+  as_of: string;
+  start: string;
+  days: number;
+  unit: string;
+  points: SupplyHistoryPoint[];
+};
+
+export const fetchLiquidityHistory = (
+  subject: string,
+  days = 90,
+  f?: typeof fetch,
+): Promise<ApiResult<SupplyHistory>> =>
+  getJson<SupplyHistory>("/api/v1/liquidity/history", { subject, days: String(days) }, f);
+
+// --------------------------------------------------------------------------- chart data
+
+export type LinePoint = { time: number; value: number } | { time: number };
+
+function toSeconds(iso: string): number {
+  return Math.floor(new Date(iso).getTime() / 1000);
+}
+
+/** Daily circulating-supply line for one subject. Days without a value are holes, never zeros. */
+export function toSupplyHistoryChart(history: SupplyHistory): LinePoint[] {
+  return history.points.map((p) =>
+    p.value === null
+      ? { time: toSeconds(p.time) }
+      : { time: toSeconds(p.time), value: Number(p.value) },
+  );
+}

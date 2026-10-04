@@ -48,15 +48,16 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     href: "/liquidity",
     label: "Liquidity",
-    description: "Stablecoin supply and exchange balances, order-book depth, and macro liquidity.",
-    plannedPhase: "not yet scheduled",
+    description:
+      "Stablecoin circulating supply and growth, market share, growth acceleration, and the transparent Liquidity Score, with daily supply history.",
+    plannedPhase: "9 (liquidity); order-book depth and macro liquidity later",
   },
   {
     href: "/analytics",
     label: "Analytics",
     description:
-      "Divergences, regimes, historical similarity, anomalies, capital rotation, and backtests.",
-    plannedPhase: "12–18",
+      "Market regime, capital-flow divergences, anomalies, capital rotation, historical similarity, and recent intelligence events — each reusing its own engine's output unchanged.",
+    plannedPhase: "12–15, 19, 20, 35 (backtests not yet scheduled)",
   },
   {
     href: "/alerts",
@@ -88,8 +89,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   {
     href: "/settings",
     label: "Settings",
-    description: "System status, preferences, and (later) account and security settings.",
-    plannedPhase: "3 (status only)",
+    description:
+      "System readiness, service metadata, provider health, and recent ingestion runs. Account and security settings not yet built.",
+    plannedPhase: "3, 36 (operational status); account and security settings later",
   },
 ] as const;
 

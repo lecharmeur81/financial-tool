@@ -6,6 +6,7 @@ import { AnomalySection } from "@/components/dashboard/AnomalySection";
 import { BriefSection } from "@/components/dashboard/BriefSection";
 import { DerivativesLiquiditySection } from "@/components/dashboard/DerivativesLiquiditySection";
 import { DivergenceSection } from "@/components/dashboard/DivergenceSection";
+import { IntelligenceEventsSection } from "@/components/dashboard/IntelligenceEventsSection";
 import { IntelligenceOverviewSection } from "@/components/dashboard/IntelligenceOverviewSection";
 import { JournalPaperSection } from "@/components/dashboard/JournalPaperSection";
 import { MacroSection } from "@/components/dashboard/MacroSection";
@@ -21,6 +22,7 @@ import { fetchLatestBrief } from "@/lib/brief";
 import { fetchDerivativesAsset } from "@/lib/derivatives";
 import { fetchDivergenceMatrix } from "@/lib/divergence";
 import { fetchInstitutionalOverview } from "@/lib/institutional";
+import { fetchIntelligenceEvents } from "@/lib/intelligence";
 import { fetchRecentDecisions } from "@/lib/journal";
 import { fetchLiquidityOverview } from "@/lib/liquidity";
 import { fetchMacroOverview } from "@/lib/macro";
@@ -60,6 +62,7 @@ export default async function DashboardPage() {
     positions,
     performance,
     decisions,
+    intelligenceEvents,
   ] = await Promise.all([
     fetchCurrentRegime(),
     fetchSummary(),
@@ -80,6 +83,7 @@ export default async function DashboardPage() {
     fetchOpenPositions(),
     fetchPaperPerformance(),
     fetchRecentDecisions(5),
+    fetchIntelligenceEvents({ limit: 5 }),
   ]);
 
   return (
@@ -113,6 +117,8 @@ export default async function DashboardPage() {
         derivatives={derivatives.ok ? derivatives.data : null}
         rotation={rotation.ok ? rotation.data : null}
       />
+
+      <IntelligenceEventsSection events={intelligenceEvents} />
 
       <DivergenceSection matrix={divergence} />
 

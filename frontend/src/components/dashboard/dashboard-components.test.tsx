@@ -7,6 +7,7 @@ import type { BriefStatus } from "@/lib/brief";
 import type { DerivativesAssetView } from "@/lib/derivatives";
 import type { DivergenceMatrix } from "@/lib/divergence";
 import type { Overview as InstitutionalOverview } from "@/lib/institutional";
+import type { IntelligenceEvent } from "@/lib/intelligence";
 import type { DecisionStatus } from "@/lib/journal";
 import type { LiquidityOverview } from "@/lib/liquidity";
 import type { MacroOverview } from "@/lib/macro";
@@ -22,6 +23,7 @@ import { AnomalySection } from "./AnomalySection";
 import { BriefSection } from "./BriefSection";
 import { DerivativesLiquiditySection } from "./DerivativesLiquiditySection";
 import { DivergenceSection } from "./DivergenceSection";
+import { IntelligenceEventsSection } from "./IntelligenceEventsSection";
 import { IntelligenceOverviewSection } from "./IntelligenceOverviewSection";
 import { JournalPaperSection } from "./JournalPaperSection";
 import { MacroSection } from "./MacroSection";
@@ -762,5 +764,46 @@ describe("Unavailable", () => {
     expect(screen.getByText("Something unavailable")).toBeTruthy();
     expect(screen.getByText("boom")).toBeTruthy();
     expect(screen.getByText(/no cached or estimated values/)).toBeTruthy();
+  });
+});
+
+const intelligenceEventsOk: IntelligenceEvent[] = [
+  {
+    event_id: "11111111-1111-1111-1111-111111111111",
+    created_at: "2026-10-01T00:05:00Z",
+    observed_at: "2026-10-01T00:00:00Z",
+    domain: "regime",
+    event_type: "regime_change",
+    severity: "elevated",
+    previous_value: "risk-off",
+    current_value: "risk-on",
+    change_magnitude: "1",
+    detection_method: "rule_engine",
+    data_quality_state: "ok",
+    component_status: "ok",
+    dedup_key: "regime:BTC",
+    correlation_key: "regime:BTC:2026-10-01",
+    snapshot_id: 42,
+    status: "active",
+    ai_interpretation_id: null,
+  },
+];
+
+describe("IntelligenceEventsSection", () => {
+  it("summarizes recent events and links to the full Analytics view", () => {
+    render(<IntelligenceEventsSection events={{ ok: true, data: intelligenceEventsOk }} />);
+    expect(screen.getByText(/elevated/)).toBeTruthy();
+    expect(screen.getByText(/regime\/regime_change/)).toBeTruthy();
+    expect(screen.getByText("All intelligence events →")).toBeTruthy();
+  });
+
+  it("shows no fabricated events when none are recorded", () => {
+    render(<IntelligenceEventsSection events={{ ok: true, data: [] }} />);
+    expect(screen.getByText(/No intelligence events recorded recently/)).toBeTruthy();
+  });
+
+  it("reports an unreachable API rather than hiding it", () => {
+    render(<IntelligenceEventsSection events={{ ok: false, reason: "Unreachable" }} />);
+    expect(screen.getByText("Intelligence events unavailable")).toBeTruthy();
   });
 });

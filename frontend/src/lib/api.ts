@@ -4,6 +4,8 @@
  * every environment.
  */
 
+import { type ApiResult, getJson } from "@/lib/market";
+
 export type ComponentReport = {
   status: "ok" | "error";
   latency_ms: number;
@@ -58,3 +60,74 @@ export async function fetchReadiness(
     return { reachable: false, reason: name === "TimeoutError" ? "Timed out" : "Unreachable" };
   }
 }
+
+// ------------------------------------------------------------------ operational endpoints (Phase 36)
+// These describe the ingestion pipeline, not the market — kept on /settings, never on a market page
+// (Phase 36 constraint: operational/system information stays clearly separated from market intelligence).
+
+export type Meta = {
+  name: string;
+  version: string;
+  environment: string;
+  api_version: string;
+  server_time_utc: string;
+  evidence_categories: string[];
+  data_sources_connected: number;
+};
+
+export const fetchMeta = (f?: typeof fetch): Promise<ApiResult<Meta>> =>
+  getJson<Meta>("/api/v1/meta", {}, f);
+
+export type ProviderHealth = {
+  provider_id: string;
+  display_name: string;
+  requests: number;
+  successes: number;
+  success_rate: number | null;
+  consecutive_failures: number;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_error: string | null;
+  last_job_status: string | null;
+};
+
+export type ProviderHealthResponse = {
+  window_hours: number;
+  generated_at: string;
+  providers: ProviderHealth[];
+};
+
+export const fetchProviderHealth = (f?: typeof fetch): Promise<ApiResult<ProviderHealthResponse>> =>
+  getJson<ProviderHealthResponse>("/api/v1/providers/health", {}, f);
+
+export type IngestionJobRun = {
+  job_run_id: number;
+  job_type: string;
+  dataset_id: string;
+  provider_id: string;
+  subject: string | null;
+  status: string;
+  window_start: string;
+  window_end: string;
+  started_at: string;
+  finished_at: string | null;
+  pages: number;
+  records_received: number;
+  inserted: number;
+  duplicates: number;
+  revisions: number;
+  missing: number;
+  conflicts: number;
+  rejected: number;
+  skipped: number;
+  suspect: number;
+  stale: boolean | null;
+  error_code: string | null;
+  error_detail: string | null;
+};
+
+export const fetchIngestionRuns = (
+  limit = 20,
+  f?: typeof fetch,
+): Promise<ApiResult<IngestionJobRun[]>> =>
+  getJson<IngestionJobRun[]>("/api/v1/ingestion/runs", { limit: String(limit) }, f);
