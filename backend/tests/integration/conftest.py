@@ -6,7 +6,9 @@ Data-writing tests never touch the configured database. They run in a separate d
 
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
@@ -21,6 +23,19 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.core.config import Settings, get_settings
 from cfi.db.engine import create_engine
+
+# Windows test-environment-only: psycopg's async mode does not support the ProactorEventLoop
+# asyncio uses by default on Windows (it needs ``loop.add_reader``/socket-waiter support the
+# Proactor implementation does not provide), and raises ``psycopg.InterfaceError`` the moment an
+# async connection is opened. Every integration test opens one (directly, via the ``db`` fixture's
+# async engine, or via Alembic's online migration inside ``test_database_url``), so the policy
+# must be set before any event loop is created — plain module-level code at import time, not a
+# pytest-asyncio fixture/hook override (overriding the "event_loop_policy" fixture itself is
+# deprecated in pytest-asyncio 1.x; this never touches that fixture, so no deprecation warning).
+# A no-op everywhere else: ``WindowsSelectorEventLoopPolicy`` only exists on win32, and nothing
+# about Python 3.12 support, asyncio_mode, or loop scope changes on any platform.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 BACKEND = Path(__file__).resolve().parents[2]
 SERVICES_AVAILABLE = bool(os.environ.get("CFI_DATABASE_URL") and os.environ.get("CFI_REDIS_URL"))

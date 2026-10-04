@@ -13,16 +13,22 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from cfi.alerts.repository import AlertRepository
 from cfi.cache.redis import create_redis
 from cfi.core.config import Settings
 from cfi.db import tables as t
+from cfi.market.jobs import backfill_step
+from cfi.market.sources import ADAPTERS as MARKET_ADAPTERS
+from cfi.market.universe import ASSET_SYMBOLS, ohlcv_dataset
 from cfi.realtime.repository import IntelligenceEventRepository
 from cfi.realtime.service import RealtimeIntelligenceService
 from tests.integration.conftest import requires_services
+from tests.integration.market_support import MarketHarness
 
 pytestmark = [pytest.mark.integration, requires_services]
 
 AS_OF = datetime(2026, 10, 4, tzinfo=UTC)
+DAILY = ohlcv_dataset("usd", "1d")
 
 
 @pytest.fixture
@@ -34,16 +40,34 @@ async def redis(test_settings: Settings) -> AsyncIterator[Redis]:
     await client.aclose()
 
 
+async def _seed_minimum_regime_data(market: MarketHarness) -> None:
+    """The smallest real seed that lets the regime engine report a ``status="ok"`` classification
+    (never fabricated — R3): ``cfi.alerts.rules.evaluate_regime_change`` only ever reports a
+    candidate when the regime tool's own snapshot status is "ok", which itself requires at least
+    one regime definition's ``available_weight`` to clear
+    ``cfi.regime.parameters.REGIME_CLASSIFIER_V1.min_available_weight`` (0.5). Backfilling every
+    tracked asset's OHLCV history — the same ``market`` harness + ``backfill_step`` helper already
+    used by ``tests/integration/test_divergence_api.py`` — is read directly by
+    ``cfi.market_structure.service`` (no re-ingestion, see its own module docstring) and populates
+    ``market_structure_score``, ``btc_trend``, ``btc_rsi`` and ``market_breadth``: together 0.55 of
+    the "expansion" regime's weight, comfortably over the 0.5 threshold. No other domain, and no
+    application code, is touched to get there."""
+    for asset in ASSET_SYMBOLS:
+        await backfill_step(market.ctx, MARKET_ADAPTERS["coinbase"], DAILY, asset, depth_days=280)
+
+
 # --------------------------------------------------------------------------- change -> event
 
 
 async def test_first_cycle_creates_at_least_one_event_for_the_always_present_regime_candidate(
-    db: AsyncEngine, test_settings: Settings, redis: Redis
+    db: AsyncEngine, test_settings: Settings, redis: Redis, market: MarketHarness
 ) -> None:
-    """Testing requirement #1 (first event creation): even against a wholly empty database,
-    ``evaluate_regime_change`` always reports a current classification (``mixed_unclear`` with no
-    data loaded), so the very first cycle must create exactly one alert — and therefore exactly
-    one intelligence event — for it."""
+    """Testing requirement #1 (first event creation): ``evaluate_regime_change`` reports a current
+    classification (possibly ``mixed_unclear``, never fabricated — R3) whenever the regime tool's
+    own snapshot reaches ``status="ok"``, so once the minimum real market-structure data this
+    requires (see ``_seed_minimum_regime_data``) is seeded, the very first cycle must create
+    exactly one alert — and therefore exactly one intelligence event — for it."""
+    await _seed_minimum_regime_data(market)
     svc = RealtimeIntelligenceService(db, test_settings, redis=redis)
     result = await svc.process_cycle(as_of=AS_OF, knowledge_time=AS_OF, now=AS_OF)
     assert result.locked_out is False
@@ -53,11 +77,14 @@ async def test_first_cycle_creates_at_least_one_event_for_the_always_present_reg
 
 
 async def test_a_second_identical_cycle_creates_no_new_events(
-    db: AsyncEngine, test_settings: Settings, redis: Redis
+    db: AsyncEngine, test_settings: Settings, redis: Redis, market: MarketHarness
 ) -> None:
     """Testing requirement #5 (non-meaningful/noisy change ignored): nothing in the underlying
     data changed between the two calls, so ``cfi.alerts.lifecycle.decide`` skips every candidate
-    the second time, and no new event is created for any of them."""
+    the second time, and no new event is created for any of them. The minimum real market-
+    structure data (see ``_seed_minimum_regime_data``) is seeded first so the first cycle actually
+    has a "ok" regime candidate to create and then repeat unchanged."""
+    await _seed_minimum_regime_data(market)
     svc = RealtimeIntelligenceService(db, test_settings, redis=redis)
     first = await svc.process_cycle(as_of=AS_OF, knowledge_time=AS_OF, now=AS_OF)
     second = await svc.process_cycle(as_of=AS_OF, knowledge_time=AS_OF, now=AS_OF)
@@ -77,7 +104,27 @@ async def test_a_duplicate_alert_id_is_safely_deduplicated_at_the_repository_lev
     exact scenario the migration's ``ON CONFLICT (alert_id) DO NOTHING`` guarantees — inserting
     an event for the same ``alert_id`` twice (a worker retrying the same decision, or two
     overlapping cycles that both got past the lock) must silently no-op the second time, never
-    create a second row or raise."""
+    create a second row or raise. ``sig.intelligence_event.alert_id`` is a real foreign key into
+    ``usr.alert_event`` (the migration's own "deterministic anchor" for idempotency), so this test
+    first creates a real alert row via ``AlertRepository.insert_alert`` — the same helper
+    ``tests/integration/test_alerts_service.py`` already uses — and dedups against its actual id,
+    rather than an invalid fabricated one."""
+    alerts = AlertRepository(db)
+    alert_db_id, _alert_uuid = await alerts.insert_alert(
+        now=AS_OF,
+        alert_type="anomaly",
+        severity="critical",
+        domain="BTC",
+        dedup_key="anomaly:funding_rate",
+        trigger_condition="Funding rate anomaly",
+        observed_value="extreme_high",
+        reference_value=None,
+        evidence_field_ids=["get_derivatives.funding_rate"],
+        snapshot_id=None,
+        source_tool_id="get_derivatives",
+        component_status="ok",
+        data_quality_state="ok",
+    )
     repo = IntelligenceEventRepository(db)
     first = await repo.insert_event(
         now=AS_OF,
@@ -94,7 +141,7 @@ async def test_a_duplicate_alert_id_is_safely_deduplicated_at_the_repository_lev
         dedup_key="anomaly:funding_rate",
         correlation_key="snapshot:1",
         snapshot_id=None,
-        alert_id=999_001,
+        alert_id=alert_db_id,
     )
     second = await repo.insert_event(
         now=AS_OF,
@@ -111,7 +158,7 @@ async def test_a_duplicate_alert_id_is_safely_deduplicated_at_the_repository_lev
         dedup_key="anomaly:funding_rate",
         correlation_key="snapshot:1",
         snapshot_id=None,
-        alert_id=999_001,
+        alert_id=alert_db_id,
     )
     assert first is not None
     assert second is None  # the retry/duplicate is a safe no-op, not a second row
@@ -119,7 +166,7 @@ async def test_a_duplicate_alert_id_is_safely_deduplicated_at_the_repository_lev
     async with db.connect() as conn:
         rows = (
             await conn.execute(
-                select(t.intelligence_event).where(t.intelligence_event.c.alert_id == 999_001)
+                select(t.intelligence_event).where(t.intelligence_event.c.alert_id == alert_db_id)
             )
         ).all()
     assert len(rows) == 1
@@ -129,7 +176,41 @@ async def test_two_different_domains_are_independently_deduplicated(
     db: AsyncEngine, test_settings: Settings
 ) -> None:
     """Testing requirement #6 (multiple domains operating independently): one domain's event does
-    not block or interfere with another's, even within the same correlation group."""
+    not block or interfere with another's, even within the same correlation group. Each event's
+    ``alert_id`` is the real id of its own ``usr.alert_event`` row (created via
+    ``AlertRepository.insert_alert``, the same helper ``test_alerts_service.py`` already uses),
+    satisfying the real foreign key rather than a fabricated one."""
+    alerts = AlertRepository(db)
+    btc_alert_id, _btc_alert_uuid = await alerts.insert_alert(
+        now=AS_OF,
+        alert_type="regime_change",
+        severity="notable",
+        domain="BTC",
+        dedup_key="regime_change:BTC",
+        trigger_condition="Market regime classification",
+        observed_value="accumulation",
+        reference_value=None,
+        evidence_field_ids=["get_market_regime.regime_id"],
+        snapshot_id=None,
+        source_tool_id="get_market_regime",
+        component_status="ok",
+        data_quality_state="ok",
+    )
+    eth_alert_id, _eth_alert_uuid = await alerts.insert_alert(
+        now=AS_OF,
+        alert_type="anomaly",
+        severity="critical",
+        domain="ETH",
+        dedup_key="anomaly:ETH_funding",
+        trigger_condition="Funding rate anomaly",
+        observed_value="extreme_low",
+        reference_value=None,
+        evidence_field_ids=["get_derivatives.funding_rate"],
+        snapshot_id=None,
+        source_tool_id="get_derivatives",
+        component_status="ok",
+        data_quality_state="ok",
+    )
     repo = IntelligenceEventRepository(db)
     btc = await repo.insert_event(
         now=AS_OF,
@@ -146,7 +227,7 @@ async def test_two_different_domains_are_independently_deduplicated(
         dedup_key="regime_change:BTC",
         correlation_key="snapshot:2",
         snapshot_id=None,
-        alert_id=999_002,
+        alert_id=btc_alert_id,
     )
     eth = await repo.insert_event(
         now=AS_OF,
@@ -163,7 +244,7 @@ async def test_two_different_domains_are_independently_deduplicated(
         dedup_key="anomaly:ETH_funding",
         correlation_key="snapshot:2",
         snapshot_id=None,
-        alert_id=999_003,
+        alert_id=eth_alert_id,
     )
     assert btc is not None
     assert eth is not None
@@ -210,11 +291,14 @@ async def test_without_a_redis_client_the_service_still_runs_as_the_sole_runner(
 
 
 async def test_events_carry_full_provenance(
-    db: AsyncEngine, test_settings: Settings, redis: Redis
+    db: AsyncEngine, test_settings: Settings, redis: Redis, market: MarketHarness
 ) -> None:
     """Testing requirement #14 (event provenance): every field the spec's "what changed / when /
     which asset / which source / previous / current / detection method / data quality / downstream
-    action" checklist asks for is actually populated, never left null by omission."""
+    action" checklist asks for is actually populated, never left null by omission. The minimum
+    real market-structure data (see ``_seed_minimum_regime_data``) is seeded first so there is an
+    actual "ok" regime event to inspect, rather than relying on an empty database."""
+    await _seed_minimum_regime_data(market)
     svc = RealtimeIntelligenceService(db, test_settings, redis=redis)
     result = await svc.process_cycle(as_of=AS_OF, knowledge_time=AS_OF, now=AS_OF)
     assert result.alerts is not None

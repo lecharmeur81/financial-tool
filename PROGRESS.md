@@ -3238,5 +3238,59 @@ reading, not guessing, every file this phase touched before changing it.
 **Git commit:** `dc9f009` — "[P35] real-time intelligence: change-detection events, idempotent
 persistence, gated AI triggers" (git runs on the user's machine per C5).
 
+### Phase 35 integration-test fixes (live-verified on Windows)
+
+Both live-verification blockers noted in "Known limitations" #1 above are now resolved.
+
+**1. Windows async event-loop incompatibility (test-environment only).** `psycopg`'s async mode
+cannot use Windows' default `ProactorEventLoop` (it needs `loop.add_reader`/socket-waiter support
+Proactor doesn't provide), so every integration test errored with `psycopg.InterfaceError` the
+moment it opened an async connection. Fixed in `tests/integration/conftest.py`: a platform-gated
+(`sys.platform == "win32"`) `asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())`
+at import time — plain module-level code, not a pytest-asyncio fixture/hook override (overriding
+the `event_loop_policy` fixture itself is deprecated in pytest-asyncio 1.x; this never touches
+that fixture). A no-op on every other platform. No application code changed.
+
+**2. Two genuine test-authoring bugs**, found once the environment fix above let the suite
+actually run (test/fixture code only — no application, runtime, or migration code changed):
+
+- **3 tests** (`test_first_cycle_creates_at_least_one_event_for_the_always_present_regime_candidate`,
+  `test_a_second_identical_cycle_creates_no_new_events`, `test_events_carry_full_provenance` in
+  `test_realtime_service.py`) wrongly assumed `evaluate_regime_change` always fires against a
+  wholly empty database. In fact (`src/cfi/alerts/rules.py`) it only reports a candidate once the
+  regime tool's own snapshot reaches `status="ok"` — correct, intentional R3 behavior (never
+  fabricate a classification from no data), not a defect. Fixed by seeding the minimum real data
+  this actually requires: a new `_seed_minimum_regime_data(market)` helper backfills OHLCV bars
+  for every tracked asset via the existing `market` test fixture + `backfill_step` (the same
+  pattern `test_divergence_api.py` already uses). `market_structure_score`, `btc_trend`,
+  `btc_rsi`, and `market_breadth` are all computed directly from those bars (no re-ingestion),
+  together carrying 0.55 of the "expansion" regime's weight — over the classifier's
+  `min_available_weight` (0.5) threshold, so the snapshot genuinely reaches `status="ok"`.
+- **5 tests** (2 in `test_realtime_service.py`, 3 via the `_seed()` helper in
+  `test_intelligence_api.py`) inserted `sig.intelligence_event` rows with fabricated `alert_id`
+  integers, violating the real `alert_id → usr.alert_event.id` foreign key — by design, the
+  migration's own "deterministic anchor" for idempotency. Fixed by creating a real
+  `usr.alert_event` row first via `AlertRepository.insert_alert` (the same helper
+  `test_alerts_service.py` already uses) and using its actual returned id.
+- Checked whether `sig.intelligence_event` needed adding to `conftest.py`'s `DATA_TABLES`
+  truncation list: it does not — `TRUNCATE usr.alert_event ... RESTART IDENTITY CASCADE` already
+  cascades to `sig.intelligence_event` via its foreign key, fully clearing it before every test.
+
+**Live verification (user's Windows machine, full repository suite):** `uv run pytest` →
+**275 passed, 0 failed** (23m58s) — a superset of the 15 Phase 35 integration tests this pass
+targeted. `uv run ruff check .` → all checks passed. `uv run ruff format --check .` → 398 files
+already formatted. `uv run mypy .` → no issues found in 393 source files.
+
+This closes "Known limitations" #1 above: Phase 35's integration suite (now correctly written)
+has been executed live against real PostgreSQL + Redis and passes in full, alongside the rest of
+the repository's test suite with no regressions.
+
+**Files changed this pass:** `backend/tests/integration/conftest.py` (Windows event-loop fix
+only), `backend/tests/integration/test_realtime_service.py`,
+`backend/tests/integration/test_intelligence_api.py`. No `src/`, no migration, no other test file
+touched.
+
+**Git commit:** `<pending — see below>`
+
 **Next step:** awaiting the user's review. Per the phase's explicit final instruction, **not**
 proceeding to Phase 36 or any further phase automatically (R13).
