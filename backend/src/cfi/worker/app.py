@@ -14,7 +14,6 @@ from typing import Any
 
 from celery import Celery, signals
 
-from cfi.alerts.service import AlertService
 from cfi.analyst.client import anthropic_capabilities
 from cfi.analyst.repository import AnalystRepository
 from cfi.analyst.service import AnalystService
@@ -42,6 +41,7 @@ from cfi.market_structure.jobs import ingest_source as ingest_market_structure_s
 from cfi.market_structure.sources import source as market_structure_source
 from cfi.market_structure.sources import sources_for as market_structure_sources_for
 from cfi.providers.http import ProviderHttpClient
+from cfi.realtime.service import RealtimeIntelligenceService, trigger_cycle_if_due
 from cfi.retail.jobs import ingest_source as ingest_retail_source
 from cfi.retail.sources import source as retail_source
 from cfi.retail.sources import sources_for as retail_sources_for
@@ -109,6 +109,12 @@ def ingest_latest_task(provider_id: str, dataset_id: str) -> dict[str, Any]:
     async def go() -> dict[str, Any]:
         ctx = await rt.context()
         results = await ingest_latest(ctx, ADAPTERS[provider_id], dataset_by_id(dataset_id))
+        # Real-time intelligence (Phase 35): new rows actually landing is "data arrival" — a
+        # no-op poll that inserted nothing is not, and must not debounce-consume the window a
+        # genuine arrival would need. Debounced (see ``trigger_cycle_if_due``), never one cycle
+        # per tick.
+        if any(r.inserted for r in results):
+            await trigger_cycle_if_due(rt.redis(), settings)
         return {"runs": [(r.subject, r.status, r.inserted, r.missing) for r in results]}
 
     return rt.run(go())
@@ -411,26 +417,35 @@ def brief_generate_task(brief_id: str | None = None) -> dict[str, Any]:
 
 @app.task(name="alerts.evaluate", time_limit=120, soft_time_limit=100)
 def alerts_evaluate_task() -> dict[str, Any]:
-    """Run one alert-evaluation cycle (Phase 23). No credential gate and no budget check — this
-    is a fully deterministic rule engine with no AI/Claude component at all, unlike
-    ``analyst_analyze_task``/``brief_generate_task``. A periodic sweep only (ADR-0035 also allows
-    event-driven evaluation after each computation completes, but this platform has no event bus
-    to drive that off — see PROGRESS.md's Phase 23 entry for this documented limitation)."""
+    """Run one real-time intelligence cycle (Phase 23's alert evaluation, extended by Phase 35's
+    ``RealtimeIntelligenceService`` — same task name/schedule entry, so every existing caller,
+    test and beat entry is unaffected). No credential gate on the alert-evaluation half itself —
+    it is still a fully deterministic rule engine; the AI half ``RealtimeIntelligenceService``
+    adds is independently gated (significance, recency, and the existing Phase 21 budget check
+    inside ``analyst.analyze`` itself). Periodic (every 15 minutes, unchanged) *and* triggered
+    shortly after new market data arrives (see ``ingest_latest_task``'s debounced enqueue) — the
+    hybrid model the phase spec asks for, not a rewrite into a streaming system."""
     rt = runtime()
     now = utc_now()
 
     async def go() -> dict[str, Any]:
         engine = rt.engine()
-        svc = AlertService(engine, settings)
-        result = await svc.evaluate(as_of=now, knowledge_time=now, now=now)
+        svc = RealtimeIntelligenceService(engine, settings, redis=rt.redis())
+        result = await svc.process_cycle(as_of=now, knowledge_time=now, now=now)
+        if result.locked_out or result.alerts is None:
+            return {"skipped": "another cycle is already running"}
+        alerts = result.alerts
         return {
-            "created": result.created,
-            "rearmed": result.rearmed,
-            "resolved": result.resolved,
-            "skipped_unchanged": result.skipped_unchanged,
-            "skipped_cooldown": result.skipped_cooldown,
-            "candidates_evaluated": result.candidates_evaluated,
-            "comparison_basis": result.comparison_basis,
+            "created": alerts.created,
+            "rearmed": alerts.rearmed,
+            "resolved": alerts.resolved,
+            "skipped_unchanged": alerts.skipped_unchanged,
+            "skipped_cooldown": alerts.skipped_cooldown,
+            "candidates_evaluated": alerts.candidates_evaluated,
+            "comparison_basis": alerts.comparison_basis,
+            "events_created": result.events_created,
+            "events_deduplicated": result.events_deduplicated,
+            "ai_requested": result.ai_requested,
         }
 
     return rt.run(go())

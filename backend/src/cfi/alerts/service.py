@@ -12,18 +12,18 @@ client, no prompt, no budget check, no validator for LLM output."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from cfi.alerts.lifecycle import Candidate, decide
+from cfi.alerts.lifecycle import Action, Candidate, decide
 from cfi.alerts.repository import AlertRepository
-from cfi.alerts.rules import evaluate_all
+from cfi.alerts.rules import AlertCandidate, evaluate_all
 from cfi.alerts.universe import ALERT_TYPE_TOOL_IDS, cooldown_period
 from cfi.analyst.repository import AnalystRepository
-from cfi.analyst.snapshot import build_snapshot
+from cfi.analyst.snapshot import Snapshot, build_snapshot
 from cfi.brief.changes import ChangeSet, compute_changes
 from cfi.core.config import Settings
 from cfi.core.logging import get_logger
@@ -37,6 +37,20 @@ _FLAGGED_STATE_TYPES = ("divergence", "anomaly", "capital_rotation")
 
 
 @dataclass(frozen=True, slots=True)
+class CandidateDecision:
+    """One candidate's outcome from one evaluation cycle — additive detail ``EvaluationResult``
+    did not previously expose (Phase 35, "Real-Time Intelligence"), needed by
+    ``cfi.realtime.service.RealtimeIntelligenceService`` to build an intelligence event without
+    re-deciding or re-reading anything this method has already computed (R13: extend, never
+    duplicate, the one place a candidate's fate is decided)."""
+
+    candidate: AlertCandidate
+    action: Action
+    alert_id: int | None  # set only for "create"/"rearm" — the two actions that write a row
+    previous_observed_value: str | None  # the dedup key's prior value, if any existed
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluationResult:
     created: int
     rearmed: int
@@ -45,6 +59,13 @@ class EvaluationResult:
     skipped_cooldown: int
     candidates_evaluated: int
     comparison_basis: str
+    # Additive (Phase 35): the per-candidate detail needed to build an intelligence event, and the
+    # snapshot this cycle's candidates were read from — both already computed above, now simply
+    # not thrown away. Defaulted so every existing construction of this dataclass (tests included)
+    # stays valid unchanged.
+    decisions: tuple[CandidateDecision, ...] = field(default_factory=tuple)
+    snapshot_id: int | None = None
+    snapshot: Snapshot | None = None
 
 
 class AlertService:
@@ -89,6 +110,7 @@ class AlertService:
 
         created = rearmed = resolved = skipped_unchanged = skipped_cooldown = 0
         seen_keys: dict[str, set[str]] = {t: set() for t in _FLAGGED_STATE_TYPES}
+        decisions: list[CandidateDecision] = []
 
         for candidate in candidates:
             if candidate.alert_type in seen_keys:
@@ -136,6 +158,15 @@ class AlertService:
                 if old_id is not None and old_id != new_id:
                     await self.repo.supersede(old_id, now=now, superseded_by=new_id)
 
+            decisions.append(
+                CandidateDecision(
+                    candidate=candidate,
+                    action=action,
+                    alert_id=new_id,
+                    previous_observed_value=existing.observed_value if existing else None,
+                )
+            )
+
         resolved += await self._auto_resolve_cleared(seen_keys, now=now)
 
         return EvaluationResult(
@@ -146,6 +177,9 @@ class AlertService:
             skipped_cooldown=skipped_cooldown,
             candidates_evaluated=len(candidates),
             comparison_basis=changes.comparison_basis,
+            decisions=tuple(decisions),
+            snapshot_id=snapshot_id,
+            snapshot=snapshot,
         )
 
     async def _auto_resolve_cleared(self, seen_keys: dict[str, set[str]], *, now: datetime) -> int:
@@ -174,4 +208,4 @@ class AlertService:
         return await self.repo.set_status(alert_id, status=status, now=now)
 
 
-__all__ = ["ALERT_TYPE_TOOL_IDS", "AlertService", "EvaluationResult"]
+__all__ = ["ALERT_TYPE_TOOL_IDS", "AlertService", "CandidateDecision", "EvaluationResult"]

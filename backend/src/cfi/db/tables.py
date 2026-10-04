@@ -534,3 +534,28 @@ decision_journal = Table(
     Column("paper_trade_id", BigInteger),
     schema="usr",
 )
+
+intelligence_event = Table(
+    "intelligence_event",
+    metadata,
+    Column("id", BigInteger, Identity(always=True), primary_key=True),
+    Column("uuid", UUID(as_uuid=True), nullable=False, unique=True),
+    Column("created_at", TS, nullable=False),
+    Column("observed_at", TS, nullable=False),
+    Column("domain", Text, nullable=False),
+    Column("event_type", Text, nullable=False),
+    Column("severity", Text, nullable=False),
+    Column("previous_value", Text),
+    Column("current_value", Text, nullable=False),
+    Column("change_magnitude", Numeric),
+    Column("detection_method", Text, nullable=False),
+    Column("data_quality_state", Text, nullable=False),
+    Column("component_status", Text, nullable=False),
+    Column("dedup_key", Text, nullable=False),
+    Column("correlation_key", Text, nullable=False),
+    Column("snapshot_id", BigInteger),
+    Column("alert_id", BigInteger, unique=True),
+    Column("status", Text, nullable=False),
+    Column("ai_interpretation_id", BigInteger),
+    schema="sig",
+)

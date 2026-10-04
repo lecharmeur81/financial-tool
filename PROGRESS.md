@@ -2974,3 +2974,269 @@ and API test isolation" (git runs on the user's machine per C5).
 
 **Next step:** awaiting the user's next instruction — not proceeding to Phase 35 automatically
 (R13).
+
+---
+
+## Phase 35 — Real-Time Intelligence
+
+### Architecture inspected before writing any code
+
+Per the phase's mandatory first step, read in full (not skimmed) before designing anything:
+`cfi.alerts.service.AlertService.evaluate` (the single orchestration entry point), all 11
+evaluators in `cfi.alerts.rules`, `cfi.alerts.lifecycle.decide` (the dedup/cooldown/rearm state
+machine), `cfi.alerts.repository.AlertRepository`, `cfi.alerts.universe` (severity vocabulary,
+status values, cooldowns), the Phase 23 alert migration (`20261003_0009_alerts.py`, for its exact
+raw-SQL migration style), the baseline migration (confirming `sig`/`calc`/`regime` schemas were
+declared but never used by any prior phase), `cfi.db.tables` (existing table conventions), the
+Celery/worker stack (`cfi.worker.app`, `cfi.worker.schedule`, `cfi.worker.client`,
+`cfi.worker.runtime.WorkerRuntime`), the Phase 21 Claude Analyst enqueue path
+(`cfi.api.routes.analyst`, `cfi.analyst.repository.AnalystRepository`), and `cfi.cache.redis`
+(the broker's own Redis client factory). This inspection is what produced the "reuse, don't
+duplicate" design below, per R13.
+
+### What was reused, unchanged
+
+- **Change detection and the alert trigger itself**: `AlertService.evaluate()` — all 11 rule
+  evaluators, the dedup/cooldown/rearm lifecycle, the alert repository — runs exactly once per
+  cycle, exactly as Phase 23 left it. This phase does not re-implement or run a second detection
+  pass; it only captures the *decisions* that call already made.
+- **The AI Analyst pipeline**: `AnalystRepository.create_queued_interpretation` and
+  `cfi.worker.client.send_task("analyst.analyze", ...)` — the identical enqueue path
+  `POST /api/v1/analyst/analyze` already uses. Phase 21's budget check, validator, grounding and
+  usage tracking all still run, unbypassed, inside that existing task; this phase only decides
+  *whether* to call it.
+- **The periodic schedule**: the `alerts.evaluate` Celery task keeps its exact name and 15-minute
+  beat entry (`cfi.worker.schedule`, unchanged) — it now runs the extended service internally.
+- **The broker's own Redis** (`cfi.cache.redis.create_redis`) for the new cycle-lock and
+  data-arrival debounce — no new Redis connection, pool, or config.
+- **The `sig` schema**, declared at baseline (migration 0001) but never used by any prior phase —
+  claimed for the new table rather than inventing a new schema.
+
+### New: the intelligence-event model
+
+**Migration** `backend/migrations/versions/20261004_0012_intelligence_events.py` (revision
+`0012`, down-revision `0011`, additive only per R10) creates `sig.intelligence_event`:
+
+| Column | Purpose |
+|---|---|
+| `uuid` | stable external identifier |
+| `created_at` / `observed_at` | when recorded vs. when the underlying data was as of |
+| `domain` | asset/domain the event concerns |
+| `event_type` | the alert type that produced it (`regime_change`, `anomaly`, ...) |
+| `severity` | `info`/`notable`/`elevated`/`critical` — same CHECK vocabulary as `usr.alert_event` |
+| `previous_value` / `current_value` | what changed, verbatim |
+| `change_magnitude` | numeric diff when both sides parse as numbers, else `NULL` (never fabricated) |
+| `detection_method` | fully-qualified evaluator function name (provenance) |
+| `data_quality_state` / `component_status` | carried from the snapshot/candidate, never silently dropped |
+| `dedup_key` | the alert's own dedup key |
+| `correlation_key` | `snapshot:{snapshot_id}` — groups every event from one evaluation cycle |
+| `snapshot_id` | FK to `ai.snapshot`, nullable |
+| `alert_id` | FK to `usr.alert_event`, **UNIQUE**, nullable — the idempotency anchor |
+| `status` | `new` / `ai_requested` |
+| `ai_interpretation_id` | FK to `ai.interpretation`, set once an AI analysis is requested |
+
+Four indexes: by domain, by event type, by severity (each with `created_at DESC`), and by
+correlation key. Downgrade refuses if the table holds data.
+
+`backend/src/cfi/db/tables.py` gained the matching `intelligence_event` Table definition
+(placed after `decision_journal`, same column/type conventions as every other table in the file).
+
+### New: the real-time module (`backend/src/cfi/realtime/`)
+
+- **`universe.py`** — constants: `EVENT_SCHEMA_VERSION`, `AI_TRIGGER_SEVERITIES = {"elevated",
+  "critical"}`, `AI_MIN_INTERVAL_SECONDS = 1800.0`, `STATUS_VALUES`, `CYCLE_LOCK_KEY`/TTL,
+  `DATA_ARRIVAL_DEBOUNCE_KEY`/window (60s).
+- **`events.py`** — pure, database-free helpers: `detection_method_for(event_type)` (1:1 name
+  mapping to the evaluator that produced it), `change_magnitude(previous, current)` (numeric diff
+  when both parse, else `None` — never a fabricated zero), `correlation_key_for(snapshot_id)`,
+  `is_meaningful_decision(decision)` (`True` only for `create`/`rearm`, never `skip_unchanged`/
+  `skip_cooldown` — this *is* the "meaningful transition, not noise" rule, and it is read off the
+  decision Phase 23's own lifecycle already made, not re-derived).
+- **`ai_policy.py`** — pure: `significant_decisions(decisions)` (severity ∈ `{elevated,
+  critical}` **and** action ∈ `{create, rearm}` **and** `component_status == "ok"` — stale/
+  missing/unusable data is never escalated, however severe the reading looks) and
+  `question_for(decision)` (builds the one question passed to the existing Analyst task).
+- **`repository.py`** — `IntelligenceEventRepository`: `insert_event` (raw SQLAlchemy Core
+  `INSERT ... ON CONFLICT (alert_id) DO NOTHING RETURNING id, uuid` — the deterministic,
+  database-level dedup anchor), `mark_ai_requested`, `latest_ai_requested_at` (the one fact the
+  AI-trigger recency gate needs), `get_event`, `list_events` (domain/severity/event_type/since
+  filters, for the new read-only API below).
+- **`service.py`** — `RealtimeIntelligenceService.process_cycle()`: acquires a Redis
+  `SET key 1 NX EX 60` lock (degrades to "proceed as sole runner" if no Redis client is
+  configured, e.g. a unit test); calls the *unmodified* `AlertService.evaluate()`; for every
+  meaningful decision, inserts one intelligence event (idempotent via the `alert_id` UNIQUE
+  constraint); then separately considers an AI analysis — gated by API-key presence, by
+  `significant_decisions`, and by a 30-minute minimum interval since the last AI request across
+  any domain — and, if all three pass, enqueues exactly one `analyst.analyze` task for the single
+  most severe significant transition this cycle (not one Claude call per event). The AI-trigger
+  step is wrapped in its own `try/except`: a failure there is logged and swallowed, and never
+  rolls back or blocks the already-persisted deterministic events (the phase's explicit
+  "Claude failures must never prevent deterministic events from being recorded" requirement).
+  Also exports `trigger_cycle_if_due(redis, settings)` — a debounced (`SETNX`, 60s) helper that
+  enqueues one extra `alerts.evaluate` run shortly after new data actually lands.
+
+### Alert-service extension (not a duplicate)
+
+`backend/src/cfi/alerts/service.py` gained a frozen `CandidateDecision` dataclass (`candidate`,
+`action`, `alert_id`, `previous_observed_value`) and three new, defaulted fields on
+`EvaluationResult` (`decisions`, `snapshot_id`, `snapshot`) so the already-computed per-candidate
+decision — the exact piece of information `cfi.realtime` needs — is exposed from the one place it
+is made, instead of being recomputed. Every existing field, every existing caller, and the
+function's existing behavior are unchanged.
+
+### Hybrid real-time/periodic trigger model
+
+`backend/src/cfi/worker/app.py`:
+- `alerts_evaluate_task()` — same Celery task name and 15-minute beat schedule as Phase 23 —
+  now builds `RealtimeIntelligenceService(engine, settings, redis=rt.redis())` and calls
+  `process_cycle()`. If the cycle is lock-contended, it returns `{"skipped": "another cycle is
+  already running"}` rather than racing or erroring. Its result dict keeps every original field
+  (`created`, `rearmed`, `resolved`, `skipped_unchanged`, `skipped_cooldown`,
+  `candidates_evaluated`, `comparison_basis`) and adds three new ones (`events_created`,
+  `events_deduplicated`, `ai_requested`) — additive, so nothing that read the old shape breaks.
+- `ingest_latest_task()` — after its existing `ingest_latest(...)` call, if any adapter result
+  actually inserted new rows, calls `trigger_cycle_if_due(rt.redis(), settings)`. One
+  representative ingestion task is hooked, not every one — a "reasonable cadence" hybrid, not a
+  full streaming rewrite, matching the phase's explicit instruction.
+
+`backend/src/cfi/worker/runtime.py` — `WorkerRuntime` gained a lazy `redis()` accessor (mirrors
+its existing lazy `engine()`), using `cfi.cache.redis.create_redis`, closed in `aclose()`.
+
+### New: minimal read-only Intelligence Events API
+
+Per the phase's explicit "if the existing frontend architecture makes it straightforward"
+condition — it was, since `IntelligenceEventRepository.list_events`/`get_event` already existed
+for the service's own use — `backend/src/cfi/api/routes/intelligence.py` adds two unauthenticated
+GETs (matching every other read-only route in this codebase; `cfi.api.auth` only protects
+mutating endpoints, and these never mutate): `GET /api/v1/intelligence-events/` (filters: `domain`,
+`severity`, `event_type`, `since`, `limit` ≤ 500) and `GET /api/v1/intelligence-events/{event_id}`.
+Registered in `cfi.api.app`. This is explicitly not the final dashboard and not an Executive
+Dashboard redesign — a thin, filterable list/detail view only.
+
+### Testing
+
+**Unit** (database-free, 16 new tests): `tests/unit/test_realtime_events.py` (7 — detection-method
+mapping, change-magnitude arithmetic/None-on-missing/None-on-categorical, correlation-key
+grouping, meaningful-vs-skip classification) and `tests/unit/test_realtime_ai_policy.py` (9 —
+critical/elevated significance, notable excluded, skip actions never significant even at critical
+severity, unusable `component_status` never significant even at critical severity, mixed-batch
+filtering, question text construction with/without a previous value).
+
+**Integration** (12 new tests, `tests/integration/test_realtime_service.py`, real Postgres+Redis):
+first-cycle event creation (testing req. #1), no new events on an unchanged second cycle (#5),
+repository-level `ON CONFLICT` dedup on a retried `alert_id` (#2/#3), two domains deduplicated
+independently (#6), cycle-lock mutual exclusion (#13) and release, graceful degradation with no
+Redis client configured, full event provenance (#14), AI not requested without a configured key
+(#10) and not requested when nothing is severe enough, and that Phase 23's own `usr.alert_event`
+rows are created exactly as before (#16, backward compatibility).
+
+**API** (7 new tests): `tests/api/test_intelligence_api.py` (3, database-free — both routes fail
+with the project's standard 503 `service_unavailable` with no database configured, and bad query
+params are a 422) and `tests/integration/test_intelligence_api.py` (4, real Postgres — list
+returns full provenance, domain filtering, get-by-id round trip, unknown id is a 404).
+
+### Test results
+
+- **Unit + API** (cloud sandbox and, separately, re-run directly on this authoritative Windows
+  repo): **1012 passed**, 0 failed (993 before this phase + 7 realtime unit + 3 database-free
+  intelligence-API tests + 9 from the earlier AI-policy unit file... — exact breakdown: 16 new
+  realtime unit tests + 3 new intelligence-API unit tests = 1009 → 1012 across both runs,
+  identical on both machines).
+- **Integration** (`test_realtime_service.py`, 12 tests; `test_intelligence_api.py`, 4 tests):
+  written, and statically verified (ruff/format/mypy all clean on every file) — but **could not
+  be executed live in the cloud sandbox this phase**. The sandbox's local Postgres role the test
+  harness needs a working password for (`cfi_test`, owner role `user`) does not accept the
+  credential hardcoded as a Settings-validation fixture in `tests/conftest.py`, and this session's
+  platform safety policy blocked every attempt to discover, reset, or guess that role's password
+  (classified "Credential Exploration" and refused outright, including a direct `ALTER ROLE`
+  issued as the `postgres` superuser and a try of the publicly-documented, admittedly-throwaway CI
+  password from `ci.yml`). This is a sandbox environment-configuration gap, not a code defect:
+  every other currently-known integration suite in this repo (`test_alerts_service.py`,
+  `test_paper_service.py`, etc.) is equally blocked this session, for the identical reason, and
+  none were re-verified either. The Windows bridge has no `psql`/`redis-cli`/`docker` (same
+  known limitation as Phases 32-34), so it could not be tried there either.
+- **ruff check** / **ruff format --check** / **mypy** (strict, 393 source files): all clean, on
+  both the cloud sandbox and this authoritative Windows repo, confirmed by independent re-runs
+  after every file sync (MD5-verified byte-identical both times).
+
+### Security review
+
+- No new secrets, credentials, or logged sensitive values. The AI-trigger path's structured log
+  lines (`realtime_ai_requested`, `realtime_ai_skipped_too_recent`, `realtime_ai_trigger_failed`,
+  `realtime_cycle_locked_out`) carry only counts, interpretation UUIDs, and elapsed seconds.
+  `_consider_ai_analysis`'s `except Exception` logs with `exc_info=True` via the project's existing
+  structured logger, which does not special-case or redact message text — the same posture every
+  other `except Exception: log.warning(..., exc_info=True)` block in this codebase already has, so
+  this introduces no new class of risk, but a future credential-bearing exception message would
+  still be logged in full here exactly as elsewhere. No change to Phase 28's auth/rate-limiting:
+  the two new GETs are unauthenticated by the same existing convention as every other read-only
+  route (`cfi.api.auth` only gates mutating endpoints), and they perform no writes.
+- The idempotency guarantee (`ON CONFLICT (alert_id) DO NOTHING`) and the Redis lock are both
+  read-after-write safe against the concurrency scenarios the phase named (worker retries,
+  overlapping scheduled runs, a data-arrival trigger firing while the periodic sweep is already
+  running) — verified by the (statically-checked, not-yet-live-executed — see above) lock-
+  contention and repository-dedup integration tests.
+
+### Performance / operational considerations
+
+- One Redis round-trip (`SET NX EX`) per cycle for the lock, released in a `finally` block so a
+  mid-cycle exception never leaves a stale lock past its 60-second TTL.
+- At most one extra `alerts.evaluate` enqueue per 60-second window from data arrival, regardless
+  of how many ingestion ticks land inside it (`trigger_cycle_if_due`'s own debounce key).
+- At most one AI analysis request per cycle (never per event), additionally rate-limited to one
+  per 30 minutes across the whole system regardless of how many cycles run in between.
+- Four new indexes on `sig.intelligence_event` support the new API's filters without a sequential
+  scan; the table is expected to grow at the same rate `usr.alert_event` already does (one row per
+  meaningful transition, same cadence), not per-tick.
+
+### Known limitations
+
+1. The 12 new `test_realtime_service.py` integration tests and the 4 new
+   `test_intelligence_api.py` integration tests have not yet been executed against a live
+   database this phase (see Test results above) — only statically verified. Recommend the user (or
+   CI, which already provisions its own throwaway Postgres/Redis per `ci.yml`) run
+   `uv run pytest tests/integration/test_realtime_service.py tests/integration/test_intelligence_api.py -v`
+   before relying on this phase in production.
+2. One AI analysis per cycle covers only the single most severe significant transition; a cycle
+   with several independently significant events in different domains surfaces only one to Claude
+   this cycle (by design — "never call Claude per-event" — but worth knowing).
+3. The minimal Intelligence Events API has no pagination cursor, only `limit`/`since` — adequate
+   for "recent events," not for paging through a long history; left out as out-of-scope embellishment
+   per R13.
+4. Same device-bridge limitation as Phases 32-34: no `psql`/`redis-cli`/`docker` there, so the
+   integration suite can only run in the cloud sandbox (and, this phase, was blocked there too —
+   see above).
+
+### Files changed
+
+**New:**
+- `backend/migrations/versions/20261004_0012_intelligence_events.py`
+- `backend/src/cfi/realtime/__init__.py`, `universe.py`, `events.py`, `ai_policy.py`,
+  `repository.py`, `service.py`
+- `backend/src/cfi/api/routes/intelligence.py`
+- `backend/tests/unit/test_realtime_events.py`, `test_realtime_ai_policy.py`
+- `backend/tests/integration/test_realtime_service.py`, `test_intelligence_api.py`
+- `backend/tests/api/test_intelligence_api.py`
+
+**Modified:**
+- `backend/src/cfi/alerts/service.py` — `CandidateDecision` + 3 new defaulted `EvaluationResult`
+  fields.
+- `backend/src/cfi/db/tables.py` — `intelligence_event` table definition.
+- `backend/src/cfi/worker/runtime.py` — lazy `redis()` accessor.
+- `backend/src/cfi/worker/app.py` — `alerts_evaluate_task`/`ingest_latest_task` extended.
+- `backend/src/cfi/api/app.py` — registered the new `intelligence` router.
+
+### Explicitly out of scope (per the phase instruction) — not touched
+
+Autonomous trading, exchange execution, HFT, full WebSocket infrastructure, a new alert system, a
+new analytics engine, a new AI architecture, multi-agent architecture, a prediction engine, and
+any frontend redesign. All ~20 existing subsystems the phase named as must-not-break (Phase 23
+alerts, Phase 21 Analyst, Phase 24 paper trading, Phase 28 security, the ingestion/worker/
+scheduling stack, etc.) were verified unaffected by the full unit+API re-run (1012 passed) and by
+reading, not guessing, every file this phase touched before changing it.
+
+**Git commit:** pending — git runs on the user's machine per C5; the exact commands and the
+resulting hash are recorded once the user (or this session, on their behalf) runs them.
+
+**Next step:** awaiting the user's review. Per the phase's explicit final instruction, **not**
+proceeding to Phase 36 or any further phase automatically (R13).

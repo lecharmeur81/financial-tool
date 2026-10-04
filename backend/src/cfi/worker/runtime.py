@@ -11,8 +11,10 @@ import asyncio
 from collections.abc import Coroutine
 from typing import Any
 
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from cfi.cache.redis import create_redis
 from cfi.core.config import Settings
 from cfi.db.engine import create_engine
 from cfi.derivatives import sources as derivatives
@@ -34,9 +36,19 @@ class WorkerRuntime:
         self.loop = asyncio.new_event_loop()
         self._context: JobContext | None = None
         self._engine: AsyncEngine | None = None
+        self._redis: Redis | None = None
 
     def run[T](self, coro: Coroutine[Any, Any, T]) -> T:
         return self.loop.run_until_complete(coro)
+
+    def redis(self) -> Redis:
+        """One Redis client per process (Phase 35, "Real-Time Intelligence"), the same broker
+        connection every worker process already depends on (ADR-0023) — not a second Redis
+        dependency, and not reused across worker processes (ADR-0046's own per-process posture,
+        same as :meth:`engine`)."""
+        if self._redis is None:
+            self._redis = create_redis(self.settings)
+        return self._redis
 
     def engine(self) -> AsyncEngine:
         """A bare DB engine, without :meth:`context`'s ingestion-specific adapter/client/dataset
@@ -94,3 +106,6 @@ class WorkerRuntime:
         if self._engine is not None:
             await self._engine.dispose()
             self._engine = None
+        if self._redis is not None:
+            await self._redis.aclose()
+            self._redis = None
