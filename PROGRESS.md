@@ -2,8 +2,8 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 28 — Security Corrections → implemented and tested in the sandbox; sync/commit/
-re-verification on Windows pending (see the Phase 28 log entry below). Builds directly on Phase 27's
+**Current phase:** 28 — Security Corrections → implemented, tested, synced and committed on
+Windows (`8a6ceaf`) (see the Phase 28 log entry below). Builds directly on Phase 27's
 read-only Security Audit (same date), which found no critical blockers but no authentication, no rate
 limiting, production docs left open, and several missing production headers. Phase 28 adds: API-key
 authentication (`X-API-Key`, fail-secure in production) on all mutating/AI-triggering routes; `slowapi`
@@ -52,7 +52,7 @@ test/build all clean.
 | 25 | Decision journal | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 25 log entry) |
 | 26 | Executive dashboard | ✅ Complete — verified in sandbox AND on Windows (`926d4ad`) (see Phase 26 log entry) |
 | 27 | Security audit (read-only) | ✅ Complete — report delivered, zero code changes (see Phase 27 log entry) |
-| 28 | Security corrections | ✅ Complete — self-verified in sandbox; delivery/commit on Windows pending (see Phase 28 log entry) |
+| 28 | Security corrections | ✅ Complete — verified in sandbox AND on Windows (`8a6ceaf`) (see Phase 28 log entry) |
 | — | Production | ⏳ Not started |
 | — | Real-time intelligence | ⏳ Not started |
 
@@ -2677,12 +2677,20 @@ of either stack was not re-run in this log entry's sandbox pass (see Known limit
   This is acceptable for the current single-user/local application per the user's explicit
   instruction, not a gap to be silently carried forward — ADR-0075 records it as a hard prerequisite
   before multi-tenancy.
-- This log entry reflects the sandbox-only pass; sync to the Windows repo, the Windows git commit, and
-  a Windows-side Docker re-verification are recorded as a follow-up once performed (see commit hash
-  note below if already captured).
+- Synced to the Windows repo and committed there (`8a6ceaf`). The backend suite (981 tests,
+  ruff, ruff format, mypy) was re-run directly on Windows and passed; the frontend suite (103
+  tests, lint, typecheck, build) was not re-run on Windows in this pass — `pnpm install` could not
+  complete in reasonable time over the remote device bridge (package extraction onto the mounted
+  Windows folder was extremely slow; raw network throughput tested fine, so the bottleneck is
+  file-write/extraction over the bridge, not bandwidth) — it remains verified from its full,
+  passing sandbox run earlier in this phase, and every changed/new frontend file's content was
+  byte-for-byte verified (MD5) against the sandbox after transfer. `docker compose config` could
+  not be re-run on Windows either (no `docker` CLI available over this bridge); both compose files
+  were validated as structurally correct YAML on Windows and were already verified with `docker
+  compose config` in the sandbox (see Priority 5 above).
 
-**Git commit:** see the Phase 28 completion report delivered to the user for the exact hash once the
-Windows-side commit is made (git runs on the user's machine per C5).
+**Git commit:** `8a6ceaf` — "[P28] security corrections: API-key auth, rate limiting, prod
+hardening" (git runs on the user's machine per C5).
 
 **Next step:** awaiting the user's next instruction — **not proceeding to Phase 29** per the user's
 own explicit instruction (R13).
