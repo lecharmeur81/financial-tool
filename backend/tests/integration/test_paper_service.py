@@ -15,6 +15,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.backtest.costs import CURRENT_VERSION
@@ -36,7 +37,26 @@ EXIT_AS_OF = NOW
 
 
 async def _seed_btc(market: MarketHarness) -> None:
+    """Seed 280 days of BTC daily bars, then realign each bar's ``ingested_at`` to its own
+    ``available_at`` (the exact convention Phase 16's backtest fixtures already use for synthetic
+    bars — see ``test_backtest_engine.py``) rather than leaving it at the single moment this one
+    bulk ``backfill_step`` call ran.
+
+    This matters only because this suite deliberately exercises a *point-in-time* lookup
+    (``ENTRY_AS_OF`` is 30 days before ``EXIT_AS_OF``), unlike every other ``MarketHarness``
+    consumer, which only ever queries "as of now" (``NOW``, the same moment the harness's wall
+    clock is fixed to). ``cfi.market.queries.MarketQueries.bars`` correctly requires
+    ``ingested_at <= as_of`` (knowledge-time, not just real-world availability) — a single bulk
+    backfill stamps every row with the one moment *that job* ran, which is accurate for a
+    real deployment (a backfill always precedes the "now" that queries it) but is not a faithful
+    stand-in for "this bar was ingested shortly after its own day closed," which is what an
+    entry 30 days in the past needs in order to see it. Setting ``ingested_at = available_at``
+    keeps every bar's point-in-time/knowledge-time gating fully enforced (R3) — it only makes the
+    simulated ingestion timeline realistic instead of an artifact of when this test happened to
+    call ``backfill_step``."""
     await backfill_step(market.ctx, MARKET_ADAPTERS["coinbase"], DAILY, "BTC", depth_days=280)
+    async with market.db.begin() as conn:
+        await conn.execute(text("UPDATE obs.market_bar SET ingested_at = available_at"))
 
 
 async def test_create_trade_persists_entry_fields_and_a_decision_snapshot(
