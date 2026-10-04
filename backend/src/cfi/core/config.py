@@ -52,7 +52,23 @@ class Settings(BaseSettings):
     # only ever issues GETs, which are never protected) but required in production — see
     # ``_api_key_required_in_production`` below, which fails the app at startup rather than
     # serving unauthenticated mutating traffic (R3/R9: fail secure, never a silent gap).
+    #
+    # Phase 32 finding: ``compose.prod.yaml`` inherits ``CFI_API_KEY: ${CFI_API_KEY:-}`` from the
+    # base compose file's shared anchor, so an operator who forgets to set ``CFI_API_KEY`` in
+    # their ``.env`` gets the literal empty string as the container's env value, not an absent
+    # variable. Pydantic would otherwise parse that into ``SecretStr("")``, which is not ``None``
+    # — silently defeating both the fail-secure startup check below *and*
+    # ``cfi.api.auth.require_api_key``'s ``secrets.compare_digest(supplied, "")``, which accepts a
+    # blank ``X-API-Key`` header. Treating a blank/whitespace value as unset closes that gap at
+    # the single point every other check already trusts.
     api_key: SecretStr | None = None
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def _blank_api_key_is_unset(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
 
     # Database privilege-separation (Phase 28, Priority 6). Optional, additive, opt-in: when
     # unset, the API/worker use ``database_url`` exactly as before. When set, the API/worker use

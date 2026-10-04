@@ -116,6 +116,39 @@ def test_settings_construct_fine_in_production_with_an_api_key() -> None:
     assert settings.api_key is not None
 
 
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_settings_refuse_to_construct_in_production_with_a_blank_api_key(blank: str) -> None:
+    """Phase 32 finding: ``compose.prod.yaml`` inherits ``CFI_API_KEY: ${CFI_API_KEY:-}`` from the
+    base compose file, so an operator who forgets to set ``CFI_API_KEY`` in their ``.env`` gets
+    the literal empty string as the container's env value — not an absent variable. Pydantic would
+    otherwise parse that as ``SecretStr("")``, which is not ``None``, silently defeating the
+    fail-secure check above. A blank/whitespace-only value must be treated exactly like ``None``."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="CFI_API_KEY must be set"):
+        Settings(
+            environment="production",
+            database_url=SecretStr(TEST_DATABASE_URL),
+            redis_url=SecretStr(TEST_REDIS_URL),
+            api_key=blank,  # type: ignore[arg-type]
+        )
+
+
+def test_a_blank_api_key_normalizes_to_none_outside_production() -> None:
+    """The same normalization applies in every environment, so a blank value never reaches
+    ``cfi.api.auth.require_api_key`` as a (falsy-but-not-``None``) key that an empty
+    ``X-API-Key`` header could then match via ``secrets.compare_digest("", "")``. Construct
+    directly (rather than via ``model_copy``, which skips validators) so the ``mode="before"``
+    normalizer actually runs."""
+    settings = Settings(
+        environment="test",
+        database_url=SecretStr(TEST_DATABASE_URL),
+        redis_url=SecretStr(TEST_REDIS_URL),
+        api_key="",  # type: ignore[arg-type]
+    )
+    assert settings.api_key is None
+
+
 # --------------------------------------------------------------------------------- Rate limiting
 
 
