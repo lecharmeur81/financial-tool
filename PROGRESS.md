@@ -2,7 +2,10 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 32 — Production Readiness Assessment → verified against the authoritative
+**Current phase:** 34 — Fix Remaining Phase 33 Findings → all three issues Phase 33 surfaced
+(gross_pnl long/short mirror asymmetry, invalid alert severity test fixture, market/regime API
+test-isolation gap) fixed and verified; see the Phase 34 log entry at the end of this file. Phase 32
+— Production Readiness Assessment → verified against the authoritative
 Windows repo; one fail-secure gap found and fixed (`3831532`); see the Phase 29-32 log entry
 at the end of this file and the Phase 32 report delivered in chat for the full verdict. Phase 28
 (Security Corrections) → implemented, tested, synced and committed on Windows (`8a6ceaf`). Builds directly on Phase 27's
@@ -2863,3 +2866,111 @@ app code" (git runs on the user's machine per C5).
 (R13). Two of the three newly-surfaced issues above (the gross_pnl mirror asymmetry and the
 invalid alert severity value) look like reasonable candidates for a future phase; the third (test
 isolation for `test_settings`-only tests) is lower-severity and test-only.
+
+---
+
+## Phase 34 — Fix Remaining Phase 33 Findings
+
+Scope (per the phase instruction): fix only the three issues Phase 33 explicitly discovered and
+reported, with regression tests for each. No redesign, no change to Phase 33's point-in-time fix,
+no change to authentication/security/JSON-serialization/production-readiness work.
+
+### Finding 1 — P&L long/short mirror asymmetry
+
+**Root cause:** `calculate_pnl()` in `cfi.paper.pnl` sized the trade's `quantity` as
+`notional / entry_price_execution`. The execution price is direction-dependent by construction
+(`slipped_price`/`execution_price`: adverse *upward* for a long's "buy" entry, adverse *downward*
+for a short's "sell" entry), so a long and a short trade opened at the identical *observed* entry
+price ended up with different `quantity` values — which broke the mirror symmetry the module's
+own docstring promises for `gross_pnl` ("the pure price-move result, computed from the two
+*observed* prices... with no cost assumption at all"). The existing unit test asserting mirror
+symmetry (`test_long_and_short_are_mirror_images_on_the_same_price_move`) never caught this
+because it artificially set `entry_price_execution == entry_price_observed` (zero slippage),
+sidestepping the asymmetry entirely — only the real integration test, using genuinely slipped
+execution prices, exposed it.
+
+**Fix (smallest correct change, one line plus explanatory comment):**
+`backend/src/cfi/paper/pnl.py` — `quantity` is now `notional / entry_price_observed` instead of
+`notional / entry_price_execution`. `entry_price_observed` is direction-independent, so `quantity`
+is now identical between a mirrored long and short, restoring the documented symmetry. Nothing
+else in the pipeline changed: `fees_total`/`slippage_cost`/`net_pnl`/`return_pct`/`margin`/
+leverage semantics all still use the same formulas, just multiplied by the corrected `quantity`.
+
+**Tests added** (`backend/tests/unit/test_paper_pnl.py`, Finding 1 section): a `_realistic_trade`
+helper that computes genuinely slipped, direction-appropriate execution prices via
+`execution_price()` itself (not the pre-existing test's equal-price shortcut) —
+`test_mirrored_long_and_short_have_equal_and_opposite_gross_pnl_under_real_slippage` (reproduces
+the actual bug and checks the exact spec formula), `test_profitable_long_mirrors_profitable_short_
+on_the_opposite_price_move`, `test_losing_long_mirrors_losing_short_on_the_opposite_price_move`,
+`test_zero_price_movement_produces_zero_gross_pnl_for_both_directions`, and
+`test_fee_and_slippage_cost_behavior_is_unchanged_by_the_quantity_fix` (fee linearity in notional,
+exact net/gross/slippage/fees reconciliation, both preserved). All 23 pre-existing unit tests in
+that file still pass unmodified. The real integration test,
+`test_short_trade_is_the_mirror_of_a_long_trade_on_the_same_prices`
+(`test_paper_service.py`), now passes.
+
+### Finding 2 — Journal alert-severity test violates the DB constraint
+
+**Root cause:** `test_relevant_alert_ids_capture_active_alerts_at_decision_time`
+(`test_journal_service.py`) seeded an alert with `severity="medium"`. The canonical allowed values
+are defined by `usr.alert_event`'s CHECK constraint (`migrations/versions/20261003_0009_alerts.py`:
+`SEVERITY = "'info','notable','elevated','critical'"`) — `"medium"` was never one of them; the test
+fixture was simply wrong, confirmed independently of Phase 33's fix.
+
+**Fix (test-only, no application/DB change):** the fixture now uses `severity="notable"` — the
+value `cfi.alerts.rules` itself uses for an ordinary active alert — with a comment explaining the
+canonical values and why. The DB constraint is unchanged.
+
+### Finding 3 — Market/regime API cross-test pollution
+
+**Root cause:** `test_market_api.py::test_summary_is_honest_about_untracked_data` and
+`test_regime_api.py::test_current_is_mixed_unclear_when_nothing_is_loaded` both assume an empty
+database (their premise is "no data loaded"), but both requested only the `test_settings` fixture,
+not the auto-truncating `db` fixture (`tests/integration/conftest.py`). `MarketHarness`'s bulk
+seeding writes through its own engine and is never asked to clean up, so these two tests silently
+inherited `obs.market_bar` rows left behind by an earlier test in the same pytest session —
+passing in isolation, failing when run after `test_paper_service.py`/`test_journal_service.py` (or
+any other bar-seeding test). Confirmed independent of Phase 33's fix by reproducing the same two
+failures with the `ingested_at` realignment temporarily reverted.
+
+**Fix (test-only, no API behavior change):** both tests now also request the `db` fixture, which
+truncates every data table before the test runs — restoring the "nothing loaded" premise they
+depend on regardless of what ran before them. Verified both orders: running them immediately after
+a bar-seeding test, and in the reverse order, both pass.
+
+### Verification
+
+Targeted: `tests/unit/test_paper_pnl.py` (28/28, including the 5 new), `test_journal_service.py`
+(17/17), `test_market_api.py` + `test_regime_api.py` together (11/11, including both former
+failures, confirmed order-independent). Phase 33 regression coverage re-verified unaffected:
+`test_market_price_point_in_time.py` (6/6).
+
+Full suite (cloud sandbox, real local Postgres/Redis): unit + API `993 passed`; full integration
+suite `260 passed, 0 failed` (`tests/integration`, 373s). `ruff check` / `ruff format --check` /
+`mypy` (380 source files) all clean.
+
+Re-run directly on the authoritative Windows repo (unit/API only — this bridge still has no
+`psql`/`redis-cli`/`docker` to run the integration suite against it): `ruff check`, `ruff format
+--check`, `mypy` (380 files), and `pytest tests/unit tests/api` (993 passed) all clean.
+
+**Files changed:**
+- `backend/src/cfi/paper/pnl.py` — Finding 1 fix.
+- `backend/tests/unit/test_paper_pnl.py` — Finding 1 regression tests.
+- `backend/tests/integration/test_journal_service.py` — Finding 2 fixture fix.
+- `backend/tests/integration/test_market_api.py` — Finding 3 isolation fix.
+- `backend/tests/integration/test_regime_api.py` — Finding 3 isolation fix.
+
+**Confirmation Phase 33 behavior is intact:** the `ingested_at = available_at` realignment in both
+services' `_seed_btc()` helpers is untouched; `test_market_price_point_in_time.py`'s 6 boundary
+tests all still pass; look-ahead/knowledge-time protection unchanged.
+
+**Remaining issues:** none newly discovered in this phase. The device bridge still has no
+`psql`/`redis-cli`/`docker`, so the integration suite could only be run directly against the
+authoritative repo's unit/API subset, not its integration subset (same known limitation as Phases
+32-33).
+
+**Git commit:** `2c8863e` — "[P34] fix P&L mirror asymmetry, invalid alert-severity fixture,
+and API test isolation" (git runs on the user's machine per C5).
+
+**Next step:** awaiting the user's next instruction — not proceeding to Phase 35 automatically
+(R13).
