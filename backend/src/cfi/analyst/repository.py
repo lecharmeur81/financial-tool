@@ -18,13 +18,23 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.db import tables as t
+
+
+class SnapshotRow(NamedTuple):
+    """One stored ``ai.snapshot`` row, as the read path needs it (Phase 39)."""
+
+    row_id: int
+    uuid: str
+    payload_hash: str
+    created_at: datetime
+    payload: dict[str, Any]
 
 
 class AnalystRepository:
@@ -78,6 +88,36 @@ class AnalystRepository:
         async with self.engine.connect() as conn:
             row = (await conn.execute(stmt)).first()
         return (int(row[0]), row[1]) if row else None
+
+    async def latest_snapshot_row(self) -> SnapshotRow | None:
+        """The most recent ``ai.snapshot`` row with its identity columns (Phase 39).
+
+        Read-only, and additive: ``latest_snapshot`` above is unchanged. It returns the same
+        row, plus the ``uuid``, ``payload_hash`` and ``created_at`` the Decision Context needs to
+        build a ``SnapshotRef`` - the decision read path reads a stored snapshot, it never builds
+        one. ``id`` breaks a ``created_at`` tie deterministically."""
+        stmt = (
+            select(
+                t.ai_snapshot.c.id,
+                t.ai_snapshot.c.uuid,
+                t.ai_snapshot.c.payload_hash,
+                t.ai_snapshot.c.created_at,
+                t.ai_snapshot.c.payload,
+            )
+            .order_by(t.ai_snapshot.c.created_at.desc(), t.ai_snapshot.c.id.desc())
+            .limit(1)
+        )
+        async with self.engine.connect() as conn:
+            row = (await conn.execute(stmt)).first()
+        if row is None:
+            return None
+        return SnapshotRow(
+            row_id=int(row[0]),
+            uuid=str(row[1]),
+            payload_hash=str(row[2]),
+            created_at=row[3],
+            payload=row[4],
+        )
 
     # ------------------------------------------------------------------ interpretation (job record)
 

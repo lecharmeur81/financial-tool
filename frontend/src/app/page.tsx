@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
+import { Suspense } from "react";
 
 import { AlertsSection } from "@/components/dashboard/AlertsSection";
 import { AnomalySection } from "@/components/dashboard/AnomalySection";
 import { BriefSection } from "@/components/dashboard/BriefSection";
+import { DecisionCenterLoading, DecisionCenterSection } from "@/components/decision/DecisionCenter";
 import { DerivativesLiquiditySection } from "@/components/dashboard/DerivativesLiquiditySection";
 import { DivergenceSection } from "@/components/dashboard/DivergenceSection";
 import { IntelligenceEventsSection } from "@/components/dashboard/IntelligenceEventsSection";
@@ -19,6 +21,7 @@ import { AutoRefresh } from "@/components/market/AutoRefresh";
 import { fetchAlerts } from "@/lib/alerts";
 import { fetchAnomalyScan } from "@/lib/anomaly";
 import { fetchLatestBrief } from "@/lib/brief";
+import { resolveDecisionAsset } from "@/lib/decision";
 import { fetchDerivativesAsset } from "@/lib/derivatives";
 import { fetchDivergenceMatrix } from "@/lib/divergence";
 import { fetchInstitutionalOverview } from "@/lib/institutional";
@@ -39,9 +42,11 @@ const item = navItem("/");
 
 export const metadata: Metadata = { title: item.label };
 
-export default async function DashboardPage() {
-  // Render at request time so every section's freshness is live, never a build-time snapshot.
-  await connection();
+/**
+ * Every analytics section below the Decision Center. It is fetched on its own (and streamed) so the
+ * Decision Center never waits on these requests — in particular the slow market-regime call.
+ */
+async function DashboardAnalytics() {
   const [
     regime,
     summary,
@@ -87,12 +92,7 @@ export default async function DashboardPage() {
   ]);
 
   return (
-    <section className="page">
-      <header className="page-header">
-        <h1>{item.label}</h1>
-        <p className="page-description">{item.description}</p>
-      </header>
-
+    <>
       {regime.ok ? (
         <RegimeSection regime={regime.data} />
       ) : (
@@ -149,6 +149,35 @@ export default async function DashboardPage() {
         performance={performance}
         decisions={decisions}
       />
+    </>
+  );
+}
+
+export default async function DashboardPage(props: PageProps<"/">) {
+  // Render at request time so every section's freshness is live, never a build-time snapshot.
+  await connection();
+  const asset = resolveDecisionAsset(await props.searchParams);
+
+  return (
+    <section className="page">
+      <header className="page-header">
+        <h1>{item.label}</h1>
+        <p className="page-description">{item.description}</p>
+      </header>
+
+      <Suspense fallback={<DecisionCenterLoading />}>
+        <DecisionCenterSection asset={asset} />
+      </Suspense>
+
+      <Suspense
+        fallback={
+          <div className="placeholder" role="status">
+            Loading the rest of the dashboard…
+          </div>
+        }
+      >
+        <DashboardAnalytics />
+      </Suspense>
 
       {/* intelligence data refreshes on backend schedules measured in minutes/hours */}
       <AutoRefresh seconds={300} renderedAt={new Date().toISOString()} />

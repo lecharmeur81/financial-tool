@@ -524,3 +524,148 @@ a {
   color: var(--muted, #5b6470);
   padding: 4px 0;
 }
+
+/* Decision Center (Phase 39) */
+.decision-center {
+  border-left: 4px solid var(--accent);
+}
+
+.decision-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.decision-header h2 {
+  margin-bottom: 4px;
+}
+
+.decision-header p {
+  margin: 0;
+  max-width: 62ch;
+}
+
+.decision-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 0 0 12px;
+}
+
+.decision-tile {
+  background: var(--neutral-soft);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.decision-tile dt {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.decision-tile dd {
+  margin: 4px 0 0;
+}
+
+.decision-value {
+  font-size: 20px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.decision-callout,
+.decision-cap,
+.decision-scope-banner {
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin: 0 0 12px;
+}
+
+.decision-callout p,
+.decision-cap p {
+  margin: 4px 0;
+}
+
+.decision-cap h3,
+.decision-why h3,
+.decision-center section h3 {
+  margin: 12px 0 6px;
+  font-size: 15px;
+}
+
+.decision-center h4 {
+  margin: 14px 0 6px;
+  font-size: 14px;
+}
+
+.decision-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.decision-missing {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.decision-missing > li {
+  border-top: 1px solid var(--border);
+  padding: 8px 0;
+}
+
+.decision-evidence li {
+  margin-bottom: 8px;
+}
+
+.kind-tag,
+.scope-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  vertical-align: baseline;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.kind-observed {
+  border-style: solid;
+}
+
+.kind-calculated {
+  border-style: dashed;
+}
+
+.kind-interpretation {
+  border-style: dotted;
+}
+
+.scope-asset_specific {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.decision-disclosure {
+  margin-top: 12px;
+}
+
+.decision-center .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .decision-value {
+    font-size: 18px;
+  }
+}
