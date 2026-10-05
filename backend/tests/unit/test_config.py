@@ -51,3 +51,26 @@ def test_rejects_invalid_urls(settings: Settings, field: str, value: str) -> Non
 def test_settings_are_immutable(settings: Settings) -> None:
     with pytest.raises(ValidationError):
         settings.environment = "production"  # type: ignore[misc]
+
+
+def test_blank_database_url_runtime_env_var_is_treated_as_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for the Phase 37 startup defect: ``compose.yaml`` always sets this env var to
+    ``${CFI_DATABASE_URL_RUNTIME:-}`` (empty string when absent from ``.env``), which must behave
+    exactly like the field being unset, not fail the psycopg-prefix check below."""
+    monkeypatch.setenv("CFI_DATABASE_URL", "postgresql+psycopg://u:p@db:5432/cfi")
+    monkeypatch.setenv("CFI_REDIS_URL", "redis://redis:6379/0")
+    monkeypatch.setenv("CFI_DATABASE_URL_RUNTIME", "")
+    settings = get_settings()
+    assert settings.database_url_runtime is None
+
+
+def test_blank_api_key_env_var_is_still_treated_as_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same blank-string-from-compose shape as the regression above, for the sibling field this
+    pattern was first introduced for — guards against the two drifting apart again."""
+    monkeypatch.setenv("CFI_DATABASE_URL", "postgresql+psycopg://u:p@db:5432/cfi")
+    monkeypatch.setenv("CFI_REDIS_URL", "redis://redis:6379/0")
+    monkeypatch.setenv("CFI_API_KEY", "")
+    settings = get_settings()
+    assert settings.api_key is None

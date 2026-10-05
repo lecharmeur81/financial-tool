@@ -143,7 +143,9 @@ export default async function LiquidityPage() {
               <h2>Not tracked</h2>
               <ul className="note-list">
                 {overview.data.not_tracked.map((n) => (
-                  <li key={n}>{n}</li>
+                  <li key={n.item}>
+                    {n.item}: {n.reason}
+                  </li>
                 ))}
               </ul>
             </div>

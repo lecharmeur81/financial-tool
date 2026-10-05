@@ -77,6 +77,20 @@ class Settings(BaseSettings):
     # ``migrations/env.py``.
     database_url_runtime: SecretStr | None = None
 
+    @field_validator("database_url_runtime", mode="before")
+    @classmethod
+    def _blank_database_url_runtime_is_unset(cls, value: object) -> object:
+        # Mirrors ``_blank_api_key_is_unset`` above: ``compose.yaml`` always passes this as
+        # ``${CFI_DATABASE_URL_RUNTIME:-}`` (empty string when unset in ``.env``, exactly as
+        # documented in ``.env.example``). Pydantic-settings reads an explicit empty-string env
+        # var as the value "", not as "unset" — so without this, the empty string reached the
+        # ``postgresql+psycopg://`` prefix check below and failed startup even though an unset
+        # runtime role is the documented, supported default (bug found in Phase 37 operational
+        # verification: this blocked ``migrate``, and therefore the entire stack, on first run).
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
+
     # Raw payload archive (L0, ADR-0019). Relative paths resolve from the working directory.
     raw_archive_dir: Path = Path("data/raw")
 

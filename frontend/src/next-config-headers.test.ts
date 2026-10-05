@@ -3,9 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import nextConfig from "../next.config";
 
 /**
- * Phase 28 (ADR-0028): verifies the security headers `next.config.ts` sends — in particular that
- * the CSP/Permissions-Policy added this phase are present alongside the pre-existing baseline
- * headers, and that HSTS is gated to production only (sending it on a plain-HTTP dev response is
+ * Phase 28 (ADR-0028): verifies the security headers `next.config.ts` sends — the baseline and
+ * Permissions-Policy headers are present, no CSP is sent (it broke the local Next.js app), and
+ * HSTS is gated to production only (sending it on a plain-HTTP dev response is
  * misleading even though browsers ignore it over HTTP).
  */
 describe("next.config headers()", () => {
@@ -27,16 +27,9 @@ describe("next.config headers()", () => {
     expect(headers["X-Frame-Options"]).toBe("DENY");
   });
 
-  it("sends a self-only Content-Security-Policy with no unsafe-eval/unsafe-inline for scripts", async () => {
+  it("sends no Content-Security-Policy (local-only app; a strict one blocks Next.js inline scripts)", async () => {
     const headers = await headerMap();
-    const csp = headers["Content-Security-Policy"];
-    expect(csp).toBeTruthy();
-    expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("script-src 'self'");
-    expect(csp).not.toContain("unsafe-eval");
-    expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
-    expect(csp).toContain("frame-ancestors 'none'");
-    expect(csp).toContain("object-src 'none'");
+    expect(headers["Content-Security-Policy"]).toBeUndefined();
   });
 
   it("sends a restrictive Permissions-Policy", async () => {

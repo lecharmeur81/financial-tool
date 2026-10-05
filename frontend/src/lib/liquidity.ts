@@ -48,7 +48,11 @@ export type LiquidityOverview = {
   };
   exchange_liquidity_change: { status: string; reason: string | null };
   data_quality: { status: string; [key: string]: unknown };
-  not_tracked: string[];
+  // Each entry is {item, reason} — a free-text label plus why it's not tracked (backend
+  // cfi.liquidity.universe.NOT_TRACKED), never a bare string (bug found live, Phase 37: this
+  // crashed `/liquidity` with real data because the type and render here assumed a plain
+  // string[]).
+  not_tracked: { item: string; reason: string }[];
 };
 
 export const fetchLiquidityOverview = (f?: typeof fetch): Promise<ApiResult<LiquidityOverview>> =>
