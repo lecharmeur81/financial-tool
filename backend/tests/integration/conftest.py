@@ -10,6 +10,7 @@ import asyncio
 import os
 import sys
 from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import psycopg
@@ -75,6 +76,70 @@ def alembic_config() -> Config:
     return config
 
 
+RUNTIME_URL_ENV = "CFI_DATABASE_URL_RUNTIME"
+
+
+@contextmanager
+def isolated_database_env(test_url: str) -> Iterator[None]:
+    """Point the process environment at the test database and nothing else.
+
+    ``CFI_DATABASE_URL`` becomes the test URL **and** ``CFI_DATABASE_URL_RUNTIME`` is removed.
+    ``cfi.db.engine.create_engine`` prefers the runtime URL when one is set, so swapping only
+    ``CFI_DATABASE_URL`` (as this fixture once did) leaves every engine built from
+    ``get_settings()`` pointing at the runtime database whenever ``.env`` sets a runtime role.
+    Both variables are restored on exit."""
+    saved = {name: os.environ.get(name) for name in ("CFI_DATABASE_URL", RUNTIME_URL_ENV)}
+    os.environ["CFI_DATABASE_URL"] = test_url
+    os.environ.pop(RUNTIME_URL_ENV, None)
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        get_settings.cache_clear()
+
+
+def isolated_settings(base: Settings, test_url: str, raw_dir: Path) -> Settings:
+    """``base`` re-pointed at the test database. The runtime URL is cleared explicitly: it is
+    what ``create_engine`` would otherwise use in preference to ``database_url``."""
+    return base.model_copy(
+        update={
+            "database_url": SecretStr(test_url),
+            "database_url_runtime": None,
+            "raw_archive_dir": raw_dir,
+        }
+    )
+
+
+def engine_database_name(settings: Settings) -> str:
+    """The database ``create_engine(settings)`` would connect to (the runtime URL wins)."""
+    url = settings.database_url_runtime or settings.database_url
+    return make_url(url.get_secret_value()).database or ""
+
+
+def require_test_database(name: str) -> None:
+    """Refuse to continue unless ``name`` is a test database (``<configured name>_test``)."""
+    if not name.endswith("_test"):
+        raise RuntimeError(
+            f"Refusing to run destructive integration-test setup against database {name!r}: "
+            "integration tests may only use a database whose name ends in '_test'."
+        )
+
+
+async def reset_test_database(engine: AsyncEngine) -> None:
+    """Empty every data table. The connected database is checked first, in the same transaction
+    and before any statement that changes data, so a mis-pointed engine fails loudly instead of
+    truncating a real database."""
+    async with engine.begin() as conn:
+        name = (await conn.execute(text("SELECT current_database()"))).scalar_one()
+        require_test_database(str(name))
+        await conn.execute(text(f"TRUNCATE {', '.join(DATA_TABLES)} RESTART IDENTITY CASCADE"))
+
+
 def head_revision() -> str:
     head = ScriptDirectory.from_config(alembic_config()).get_current_head()
     assert head is not None
@@ -94,30 +159,26 @@ def test_database_url() -> Iterator[str]:
         conn.execute(f'CREATE DATABASE "{test_name}"')
     url = main.set(database=test_name).render_as_string(hide_password=False)
 
-    previous = os.environ["CFI_DATABASE_URL"]
-    os.environ["CFI_DATABASE_URL"] = url
-    get_settings.cache_clear()
-    try:
+    with isolated_database_env(url):
         command.upgrade(alembic_config(), "head")
         yield url
-    finally:
-        os.environ["CFI_DATABASE_URL"] = previous
-        get_settings.cache_clear()
 
 
 @pytest.fixture
 def test_settings(test_database_url: str, tmp_path: Path) -> Settings:
-    return get_settings().model_copy(
-        update={"database_url": SecretStr(test_database_url), "raw_archive_dir": tmp_path / "raw"}
-    )
+    return isolated_settings(get_settings(), test_database_url, tmp_path / "raw")
 
 
 @pytest.fixture
 async def db(test_settings: Settings) -> AsyncIterator[AsyncEngine]:
     """Async engine on the test database, emptied before each test."""
+    require_test_database(engine_database_name(test_settings))
     engine = create_engine(test_settings)
-    async with engine.begin() as conn:
-        await conn.execute(text(f"TRUNCATE {', '.join(DATA_TABLES)} RESTART IDENTITY CASCADE"))
+    try:
+        await reset_test_database(engine)
+    except BaseException:
+        await engine.dispose()
+        raise
     yield engine
     await engine.dispose()
 
