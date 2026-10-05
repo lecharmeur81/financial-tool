@@ -491,6 +491,18 @@ pinned images, vulnerability scanning, non-root containers; append-only audit lo
 
 **Future implications.** Phase 25 becomes verification and hardening, not a redesign.
 
+**Amendment (Phase 37, 2026-10-05) — the frontend does not emit a Content-Security-Policy.** ADR-0028
+remains the security-baseline decision; this note records an implementation state, not a new decision.
+Phase 28 implemented the CSP clause as a strict `script-src 'self'` header in `frontend/next.config.ts`.
+During Phase 37 operational verification that header was found to block the inline `<script>` tags the
+Next.js App Router uses to stream RSC flight data and swap `loading.tsx` Suspense fallbacks, so hydration
+failed (React error #412) and pages stayed on "Loading". Phase 37 (`659025a`) removed the header. The
+current implementation therefore emits **no** Content-Security-Policy; it still sends
+`X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` and a restrictive `Permissions-Policy`,
+plus HSTS in production only. This is an intentional state for a personal, local-only deployment, not an
+oversight. Any future restoration or replacement of a CSP (for example a nonce-based policy, or an HTTPS
+reverse proxy that supplies one) requires its own explicit decision and a real-browser hydration check.
+
 ---
 
 ## ADR-0029 — Observability and logging
@@ -3150,3 +3162,125 @@ to boot without it when `CFI_ENVIRONMENT=production`); local development is unaf
 developer opts in by setting it themselves. Production deployment now requires the two-file compose
 invocation (`-f compose.yaml -f compose.prod.yaml`) to get the runtime target and container
 hardening — a plain `docker compose up` still works exactly as it always has, for development.
+
+---
+
+## ADR-0076 — Phase 38.1: a deterministic L4.5 Evidence Synthesis layer between Regime and AI Narration
+
+**Status:** Accepted (methodology approved 2026-10-05, documentation only — **no implementation exists**;
+Phase 38.2 has not been started and requires a separate approval gate)
+
+**Context.** The platform computes evidence in six domains plus regime, divergence, rotation and
+anomaly detection, and Claude narrates a snapshot of them (the Phase 21 Claude AI Analyst). There is no
+deterministic place where that evidence is *synthesized* into a stance, a confidence, a posture, and
+the evidence that supports, contradicts or is missing from them. Leaving that to Claude would let an
+AI decide the classification, break R6 ("Claude is the analyst, not the database") and make
+the result unreproducible. Phase 38.0 audited the existing contracts; Phase 38.1 specified the
+methodology (external specification `claude/phase38-1-methodology-spec.md`, mirrored in repository
+form by `METHODOLOGY_DECISION_INTELLIGENCE.md`). Property testing in a throwaway reference harness
+(not the engine) found two real defects in earlier drafts that shaped the decision: computing the
+balance over *available* readings let missing neutral evidence raise a stance (132,120 violations),
+and treating a missing cap source as "no cap" let removing safety information make the stance and
+posture stronger or more permissive (1,863,646 + 48,937 violations).
+
+**Decision.** Introduce a **deterministic L4.5 Evidence Synthesis** layer between L4 Regime and L5 AI
+Narration:
+
+`L0 Raw → L1 Observed → L2 Metrics → L3 Signals → L4 Regime → L4.5 Evidence Synthesis → L5 AI Narration → L6 User`
+
+with these principles (each is an invariant a future implementation must test):
+
+1. **Claude does not determine stance.** Claude may only narrate a finished L4.5 assessment.
+2. **Evidence synthesis is deterministic** — a pure, DB-free, network-free function of an immutable
+   snapshot plus versioned parameters (same snapshot + versions → same assessment).
+3. The calculation uses `D = S + A + N + U`, `coverage = (S + A + N) / D`, `balance = (S − A) / D`
+   (integer comparisons only; five directional domains, `D = 5` for BTC/ETH and `D = 4` for SOL/XRP,
+   which have no tracked whale domain).
+4. **Unavailable evidence is never neutral.**
+5. **Missing evidence cannot strengthen the conclusion** (it may only lower coverage and confidence).
+6. **Regime is contextual**, not an independent directional vote.
+7. **Risk is not an independent directional vote**; risk can only cap a stance, constrain posture and
+   create caution.
+8. **CAP-U is a safety ceiling, not a vote** and not evidence.
+9. **Missing cap sources cannot make the result more permissive** (invariant INV-11).
+10. **CAP-U uses the most restrictive applicable ceiling**; ceilings do not compound numerically.
+11. **Missing regime produces Neutral / Wait** for a bullish-family raw stance (posture WAIT FOR CONFIRMATION).
+12. **Missing derivatives and/or anomaly safety input produces at most Cautiously Bullish** and posture
+    AVOID ADDING HIGH-RISK EXPOSURE (regime plus any other missing source, or all three: Neutral / Wait).
+13. **CAP-U does not assume risk values** (the affected risk dimension stays `Not assessed`) and creates no
+    bearish evidence.
+14. **`not_assessed` does not automatically mean high risk.** Stale, partial, `not_assessed` and
+    unavailable are distinct states; derivatives freshness `not_assessed` with an available safety
+    band does not trigger CU-02.
+15. **The result must be traceable** to the snapshot (id and `payload_hash`), the methodology version
+    (`decision_methodology.v0`), the parameter version (`decision_params.v0`), the template version
+    (`decision_templates.v0`), rule IDs and source field IDs; every CAP-U application records its cap
+    source, source field ID, source status, reason ID, rule ID, applied ceiling, raw directional stance
+    (`directional_stance_before_limits`), final stance, final posture and both versions.
+16. **The system remains general and non-personalized**: it does not know the user's goals, horizon,
+    holdings or risk tolerance, gives no personalized financial advice or trade instruction, executes
+    no trades and manages no funds. Confidence is shown only as High / Moderate / Low / Insufficient
+    Evidence — never as a percentage — and no predictive validity is claimed.
+
+**Approved decisions recorded here.**
+
+- **D-P — CAP-U authoritative fallback behavior (APPROVED).** Missing regime → Neutral / Wait +
+  WAIT FOR CONFIRMATION; derivatives, anomaly, or both → at most Cautiously Bullish + AVOID ADDING
+  HIGH-RISK EXPOSURE; regime plus any other, or all three → Neutral / Wait + WAIT FOR CONFIRMATION. The
+  six-row table is authoritative and is not to be reinterpreted.
+- **D-O — Posture permissiveness ordering (APPROVED).** Most to least permissive:
+  `MONITOR CONSTRUCTIVE CONDITIONS` > `MONITOR WITH ELEVATED CAUTION` >
+  `AVOID ADDING HIGH-RISK EXPOSURE` > `WAIT FOR CONFIRMATION` > `REASSESS / REDUCE RISK`.
+  `INVESTIGATE FURTHER` is outside the
+  ordering (a coverage / data-quality state). Stance strength and posture permissiveness are
+  separate orderings and are never used interchangeably.
+- **D-M — assessment identity (RESOLVED; documentation only).** A persisted assessment is identified by
+  `(snapshot_id, scope, methodology_version, parameter_version)`, and any future persistence migration
+  must enforce exactly that uniqueness (this ADR creates nothing). `parameter_version` is in the key
+  because any threshold or mapping change changes the assessment; `methodology_version` because an
+  output-changing fix yields a different assessment from the same snapshot. **`template_version` is not
+  part of the identity:** every text field of an assessment is a fixed template ID (stance, confidence and
+  posture are enum identifiers), so a template wording change does not change the deterministic assessment;
+  the template version is recorded with each assessment as provenance metadata only. Anything that changes
+  stance, confidence, posture, risks, readings, reason IDs or the template IDs emitted is a methodology or
+  parameter change, not a template change. Consequences: re-processing the same snapshot under the same
+  versions is idempotent (insert-or-skip, never an overwrite); a new methodology or parameter version
+  produces a new record; the "current" assessment for a scope is the newest one under the running
+  methodology and parameter versions.
+- **D-N — finalized** by CAP-U. Other revision decisions (D-A..D-L) are recorded in the external
+  specification §0.4.
+
+**Alternatives considered.**
+
+- **Treating a missing cap source as "no cap" — rejected.** It violates the monotonicity requirement:
+  removing safety information could then produce a stronger or more permissive conclusion (measured
+  above). Weakening the invariant to "compare only against the same cap class" was likewise not
+  adopted.
+- **Making a missing cap source force Insufficient Evidence — rejected.** Missing context is not
+  missing directional coverage; only the coverage floor (`2n < D`) produces Insufficient Evidence.
+- **Computing the balance over available readings (`(S − A) / n`) — rejected** (missing neutrals raised
+  stance); the denominator is `D`.
+- **Letting Claude propose or adjust the stance — rejected** (R6; not reproducible).
+- **Treating regime or risk readings as extra votes — rejected** (they are context and risk, and would
+  double-count evidence already in the directional domains).
+- **Weighted domains / fitted thresholds — rejected for v0**: no score history exists to fit or
+  validate them; all thresholds are labelled design judgment.
+
+**Trade-offs.** The strict rule means a long outage of the regime, derivatives or anomaly tool keeps a
+constructive stance from being displayed even when the directional evidence is strong; the raw
+directional stance stays visible in the audit record and the explanation says why the final result was
+limited. `REASSESS / REDUCE RISK` is used verbatim although "reduce" presupposes the reader holds
+something; the fixed disclaimer is shown with every posture and the wording is an open caveat. Derivatives
+freshness is `not_assessed` in v0 because the snapshot field does not exist (known data limitation
+for 38.2, extension point FD-01).
+
+**Consequences.** `METHODOLOGY_DECISION_INTELLIGENCE.md` is the repository-level methodology reference
+and the external specification is the full authority; any future implementation (Phase 38.2 and later)
+must conform to them, ship the golden fixtures and property tests (INV-1..INV-11, CAP-U table
+conformance, traceability), and requires its own approval gate. A change to any threshold, mapping,
+CAP-U ceiling or ordering requires a new `parameter_version` and an ADR amendment; a template
+wording change requires a new `template_version`. R2's evidence hierarchy gains a seventh category,
+**Synthesis Classification** (the deterministic L4.5 assessment), kept distinct from Calculated Metric,
+Statistical Signal, Regime Classification, AI Interpretation and Hypothesis; the code-side
+`EvidenceCategory` value is a Phase 38.2 task. No code, test, migration, route, page,
+configuration or runtime behavior changes with this ADR.

@@ -22,7 +22,7 @@ It surfaces evidence, divergences, and scenarios. The human makes the decision.
 ## A2. The layer rule (non-negotiable)
 
 ```
-Observed Data → Calculated Metrics → Statistical Signals → Market Regime → AI Interpretation → User Decision
+Observed Data → Calculated Metrics → Statistical Signals → Market Regime → Evidence Synthesis (L4.5, deterministic — see A3) → AI Interpretation → User Decision
 ```
 
 - Each layer may only read from the layers **to its left**. Never the reverse.
@@ -31,6 +31,44 @@ Observed Data → Calculated Metrics → Statistical Signals → Market Regime �
   It never writes to observed data, metrics, signals, or regimes.
 - Every value shown to a user must be traceable back to observed data (lineage).
 - See `ARCHITECTURE.md` for the full layer contract.
+
+---
+
+## A3. Decision Intelligence boundaries (ADR-0076 — non-negotiable)
+
+Applies to the deterministic **L4.5 Evidence Synthesis** layer and everything that consumes it. Full
+methodology: `METHODOLOGY_DECISION_INTELLIGENCE.md` and the approved external Phase 38.1 specification
+(`claude/phase38-1-methodology-spec.md`). **Future implementation must conform to the approved external
+methodology specification**; if the two ever disagree, stop and report — do not choose silently.
+
+```
+Observed Data → Metrics → Signals → Regime → L4.5 Evidence Synthesis → AI Narration → User
+```
+
+- **L4.5 is deterministic.** A pure, DB-free, network-free function of an immutable snapshot plus
+  versioned parameters. Same snapshot + methodology version + parameter version → same assessment.
+- **Claude narrates but does not decide.** Claude must never determine, change or override a stance,
+  confidence, posture, risk level, tally, coverage or conflict status. It may only narrate a finished
+  assessment, citing field IDs (R6 still applies).
+- **Unavailable ≠ neutral.** Unavailable evidence stays in `U` (and in `D`); it is never counted as
+  neutral, bearish or bullish evidence.
+- **Missing evidence cannot strengthen conclusions.** It may lower coverage and confidence; removing
+  information must never make a result more directional, more confident or more permissive (INV-2, INV-3, INV-11).
+- **CAP-U is a ceiling, never a vote.** A cap source that cannot be evaluated imposes a worst-case safety
+  ceiling (regime missing → at most Neutral / Wait + WAIT FOR CONFIRMATION; derivatives or anomaly
+  missing → at most Cautiously Bullish + AVOID ADDING HIGH-RISK EXPOSURE); the most restrictive applicable
+  ceiling wins; it assumes no risk value and creates no bearish evidence. Never treat a missing cap source as "no cap".
+- **Regime is contextual**, not an independent directional vote. **Risk is not directional evidence.**
+- `not_assessed` is not stale, not fresh and not high risk; stale, partial, `not_assessed` and unavailable are distinct states.
+- **No personalized financial advice.** The platform does not know the user's goals, horizon, holdings or
+  risk tolerance; output is general decision context only. **No trade execution. No funds management.**
+- **No arbitrary external browsing by AI** in this layer or its narration.
+- **Traceability is mandatory:** every assessment records snapshot id / `payload_hash`, rule IDs, source
+  field IDs, `directional_stance_before_limits` and `final_stance`, and **the methodology and parameter
+  versions** (`decision_methodology.v0`, `decision_params.v0`, `decision_templates.v0`) are mandatory on every record.
+- Stance, confidence and posture are closed enums; no free-form text, no confidence percentages, no
+  predictive-validity claims. Thresholds are design judgment, not validated predictors.
+- **Status:** methodology approved (Phase 38.1); **not implemented**. Phase 38.2+ each require a separate approval gate.
 
 ---
 
@@ -56,7 +94,7 @@ Never treat correlation as causation.
 
 ## R2. Evidence hierarchy
 
-Always distinguish these six categories. **Never collapse them.**
+Always distinguish these seven categories. **Never collapse them.**
 
 | Category | What it is | Example | Layer |
 |---|---|---|---|
@@ -64,6 +102,7 @@ Always distinguish these six categories. **Never collapse them.**
 | **Calculated Metric** | A deterministic calculation over observed data | "Aggregate ETF net flow, 7-day sum" | L2 |
 | **Statistical Signal** | A metric evaluated against its own history or another metric | "7-day ETF flow is at the 96th percentile of the past 2 years" | L3 |
 | **Regime Classification** | A labelled market state produced by a versioned model, with confidence | "Regime: leveraged expansion (confidence 0.62)" | L4 |
+| **Synthesis Classification** | A deterministic, versioned classification (stance, confidence, posture) synthesized from L1–L4 evidence by L4.5 — never produced by AI (A3, ADR-0076); methodology approved, not yet implemented | "Stance: Cautiously Bullish; final posture limited by a missing safety source" | L4.5 |
 | **AI Interpretation** | Claude's explanation of L1–L4 evidence | "Institutional demand appears to be absorbing retail selling" | L5 |
 | **Hypothesis** | A proposed explanation or expectation that has **not** been tested | "If funding normalises while ETF inflows continue, spot demand may be leading" | L5 / L6 |
 
@@ -391,5 +430,6 @@ Current phase and status: see `PROGRESS.md`.
 | `ARCHITECTURE.md` | Layers, components, data flow, contracts |
 | `DATA_DICTIONARY.md` | Every entity, field, unit, metric definition |
 | `DECISIONS.md` | Architecture Decision Records (why things are the way they are) |
+| `METHODOLOGY_DECISION_INTELLIGENCE.md` | Approved methodology for L4.5 Evidence Synthesis (stance, confidence, posture, CAP-U); ADR-0076 |
 | `PROGRESS.md` | What is done, what is in progress, per phase |
 | `TODO.md` | Upcoming work and open questions |

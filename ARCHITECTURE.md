@@ -15,6 +15,7 @@ Governing rules: `CLAUDE.md` Part B (R1–R13). Field and table definitions: `DA
 1. Purpose and principles
 2. System context and containers
 3. Layer model and evidence hierarchy
+   - 3.1 L4.5 Evidence Synthesis (Decision Intelligence, ADR-0076)
 4. Technology stack
 5. Architecture review (30 areas)
    - 5.1 Database architecture · 5.2 Time-series strategy · 5.3 Data ingestion · 5.4 Provider abstraction
@@ -108,7 +109,7 @@ Decisions: ADR-0014 (stack), ADR-0015 (service boundaries).
 ## 3. Layer model and evidence hierarchy
 
 ```
-L0 RAW → L1 OBSERVED → L2 METRICS → L3 SIGNALS → L4 REGIME → L5 AI INTERPRETATION / HYPOTHESIS → L6 USER DECISION
+L0 RAW → L1 OBSERVED → L2 METRICS → L3 SIGNALS → L4 REGIME → L4.5 EVIDENCE SYNTHESIS → L5 AI INTERPRETATION / HYPOTHESIS → L6 USER DECISION
 ```
 
 | Layer | Evidence category (R2) | DB schema | Written by (DB role) | Mutability |
@@ -118,6 +119,7 @@ L0 RAW → L1 OBSERVED → L2 METRICS → L3 SIGNALS → L4 REGIME → L5 AI INT
 | L2 Metrics | Calculated Metric | `calc` | `cfi_compute` | Recomputable; versioned definitions |
 | L3 Signals | Statistical Signal | `sig` | `cfi_compute` | Recomputable; versioned |
 | L4 Regime | Regime Classification | `regime` | `cfi_compute` | Recomputable; versioned models |
+| L4.5 Evidence Synthesis *(ADR-0076; methodology approved, **not implemented**)* | Synthesis Classification | to be decided in Phase 38.2 | to be decided in Phase 38.2 | Deterministic, versioned; assessments append-only, never rewritten (§3.1) |
 | L5 AI | AI Interpretation, Hypothesis | `ai` | `cfi_compute` (snapshots), `cfi_ai` (outputs) | Append-only |
 | L6 User | User Decision (and user hypotheses) | `usr` | `cfi_api` | Append-only journal; paper trades |
 | Reference | — | `ref` | `cfi_ingest` (+ admin) | Bitemporal (valid time + record time) |
@@ -128,6 +130,81 @@ L0 RAW → L1 OBSERVED → L2 METRICS → L3 SIGNALS → L4 REGIME → L5 AI INT
 - L2–L4 are derivable from L1 for any `as_of`; if not, that is a bug.
 - AI output never enters L1–L4. Numbers in AI output must match snapshot values (§5.18).
 - Hypotheses (AI- or user-proposed) are stored with category `hypothesis` and are never shown as interpretation or fact.
+- L4.5 (Evidence Synthesis) is deterministic and AI-free: Claude narrates a finished assessment and never decides it (§3.1).
+
+### 3.1 L4.5 Evidence Synthesis (Decision Intelligence) — ADR-0076, **methodology approved, not implemented**
+
+```
+Observed data
+    ↓
+Metrics
+    ↓
+Signals
+    ↓
+Regime
+    ↓
+L4.5 Evidence Synthesis
+    ↓
+AI Narration
+    ↓
+Decision Center / User
+```
+
+(L0 Raw precedes Observed data as in the table above. Full layer chain:
+`L0 Raw → L1 Observed → L2 Metrics → L3 Signals → L4 Regime → L4.5 Evidence Synthesis → L5 AI
+Narration → L6 User`.) The authoritative methodology is `METHODOLOGY_DECISION_INTELLIGENCE.md` and the
+external Phase 38.1 specification; this section records only where L4.5 sits and what it may do.
+
+**L4.5 is the deterministic Evidence Synthesis layer.** It:
+
+- **consumes the approved evidence snapshot** (the immutable L1–L4 bundle, identified by its
+  `payload_hash`) and nothing else;
+- is **pure and deterministic**: same snapshot + methodology version + parameter version → the same
+  assessment (no clock reads, no randomness; `generated_at` is supplied by the caller and excluded from equality);
+- **does not access the database directly**, **does not browse the internet**, **does not call
+  Claude**, **does not execute trades** and **does not manage funds**;
+- produces an **auditable structured assessment**: stance, confidence, posture, supporting /
+  contradicting / missing evidence, six risk dimensions, reason IDs and source field IDs, plus the
+  methodology, parameter and template versions.
+
+The layer rule (A2) is unchanged: L4.5 reads only the L1–L4 bundle; L5 reads L4.5 and may only narrate
+it. **Claude does not determine the stance, confidence, posture, risk level, tally, coverage or
+conflict status.** Where the persisted assessment lives (a new schema versus `sig`) is an
+implementation decision for Phase 38.2 and is not made here.
+
+**Assessment identity (D-M, resolved).** A persisted assessment is identified by
+`(snapshot_id, scope, methodology_version, parameter_version)`. `template_version` is recorded with
+each assessment but is not part of its identity (templates change wording only). See ADR-0076 and
+`METHODOLOGY_DECISION_INTELLIGENCE.md`; no migration enforcing it exists yet.
+
+**Aggregation.** `D = S + A + N + U`, `coverage = (S + A + N) / D`, `balance = (S − A) / D`.
+Unavailable evidence stays in `U` (never neutral) and can never strengthen the conclusion. Regime is
+contextual, not a vote; risk domains are not directional evidence.
+
+**`directional_stance_before_limits` versus `final_stance`.** The first is the stance the
+directional readings alone support (after the coverage and conflict rules, before any cap). The
+second is the published stance after the observed caps (RC-01..RC-04) and **CAP-U**. CAP-U sits between
+them because a safety source that *cannot be read* is not the same as one that was read and does not
+apply. If a missing regime, derivatives or anomaly input could — in its worst case — have capped
+the stance, the final stance must be no stronger and the posture no more permissive than that worst
+case (the invariant INV-11: removing information never strengthens a conclusion). CAP-U is a safety
+ceiling, not a vote: it adds nothing to the tally, assumes no risk value and creates no bearish evidence;
+the most restrictive applicable ceiling wins and ceilings do not compound. Both stances are kept in the
+audit record so the engine can say "the directional evidence supported X, but the final assessment was
+limited to Y because Z was unavailable".
+
+| Missing cap source | Maximum final stance | Maximum posture |
+|---|---|---|
+| Regime | Neutral / Wait | WAIT FOR CONFIRMATION |
+| Derivatives safety input | Cautiously Bullish | AVOID ADDING HIGH-RISK EXPOSURE |
+| Anomaly safety input | Cautiously Bullish | AVOID ADDING HIGH-RISK EXPOSURE |
+| Derivatives + anomaly | Cautiously Bullish | AVOID ADDING HIGH-RISK EXPOSURE |
+| Regime + any other | Neutral / Wait | WAIT FOR CONFIRMATION |
+| All three | Neutral / Wait | WAIT FOR CONFIRMATION |
+
+The output is general, non-personalized decision context; the platform does not know the user's goals,
+horizon, holdings or risk tolerance and gives no personalized financial advice. **No implementation
+exists** (no `cfi.decision` package, migration, route or page); Phase 38.2 requires a separate approval gate.
 
 ---
 
@@ -393,7 +470,7 @@ in-process until workers share them via Redis. Mock providers for tests only: `c
 - **Exchange credentials:** read-only keys only. The platform **never** stores keys with trading or withdrawal permission — paper trading
   needs none (§6).
 - **Network:** only the reverse proxy is exposed; Postgres and Redis bind to the internal network with passwords; TLS everywhere outside the host.
-- **Web:** strict CORS (same site), CSRF tokens, Content-Security-Policy, secure cookies, input validation (Pydantic), parameterised SQL only.
+- **Web:** strict CORS (same site), CSRF tokens, Content-Security-Policy, secure cookies, input validation (Pydantic), parameterised SQL only. (Design baseline of ADR-0028; the frontend currently emits no Content-Security-Policy, intentionally since Phase 37 — see the Phase 28/37 security-header note in the change log below.)
 - **Prompt-injection defence:** ingested text (social posts, news titles, provider free text) is **data** — delimited, length-limited,
   never placed in Claude's instructions, and never able to trigger actions; Claude has no tools that act on the world (§5.17).
 - **Supply chain:** lockfiles (uv, pnpm), pinned container image digests, dependency vulnerability scanning in CI, minimal non-root containers.
@@ -1162,12 +1239,21 @@ Request → [rate limiter, in-process] → [require_api_key, mutating/AI routes 
   store. Celery tasks are completely untouched — this only wraps inbound FastAPI routes.
 - **Production API docs gating.** `docs_url`/`openapi_url` (`api/app.py`) are `None` when
   `environment == "production"`, unchanged (enabled) otherwise — `redoc_url` was already `None`.
-- **Frontend security headers (ADR-0028 closed out).** `next.config.ts` now sends a `self`-only
+- **Frontend security headers (ADR-0028; the CSP was superseded in Phase 37, see the note below).** In
+  Phase 28 `next.config.ts` sent a `self`-only
   Content-Security-Policy (`script-src 'self'`, no `unsafe-eval`, no third-party script/style/image
   origins — verified the app loads no CDN scripts and bundles `lightweight-charts` via npm, not a
   CDN), a restrictive `Permissions-Policy`, and HSTS gated to `NODE_ENV==="production"` (sending it
   over plain local HTTP would be misleading even though browsers ignore it off-HTTPS). The
-  pre-existing `X-Content-Type-Options`/`Referrer-Policy`/`X-Frame-Options` are unchanged.
+  pre-existing `X-Content-Type-Options`/`Referrer-Policy`/`X-Frame-Options` were unchanged.
+  **Superseded in Phase 37 (`659025a`): the Content-Security-Policy header is no longer sent.** A strict
+  `script-src 'self'` blocks the inline `<script>` tags the Next.js App Router uses to stream RSC data
+  and swap `loading.tsx` Suspense fallbacks, which broke hydration (React error #412) and left pages on
+  "Loading". `next.config.ts` now sends `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`, the
+  restrictive `Permissions-Policy`, and HSTS in production only. This is intentional for this personal,
+  local-only tool; ADR-0028 remains the security-baseline decision, and restoring or replacing a CSP
+  (for example a nonce-based policy or an HTTPS reverse proxy that supplies one) needs its own explicit
+  decision (see the ADR-0028 amendment in `DECISIONS.md`).
 - **Docker hardening via an overlay file, not a change to the dev workflow.**
   `compose.prod.yaml` layers on top of `compose.yaml` (`docker compose -f compose.yaml -f
   compose.prod.yaml up -d --build`) and only then: builds the backend's existing `runtime` Docker
@@ -1262,6 +1348,7 @@ Phases 0–5 are defined by the user's guide; later phase numbers in `CLAUDE.md`
 | Executive dashboard (frontend) | 24 |
 | Security + AI + stress testing | 25 |
 | Production, real-time intelligence | 26–27 |
+| Decision Intelligence: L4.5 Evidence Synthesis (methodology approved in 38.1 — documentation only; engine, persistence, API, page and Claude narration not started) | 38.2+ (each needs its own approval gate) |
 
 ---
 

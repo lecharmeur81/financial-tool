@@ -2,7 +2,7 @@
 
 Single source of truth for what has been done. Updated at the end of every task.
 
-**Current phase:** 34 — Fix Remaining Phase 33 Findings → all three issues Phase 33 surfaced
+**Phase 34-era status (historical — the latest entries, Phases 35 to 38.1, are at the end of this file):** 34 — Fix Remaining Phase 33 Findings → all three issues Phase 33 surfaced
 (gross_pnl long/short mirror asymmetry, invalid alert severity test fixture, market/regime API
 test-isolation gap) fixed and verified; see the Phase 34 log entry at the end of this file. Phase 32
 — Production Readiness Assessment → verified against the authoritative
@@ -13,7 +13,7 @@ read-only Security Audit (same date), which found no critical blockers but no au
 limiting, production docs left open, and several missing production headers. Phase 28 adds: API-key
 authentication (`X-API-Key`, fail-secure in production) on all mutating/AI-triggering routes; `slowapi`
 rate limiting (tight limits on `/analyst/analyze` and `/brief/generate`); production gating of
-`/api/docs`/`/api/openapi.json`; CSP/HSTS/Permissions-Policy response headers; a Docker Compose
+`/api/docs`/`/api/openapi.json`; CSP/HSTS/Permissions-Policy response headers (the CSP was later removed in Phase 37); a Docker Compose
 production-hardening overlay (`compose.prod.yaml`: runtime target, capability dropping, read-only
 filesystem); additive DB runtime-role plumbing (`CFI_DATABASE_URL_RUNTIME`, opt-in, no-op unless set);
 explicit Celery JSON serializer pinning; and documentation of the one unpatched dev-only `braces`
@@ -62,6 +62,9 @@ test/build all clean.
 | — | Real-time intelligence | ⏳ Not started |
 
 Phases 0–14 follow the user's guide. The remaining topics are provisional and get their numbers when the user issues them. Phases 27-28 (security audit and corrections) were issued and numbered directly by the user, out of the original guide's order.
+
+**Note (2026-10-05):** this overview table was last updated at Phase 28. Phases 29 to 38.1 are recorded
+only in the log entries below.
 
 ---
 
@@ -2604,6 +2607,9 @@ hardening, zero functional/methodology changes (ADR-0075)
    Security` (`max-age=63072000; includeSubDomains; preload`) sent only when
    `NODE_ENV === "production"` (meaningless over plain-HTTP local dev). Pre-existing headers
    (`X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`) kept unchanged.
+   **[Superseded in Phase 37: the Content-Security-Policy header was removed because it broke Next.js
+   hydration; the current frontend emits no CSP. See the ADR-0028 amendment in `DECISIONS.md` and the
+   Phase 37 entry below.]**
 5. **Docker hardening** — new `compose.prod.yaml` overlay (`docker compose -f compose.yaml -f
    compose.prod.yaml up -d --build`), applied only when explicitly layered on top of the base file:
    builds the backend's pre-existing (previously unused) `runtime` Dockerfile target instead of `dev`,
@@ -2647,7 +2653,7 @@ updated with an autouse fixture resetting the shared rate-limiter state between 
 unit/test_config.py` fixed (a pre-existing production-environment test now also sets `CFI_API_KEY` so
 it doesn't trip the new fail-secure validator). Frontend: `frontend/src/next-config-headers.test.ts`
 (new, 5 tests — baseline headers kept, CSP correctness, Permissions-Policy, HSTS gated to
-production only via `vi.stubEnv`).
+production only via `vi.stubEnv`) [the CSP test was changed in Phase 37 to assert that no CSP is sent].
 
 **Tests run:** Backend — `uv run pytest tests/unit tests/api -x -q` → **981 passed** (970 pre-existing
 + 11 new); `uv run ruff check .` → clean; `uv run ruff format --check .` → clean; `uv run mypy` →
@@ -3294,3 +3300,119 @@ touched.
 
 **Next step:** awaiting the user's review. Per the phase's explicit final instruction, **not**
 proceeding to Phase 36 or any further phase automatically (R13).
+
+---
+
+## Phase 36 — Final UX Implementation
+
+**Date:** 2026-10-04. **Status:** ✅ Closed — committed as `5d92241` ("[P36] finalize final UX implementation").
+
+**Purpose and outcome.** A frontend-only phase (22 files, +1,669 / −20 per `git show --stat 5d92241`):
+the Similarity section and an Intelligence Events panel on `/analytics`, an Intelligence Events tile on the
+dashboard, a 90-day supply-history chart on `/liquidity`, an operations-status panel (readiness, provider
+health, ingestion runs) on `/settings`, and matching navigation, API-client and test changes. The alerts,
+paper-trading and journal pages stay read-only and the AI Analyst has no UI entry point.
+
+**Known issues found afterwards (Phase 37).** A `/liquidity` rendering defect (D3) introduced by this
+phase's liquidity changes was found and fixed in Phase 37.
+
+---
+
+## Phase 37 — Operational Verification & User Acceptance
+
+**Date:** 2026-10-04 (verification), 2026-10-05 (commit). **Status:** ✅ Closed — fixes committed as
+`659025a` ("[P37] finalize operational verification fixes"). Defect D1 remains open.
+
+**Purpose.** Run the Phase 36 system as a user would (`docker compose up --build`) and record a
+user-acceptance checklist. No feature work; no Agent Architecture work.
+
+**Outcome.**
+
+- **D2 (fixed):** a blank `CFI_DATABASE_URL_RUNTIME` (compose passes `${...:-}`) crashed `Settings`
+  construction and blocked `migrate`, and therefore the whole stack, on a by-the-book first run. Fixed with
+  a blank-as-unset validator (mirroring `api_key`) plus two regression tests.
+- **D3 (fixed):** `/liquidity` crashed with real data because `not_tracked` was typed and rendered as
+  `string[]` while the backend returns `{item, reason}[]`. Type and render corrected.
+- **CSP removal (fixed):** the strict `script-src 'self'` Content-Security-Policy blocked Next.js inline
+  scripts and broke hydration (React error #412; pages stuck on "Loading"). The header was removed and its
+  test now asserts no CSP is sent. See the ADR-0028 amendment in `DECISIONS.md`.
+- **D1 (open, not fixed):** `CFI_PROVIDER_FRED_API_KEY` has no path from `.env` into the containers
+  (`compose.yaml` does not forward it), so macro data cannot be configured.
+- **Observation (not fixed):** `GET /api/v1/regime/current` took about 65 s and
+  `GET /api/v1/similarity/current` about 96–98 s through the API on a freshly started stack.
+
+**Verification.** Before the commit the checks were re-run on a temporary copy outside the repository:
+`tests/unit/test_config.py` 8 passed; the full frontend vitest suite 21 files / 136 tests passed. The
+earlier Phase 37 report records backend `tests/unit` 981/981, ruff and mypy clean.
+
+---
+
+## Phase 38.0 — Decision Intelligence Architecture Proposal and Pre-flight (verification only)
+
+**Date:** 2026-10-05. **Status:** ✅ Closed — no repository change and no commit.
+
+**Purpose and outcome.** A design-only architecture proposal (`claude/phase38-decision-intelligence-architecture.md`)
+and a read-only pre-flight (`claude/phase38-0-preflight-report.md`), both held as external project documents.
+Verdict: READY WITH CONDITIONS. Findings carried into later phases: the alerts cycle builds the full 14-tool
+snapshot sequentially inside a task with a 100 s soft / 120 s hard limit, historical regime plus similarity
+timings alone were 104–142 s, and live cycle timing was **unverified**; the SoSoValue key was empty, FRED was
+unset and unwired, and the Anthropic key was empty and not wired into the containers; `check_data_quality`
+does not see staleness for several domains; the analyst validator bans the words "bullish" and "bearish".
+Phase 38.1 (methodology) and 38.2 (engine) were judged runtime-independent; 38.3 and later depend on
+the cycle timing.
+
+---
+
+## Phase 38.1 — Decision Intelligence Methodology Specification (documentation only)
+
+**Date:** 2026-10-05. **Status:** ✅ Methodology approved; documentation publication complete.
+**Phase 38.2 has NOT started.** No source code, test, migration, route, page, configuration or
+dependency was changed by this phase. Committed as `[P38.1] finalize decision intelligence methodology` (the hash is in `git log`; a commit cannot record its own hash).
+
+**What this phase produced.** The deterministic L4.5 Evidence Synthesis methodology
+(`decision_methodology.v0`, `decision_params.v0`, `decision_templates.v0`), specified externally in
+`claude/phase38-1-methodology-spec.md` (the full authority: rule tables, golden fixtures, property
+specification, template library, BTC-first field contract) and published into the repository as
+`METHODOLOGY_DECISION_INTELLIGENCE.md`, ADR-0076 in `DECISIONS.md`, the new §3.1 in `ARCHITECTURE.md`
+and the Decision Intelligence boundaries in `CLAUDE.md`.
+
+**Approvals recorded.**
+
+- **D-P approved** — CAP-U authoritative fallback table (missing regime → Neutral / Wait + WAIT FOR
+  CONFIRMATION; derivatives / anomaly / both → at most Cautiously Bullish + AVOID ADDING
+  HIGH-RISK EXPOSURE; regime + any other, or all three → Neutral / Wait + WAIT FOR CONFIRMATION). **Finalized, unchanged.**
+- **D-O approved** — posture permissiveness ordering: MONITOR CONSTRUCTIVE CONDITIONS > MONITOR WITH
+  ELEVATED CAUTION > AVOID ADDING HIGH-RISK EXPOSURE > WAIT FOR CONFIRMATION > REASSESS / REDUCE RISK;
+  INVESTIGATE FURTHER outside the ordering.
+- D-N finalized by CAP-U.
+
+**Validation evidence (throwaway reference harness outside the repository — it is not the engine).**
+
+- INV-1 … INV-10 pass; **INV-11 passes with 0 violations.**
+- **Exhaustive CAP-U cap-source removal sweep: 2,488,320 states, 13,258,080 mutations, 33,180,192 pairs — 0 violations.**
+  **Random sweep: 60,000 states, 317,852 mutations, 794,354 pairs — 0 violations.**
+  (The same sweep on the earlier rules that treated a missing cap source as "no cap": 1,863,646 + 48,937 violations.)
+- PT-1 table conformance: pass. PT-2 combined observed + missing ceilings: pass. PT-3 independence from
+  stale / partial / `not_assessed`: pass. PT-4 CAP-U traceability: pass.
+- Regression fixtures A–J pass (68 assertions); the 30 original golden fixtures re-run against the written rules.
+- Template lint: 118 templates, 0 violations.
+
+**Documentation published (the only five files this phase may touch):** `METHODOLOGY_DECISION_INTELLIGENCE.md`
+(new), `DECISIONS.md` (ADR-0076 appended), `ARCHITECTURE.md` (§3.1 added), `CLAUDE.md` (Decision
+Intelligence boundaries added), `PROGRESS.md` (this entry). `DATA_DICTIONARY.md` and `TODO.md` are unchanged.
+
+**Known limitations carried forward.** Thresholds and mappings are design judgment, not validated
+predictors (no predictive validity is claimed). Derivatives freshness is `not_assessed` in v0 (field
+absent from the snapshot; extension point FD-01). `REASSESS / REDUCE RISK` still presupposes the reader
+holds something (open wording caveat). Live snapshots have not been evaluated by any engine. Provider
+keys (FRED, SoSoValue, Anthropic) and the snapshot-cycle timing are unverified and untouched here. The six
+Phase 37 working-tree files were not touched by this phase and were committed separately as `659025a`.
+
+**Post-publication cleanup (2026-10-05, documentation only).** D-M (assessment identity) was resolved and
+recorded in ADR-0076, `METHODOLOGY_DECISION_INTELLIGENCE.md` and `ARCHITECTURE.md` §3.1:
+`(snapshot_id, scope, methodology_version, parameter_version)`; `template_version` is recorded but is not
+part of the identity. The stale CSP statements were corrected (ADR-0028 amendment) and the Phase 36, 37 and
+38.0 entries above were added. No migration, code, route or page was created.
+
+**Next step:** awaiting the user. Per the phase's hard-stop, **not** proceeding to Phase 38.2 or any
+further phase automatically (R13); Phase 38.2 requires a separate approval gate.
