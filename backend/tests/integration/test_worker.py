@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import psycopg
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -15,7 +16,7 @@ from cfi.whales.label_store import SEED_FILES, seed_text
 from cfi.whales.labels import parse_label_csv
 from cfi.whales.universe import all_datasets as whale_datasets
 from cfi.worker.runtime import WorkerRuntime
-from tests.integration.conftest import requires_services
+from tests.integration.conftest import isolated_redis_url, requires_services
 
 pytestmark = [pytest.mark.integration, requires_services]
 
@@ -79,12 +80,27 @@ def test_alerts_are_evaluated_every_15_minutes_on_the_ingest_queue() -> None:
     assert entry["options"]["queue"] == "ingest"
 
 
-def test_alerts_evaluate_task_runs_a_full_cycle(db: AsyncEngine) -> None:
+def test_alerts_evaluate_task_runs_a_full_cycle(
+    monkeypatch: pytest.MonkeyPatch, db: AsyncEngine, test_settings: Settings
+) -> None:
     """No credential gate (Phase 23 has no AI component at all) — the task runs straight
-    through, unlike ``brief_generate_task``/``analyst_analyze_task``."""
+    through, unlike ``brief_generate_task``/``analyst_analyze_task``.
+
+    The task reads the module-level ``worker.settings`` and the process-wide ``worker._runtime``,
+    both of which are built from the runtime configuration at import time. Both are replaced here
+    so the cycle runs on the test database and on a Redis database of its own."""
     from cfi.worker import app as worker
 
-    result = worker.alerts_evaluate_task.run()
+    redis_url = isolated_redis_url(test_settings.redis_url.get_secret_value())
+    settings = test_settings.model_copy(update={"redis_url": SecretStr(redis_url)})
+    isolated = WorkerRuntime(settings)
+    monkeypatch.setattr(worker, "settings", settings)
+    monkeypatch.setattr(worker, "_runtime", isolated)
+    try:
+        result = worker.alerts_evaluate_task.run()
+    finally:
+        isolated.run(isolated.aclose())
+        isolated.loop.close()
     assert "created" in result
     assert "comparison_basis" in result
 

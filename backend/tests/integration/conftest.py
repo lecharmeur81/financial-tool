@@ -12,6 +12,7 @@ import sys
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
 import pytest
@@ -101,6 +102,18 @@ def isolated_database_env(test_url: str) -> Iterator[None]:
             else:
                 os.environ[name] = value
         get_settings.cache_clear()
+
+
+# The live stack works on Redis logical database 0 (``compose.yaml``). Tests that touch Redis use
+# this one instead: the alerts cycle lock (``cfi:realtime:cycle_lock``) is a plain key, so on the
+# shared database a beat-triggered live cycle makes a test see "another cycle is already running",
+# and a test that sets or deletes the lock would interfere with the live stack in turn.
+ISOLATED_REDIS_DB = 15
+
+
+def isolated_redis_url(url: str) -> str:
+    """``url`` (same server, same credentials) pointed at the tests' own Redis database."""
+    return urlunsplit(urlsplit(url)._replace(path=f"/{ISOLATED_REDIS_DB}"))
 
 
 def isolated_settings(base: Settings, test_url: str, raw_dir: Path) -> Settings:

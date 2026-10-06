@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import SecretStr
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -22,7 +23,7 @@ from cfi.market.sources import ADAPTERS as MARKET_ADAPTERS
 from cfi.market.universe import ASSET_SYMBOLS, ohlcv_dataset
 from cfi.realtime.repository import IntelligenceEventRepository
 from cfi.realtime.service import RealtimeIntelligenceService
-from tests.integration.conftest import requires_services
+from tests.integration.conftest import isolated_redis_url, requires_services
 from tests.integration.market_support import MarketHarness
 
 pytestmark = [pytest.mark.integration, requires_services]
@@ -33,7 +34,9 @@ DAILY = ohlcv_dataset("usd", "1d")
 
 @pytest.fixture
 async def redis(test_settings: Settings) -> AsyncIterator[Redis]:
-    client = create_redis(test_settings)
+    # Redis database 15, never the live stack's database 0 (see ``isolated_redis_url``).
+    url = isolated_redis_url(test_settings.redis_url.get_secret_value())
+    client = create_redis(test_settings.model_copy(update={"redis_url": SecretStr(url)}))
     await client.delete("cfi:realtime:cycle_lock", "cfi:realtime:data_arrival_debounce")
     yield client
     await client.delete("cfi:realtime:cycle_lock", "cfi:realtime:data_arrival_debounce")

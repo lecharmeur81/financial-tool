@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.api.app import create_app
 from cfi.core.config import Settings
@@ -65,7 +66,10 @@ async def test_catalog_lists_all_ten_comparisons_and_twelve_map_nodes(
     assert body["capital_flow_map_nodes"][-1]["node_id"] == "retail"
 
 
-async def test_pair_is_insufficient_data_when_nothing_is_loaded(test_settings: Settings) -> None:
+async def test_pair_is_insufficient_data_when_nothing_is_loaded(
+    test_settings: Settings,
+    db: AsyncEngine,  # empties the test database: rows from earlier tests must not leak in
+) -> None:
     status, body = get(
         test_settings,
         "/api/v1/divergence/pair",
@@ -83,6 +87,7 @@ async def test_pair_is_insufficient_data_when_nothing_is_loaded(test_settings: S
 
 async def test_capital_flow_map_reports_unavailable_nodes_when_nothing_loaded(
     test_settings: Settings,
+    db: AsyncEngine,  # empties the test database: rows from earlier tests must not leak in
 ) -> None:
     status, body = get(
         test_settings,
