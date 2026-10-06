@@ -24,6 +24,7 @@ from cfi.ingestion.repository import IngestionRepository, RepositoryRecorder
 from cfi.institutional import sources as institutional
 from cfi.market.jobs import JobContext
 from cfi.market.sources import ADAPTERS, PRIORITY, datasets_for
+from cfi.market_structure import sources as market_structure
 from cfi.providers.base import ProviderAdapter
 from cfi.providers.http import ProviderHttpClient
 from cfi.whales import sources as whales
@@ -92,6 +93,12 @@ class WorkerRuntime:
                 adapter = derivatives.ADAPTERS[d.provider_id]
                 client_for(adapter)
                 await engine.register(d.dataset, adapter, derivatives.PRIORITY[d.provider_id])
+            for ms in market_structure.sources_for(self.settings.market_structure_provider_ids):
+                adapter = market_structure.ADAPTERS[ms.provider_id]
+                client_for(adapter)
+                await engine.register(
+                    ms.dataset, adapter, market_structure.PRIORITY[ms.provider_id]
+                )
             # Address labels shipped with the code (idempotent; stored labels are never changed).
             await import_seed_files(db, engine.clock())
             self._context = JobContext(engine=engine, db=db, clients=clients)

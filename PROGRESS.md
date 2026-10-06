@@ -3496,3 +3496,46 @@ History reads scan the identity index backwards; an index on `(scope, snapshot_i
 later addition, not needed at current volumes.
 
 **Next step:** awaiting the user (R13). Phase 42 has not been started.
+
+## Phase 42 — Market Structure Ingestion Registration (2026-10-06)
+
+**Scope (as approved).** Fix the market-structure dataset registration path so `market_structure.ingest`
+(CoinGecko `/global`) can store total market capitalisation. Nothing else: no change to snapshot cadence,
+retention, Bybit, API keys, decision scoring, Decision Center/history or the frontend.
+
+**Finding.** `WorkerRuntime.context()` (the one place the worker records datasets, providers and links)
+registered only the market, institutional, whale and derivative groups. `market_structure.total_market_cap.usd`
+was therefore never in `ops.dataset`, and every run crashed on `obs.series.series_dataset_id_fkey` (26
+`ingestion_crashed` events in six hours of worker log). The Phase 12 tests did not catch it because their
+harness registers its own datasets. The intended set is exactly one dataset (`market_structure.total_market_cap.usd`);
+everything else in that module is a Calculated Metric. Predates Phases 39-41; not a regression from them.
+
+**Delivered (ADR-0079).**
+- `cfi/worker/runtime.py`: registers every dataset of the enabled market-structure providers, in the shape
+  of the existing four groups (provider client, then `engine.register`). 7 lines; no schema, migration,
+  dataset name, schedule or setting changed.
+- Tests: `tests/integration/test_market_structure_registration.py` (6: the dataset set is pinned; registration
+  and provider link through the real runtime; idempotent across restarts; nothing registered when disabled;
+  provider client exists without CoinGecko market data; the real `market_structure.ingest` task stores one
+  observation under the `GLOBAL` series with only the HTTP transport faked) and `test_worker.py`
+  (`test_runtime_registers_every_enabled_dataset` now includes the group). Five of the new/changed tests fail
+  on the pre-fix runtime, the task test with the production `ForeignKeyViolation`.
+
+**Verification.** Sandbox (local PostgreSQL + TimescaleDB, Redis, isolated `_test` database): full backend
+suite 1602 passed, 0 failed (1596 + 6 new); ruff, ruff format and mypy clean. Live (development stack, only
+the `worker` service rebuilt and recreated): after the restart 0 `ingestion_crashed` and 0
+`series_dataset_id_fkey` events; `ops.dataset` has `market_structure.total_market_cap.usd` (kind `scalar`)
+linked to `coingecko`; the first run succeeded (job 21719, inserted 1); `obs.series` has the one `GLOBAL`
+series and `obs.observation` one row (event time 2026-10-06 05:53:18 UTC, about 2.92 trillion USD).
+Counts at verification: `ops.dataset` market-structure rows 1, `obs.series` rows 1, observations 1 (growing
+every five minutes). Decision system unchanged: `/decision/current` is `decision_view.v0` and
+`/decision/history` is `decision_history.v0` (`Compared`, `NO_CHANGE`); the `market_structure` domain now
+reads available (previously unavailable), and the stance stays Insufficient Evidence because institutional,
+liquidity and macro inputs are still missing.
+
+**Known limitations.** The same registration gap exists for the liquidity (Phase 9), retail (Phase 10) and
+macro (Phase 11) groups; fixing it would start ingestion for them (macro also needs a FRED key), so it is a
+separate decision. The `worker-backfill`, `beat` and `api` containers still run the earlier image; they do not
+need the change. Total market cap has no history source, so it accumulates from the first run.
+
+**Next step:** awaiting the user (R13). Phase 43 has not been started.

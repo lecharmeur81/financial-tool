@@ -3375,3 +3375,36 @@ a parameter change would read as a market change); one history across scopes (re
 reads scan the unique identity index backwards (every snapshot has one row per scope), which is cheap at
 current volumes; an index on `(scope, snapshot_id DESC)` is a possible later addition, not needed now.
 The persisted rows now have a reader; narration, Q&A and the Opportunity Map remain separate phases.
+
+## ADR-0079 — Phase 42: the worker runtime registers the market-structure dataset
+
+**Status:** Accepted (Phase 42, 2026-10-06)
+
+**Context.** `market_structure.ingest` (Phase 12, CoinGecko `/global`) crashed on every run with a
+`ForeignKeyViolation` on `obs.series.series_dataset_id_fkey`: `market_structure.total_market_cap.usd`
+was not in `ops.dataset`. The cause is `WorkerRuntime.context()`, the one place the worker records
+datasets, providers and their links: it registered only the market, institutional, whale and derivative
+groups. The Phase 12 tests did not see it because their harness registers its own datasets by hand.
+No total-market-cap observation could ever be stored, so the series that rotation, anomaly and divergence
+read was empty. This predates Phases 39-41 and is not a regression from them.
+
+**Decision.** `WorkerRuntime.context()` registers every dataset of the enabled market-structure
+providers (`CFI_MARKET_STRUCTURE_PROVIDERS`, default `coingecko`), in the same shape as the existing four
+groups: create the provider client if it does not exist, then `engine.register(dataset, adapter,
+priority)`. The intended set is exactly one dataset, `market_structure.total_market_cap.usd` (TOTAL2,
+TOTAL3, dominance, ETH/BTC and the technical metrics are Calculated Metrics and are never ingested). No
+schema, migration, dataset name, schedule or provider setting changed.
+
+**Tests.** Registration goes through the real runtime and the real `market_structure.ingest` task, not a
+harness: the dataset and its provider link exist in `ops.dataset` / `ops.dataset_provider`; registration is
+idempotent across restarts; nothing is registered when the group is disabled; a provider client exists even
+when CoinGecko is not a market-data provider; and the task stores one observation under the `GLOBAL`
+series. Five of these fail on the pre-fix runtime with the production error.
+
+**Consequences.** Existing deployments need a worker restart; registration is idempotent. Total market
+cap starts accumulating from the first successful run (the source has no history to backfill).
+
+**Known adjacent gap, not changed here.** The same method shows `WorkerRuntime.context()` also does not
+register the liquidity (Phase 9), retail (Phase 10) and macro (Phase 11) datasets, and a development
+database has no `obs.series` rows for them. Registering them would start ingestion for those groups (macro also needs
+a FRED key), so it needs its own decision and is outside Phase 42.
