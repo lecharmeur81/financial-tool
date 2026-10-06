@@ -3284,3 +3284,45 @@ wording change requires a new `template_version`. R2's evidence hierarchy gains 
 Statistical Signal, Regime Classification, AI Interpretation and Hypothesis; the code-side
 `EvidenceCategory` value is a Phase 38.2 task. No code, test, migration, route, page,
 configuration or runtime behavior changes with this ADR.
+
+## ADR-0077 — Phase 40: persist the deterministic decision assessment at the shared snapshot boundary
+
+**Status:** Accepted (approved 2026-10-06)
+
+**Context.** Since Phase 39 the Decision Center computes the assessment of the latest stored snapshot
+on every read; nothing is kept. History, narration and audit all need a durable record. ADR-0076
+defined the assessment identity `(snapshot_id, scope, methodology_version, parameter_version)` for
+exactly this purpose and left persistence for later.
+
+**Decision.**
+- New additive table `sig.decision_assessment` (migration 0013): one immutable row per identity, with
+  the engine's own `deterministic_dict()` as JSONB plus copied scalar columns for filtering. The
+  UNIQUE identity constraint plus `INSERT ... ON CONFLICT DO NOTHING` makes processing the same
+  snapshot any number of times yield exactly one row per scope. `template_version` is provenance, not
+  identity (an assessment already stored for a snapshot is not re-written for a wording-only change).
+- Persistence happens inside `AnalystRepository.insert_snapshot` - the only writer of `ai.snapshot`
+  (a unit test enforces this) and the boundary the alerts cycle, analyst, brief, journal and paper
+  services all use - so every stored snapshot is assessed, not only the cycle's. It runs after the
+  snapshot's own transaction has committed, in a separate transaction, and can never raise into the
+  caller: failure is logged and the snapshot is created exactly as before. A payload that is not a
+  supported snapshot is skipped. All four scopes of a snapshot are written in one transaction.
+- The assessment is produced by the same engine path as the Phase 39 read service
+  (`build_decision_context`, default parameters) applied to the row **as stored** (read back from
+  `ai.snapshot`), never to the in-memory snapshot, so a persisted row can be compared with a fresh
+  computation. No decision logic exists in `cfi.decision_store`; it lives outside `cfi.decision`
+  because that package is database-free. The dependency runs one way (`analyst.repository` ->
+  `decision_store` -> `decision`), with no cycle.
+- A producer-hash mismatch is persisted with `producer_hash_check = 'mismatch'`: it is audit
+  information, never a completeness signal, and the assessment is not discarded. `Insufficient
+  Evidence` is a normal, persistable assessment.
+
+**Alternatives considered.** Persisting only in the realtime cycle (rejected: snapshots made by the
+analyst, brief, journal and paper paths would have no assessment); persisting on read (rejected: the
+Phase 39 path is read-only by contract); switching the Phase 39 read path to the stored row
+(rejected for now: two sources of decision state; the public contract is unchanged and the API still
+computes on read).
+
+**Consequences.** About four rows per snapshot (the cycle runs every 15 minutes, plus other producers);
+row size and growth are measured after live verification, retention is out of scope. A template
+wording change does not create new rows for snapshots that already have one. The proposal's `scope =
+'market'`, `data_quality_state` and `conflict`-from-producer columns are obsolete and not created.

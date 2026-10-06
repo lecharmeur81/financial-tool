@@ -1767,6 +1767,44 @@ status:            implemented (completes ADR-0036; paper trading half already i
 
 ---
 
+## 5r. Decision assessments (implemented in Phase 40)
+
+### `sig.decision_assessment` (`cfi/db/tables.py::decision_assessment`, migration `0013`)
+
+One immutable row per stored snapshot, scope and methodology/parameter version: the deterministic
+Phase 38.2/38.3 assessment of that snapshot, written by `cfi.decision_store` from the engine's own
+`DecisionContext.deterministic_dict()`. Written right after every `ai.snapshot` insert (the single
+`AnalystRepository.insert_snapshot` boundary used by the alerts cycle, analyst, brief, journal and
+paper services), best-effort: a failure to assess never affects the snapshot. Never updated.
+
+| Field | Unit | Description |
+|---|---|---|
+| `id` (bigint, PK) / `uuid` (unique) | — | Internal identity / external-safe reference |
+| `created_at` | timestamptz | The snapshot's own `created_at` (no wall clock is read by persistence) |
+| `snapshot_id` | — | FK to `ai.snapshot(id)` (the D-M `snapshot_id`) |
+| `scope` | — | `BTC`, `ETH`, `SOL` or `XRP` |
+| `methodology_version`, `parameter_version` | — | With `snapshot_id` and `scope`: the UNIQUE assessment identity (ADR-0076, D-M) |
+| `template_version` | — | Provenance only; deliberately NOT part of the identity |
+| `snapshot_version`, `snapshot_as_of`, `knowledge_time` | — / timestamptz | The snapshot's own provenance |
+| `producer_payload_hash` | — | `ai.snapshot.payload_hash` exactly as stored (Phase 21 producer hash) |
+| `producer_hash_check` | — | `verified`, `mismatch` or `unverified` (re-verification result). A `mismatch` is recorded, never repaired and never a completeness signal |
+| `decision_input_hash` | — | The Phase 38.2 hash over the payload the engine received (a different value from the producer hash) |
+| `stance`, `confidence`, `posture` | — | Copies of the engine's final stance / confidence / posture (closed vocabularies, CHECK-enforced). `Insufficient Evidence` is a valid value |
+| `coverage_available`, `expected_domains` | count | Directional domains with usable evidence / defined for the scope |
+| `conflict` | — | The engine's own conflict flag (not the producer's `has_conflicts`) |
+| `assessment` | jsonb | The full `deterministic_dict()` of the context, `generated_at` excluded |
+
+The producer's `data_quality_state` and `has_conflicts` are intentionally not stored: they are not a
+completeness signal (Phase 39). Retention is not defined (out of scope for Phase 40).
+
+```
+metric:            Decision assessment (sig.decision_assessment, no worker task of its own)
+owner_phase:       40 (2026-10-06)
+status:            implemented (ADR-0077); no reader yet - the Phase 39 API still computes on read
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.

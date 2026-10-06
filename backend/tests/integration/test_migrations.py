@@ -129,3 +129,40 @@ def test_institutional_flow_rejects_inferred_labels_and_silent_missing(
     with pytest.raises(psycopg.errors.CheckViolation):  # no values but not marked missing
         _execute(url, base.format(cls="'direct'", flow="NULL", status="'ok'"))
     _empty_all(url)
+
+
+def test_decision_assessment_downgrade_refuses_when_assessments_exist(
+    test_database_url: str,
+) -> None:
+    """Phase 40 (migration 0013): the table is additive, and its downgrade never destroys data."""
+    url = test_database_url
+    _empty_all(url)
+    _execute(
+        url,
+        "INSERT INTO ai.snapshot (uuid, created_at, as_of, knowledge_time, snapshot_version,"
+        " payload, payload_hash) VALUES (gen_random_uuid(), now(), now(), now(),"
+        " 'analyst_snapshot.v1', '{}'::jsonb, 'h')",
+    )
+    _execute(
+        url,
+        "INSERT INTO sig.decision_assessment (uuid, created_at, snapshot_id, scope,"
+        " methodology_version, parameter_version, template_version, snapshot_version,"
+        " snapshot_as_of, knowledge_time, producer_hash_check, decision_input_hash, stance,"
+        " confidence, posture, coverage_available, expected_domains, conflict, assessment)"
+        " SELECT gen_random_uuid(), now(), id, 'BTC', 'm', 'p', 't', 'analyst_snapshot.v1', now(),"
+        " now(), 'verified', 'h', 'Insufficient Evidence', 'Insufficient Evidence',"
+        " 'INVESTIGATE FURTHER', 0, 5, false, '{}'::jsonb FROM ai.snapshot",
+    )
+    with _pointing_at(url):
+        with pytest.raises(RuntimeError, match=r"Refusing to downgrade: .*decision_assessment"):
+            command.downgrade(alembic_config(), "0012")
+        assert _scalar(url, "SELECT count(*) FROM sig.decision_assessment") == 1
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == head_revision()
+
+        _empty_all(url)
+        command.downgrade(alembic_config(), "0012")  # empty table: allowed
+        assert _scalar(url, "SELECT to_regclass('sig.decision_assessment')::text") is None
+        command.upgrade(alembic_config(), "head")
+        assert _scalar(url, "SELECT to_regclass('sig.decision_assessment')::text") is not None
+        assert _scalar(url, "SELECT version_num FROM alembic_version") == head_revision()
+    _empty_all(url)

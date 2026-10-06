@@ -25,6 +25,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.db import tables as t
+from cfi.decision_store.repository import persist_assessments_safely
 
 
 class SnapshotRow(NamedTuple):
@@ -53,7 +54,10 @@ class AnalystRepository:
         payload: dict[str, Any],
         payload_hash: str,
     ) -> tuple[int, uuid.UUID]:
-        """Insert one immutable evidence snapshot. Never updated after insert (ADR-0068)."""
+        """Insert one immutable evidence snapshot. Never updated after insert (ADR-0068).
+
+        The snapshot's deterministic decision assessments are persisted right after (Phase 40),
+        best-effort: see ``persist_assessments_safely``. The return value is unchanged."""
         row_uuid = uuid.uuid4()
         stmt = (
             insert(t.ai_snapshot)
@@ -70,6 +74,11 @@ class AnalystRepository:
         )
         async with self.engine.begin() as conn:
             snapshot_id = int((await conn.execute(stmt)).scalar_one())
+        # Phase 40: the one boundary every snapshot producer (alerts cycle, analyst, brief,
+        # journal, paper) goes through, so every stored snapshot gets its deterministic decision
+        # assessment. Runs AFTER the snapshot's own transaction has committed, in its own
+        # transaction, and can never raise: the snapshot is created exactly as before.
+        await persist_assessments_safely(self.engine, snapshot_id, created_at=created_at)
         return snapshot_id, row_uuid
 
     async def latest_snapshot(self) -> tuple[int, dict[str, Any]] | None:

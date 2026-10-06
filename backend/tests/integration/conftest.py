@@ -52,6 +52,7 @@ DATA_TABLES = (
     "usr.alert_event",
     "ai.usage",
     "ai.interpretation",
+    "sig.decision_assessment",
     "ai.snapshot",
     "ops.quality_check_result",
     "ops.backfill_state",

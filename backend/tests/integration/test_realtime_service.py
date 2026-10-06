@@ -337,6 +337,36 @@ async def test_events_carry_full_provenance(
         assert row["status"] in ("new", "ai_requested")
 
 
+async def test_the_cycle_snapshot_gets_one_decision_assessment_per_scope(
+    db: AsyncEngine, test_settings: Settings, redis: Redis, market: MarketHarness
+) -> None:
+    """Phase 40: the snapshot the cycle builds goes through ``insert_snapshot``, which persists its
+    deterministic assessments - one per scope, no duplicates, and the whole cycle is unaffected."""
+    await _seed_minimum_regime_data(market)
+    svc = RealtimeIntelligenceService(db, test_settings, redis=redis)
+    result = await svc.process_cycle(as_of=AS_OF, knowledge_time=AS_OF, now=AS_OF)
+    assert result.alerts is not None
+    assert result.alerts.snapshot_id is not None
+
+    async with db.connect() as conn:
+        rows = (
+            (
+                await conn.execute(
+                    select(t.decision_assessment).where(
+                        t.decision_assessment.c.snapshot_id == result.alerts.snapshot_id
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+    assert sorted(r["scope"] for r in rows) == ["BTC", "ETH", "SOL", "XRP"]
+    for row in rows:
+        assert row["producer_hash_check"] == "verified"
+        assert row["methodology_version"] == "decision_methodology.v0"
+        assert row["assessment"]["scope"] == row["scope"]
+
+
 # --------------------------------------------------------------------------- AI-trigger gating
 
 

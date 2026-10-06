@@ -3416,3 +3416,40 @@ part of the identity. The stale CSP statements were corrected (ADR-0028 amendmen
 
 **Next step:** awaiting the user. Per the phase's hard-stop, **not** proceeding to Phase 38.2 or any
 further phase automatically (R13); Phase 38.2 requires a separate approval gate.
+
+---
+
+## Phase 40 — Decision Assessment Persistence Foundation (2026-10-06)
+
+**Scope (as approved).** Persist the deterministic decision assessment durably and auditably. Nothing
+else: no Opportunity Map, narrative, Q&A, history or intelligence events; no change to the Phase 38.2
+engine, 38.3 context or the Phase 39 API/UI.
+
+**Delivered.**
+- Migration `0013` / table `sig.decision_assessment` (ADR-0077; fields in DATA_DICTIONARY §5r). Identity
+  `(snapshot_id, scope, methodology_version, parameter_version)` is UNIQUE; `template_version` is
+  provenance only. Rows are immutable; the writer uses `ON CONFLICT DO NOTHING`; all scopes of a snapshot
+  are written in one transaction.
+- New package `cfi.decision_store` (`record.py` pure, `repository.py` database). It calls the existing
+  `build_decision_context` on the snapshot row as stored; it contains no decision logic.
+- Persistence sits at the one boundary every snapshot producer uses, `AnalystRepository.insert_snapshot`
+  (the alerts cycle, analyst, brief, journal and paper services; it is the only writer of `ai.snapshot`,
+  enforced by a test). It runs after the snapshot's transaction commits and never raises into the caller.
+- A producer-hash mismatch is persisted as `producer_hash_check = 'mismatch'`; `Insufficient Evidence`
+  assessments are persisted like any other.
+- The Phase 39 API still computes on read and is unchanged (no reader of the persisted rows yet).
+
+**Verification (sandbox-local PostgreSQL 17 + TimescaleDB and Redis, not the development stack).**
+Unit and API suites: 1231 passed. Integration suites touching snapshots (decision store, migrations,
+realtime, alerts, analyst, brief, journal, paper, decision API, JSONB round trip): 92 passed. ruff, ruff
+format and mypy (246 source files) clean. Mutation checks (identity, hash check, stance, scope loop,
+vocabulary drift, a second `ai.snapshot` writer, missing `ON CONFLICT`, missing hook, wall-clock
+`created_at`, per-row transactions, propagating failures) are each caught by a test.
+Runtime verification on the development stack: migration at 0013; snapshots 170-174 each carry exactly 4 assessment rows (BTC/ETH/SOL/XRP) with no duplicate identities; all rows `producer_hash_check = verified`; all currently `Insufficient Evidence` / `INVESTIGATE FURTHER`, consistent with the known missing institutional, liquidity, macro and retail inputs; no `decision_assessment_persist_failed` log lines. Measured size: assessment JSON 8.0-8.9 KB per row (avg 8,491 bytes); 60 rows = 680 kB table total, i.e. roughly 34 KB per snapshot (4 rows). Full integration suite: 293 passed.
+
+**Known limitations.** No retention policy (out of scope). A template-wording-only change does not
+re-persist snapshots that already have an assessment. Nothing reads the persisted rows yet.
+**Not done here:** PROGRESS/DECISIONS entries for Phases 38.2-39 do not exist in these files, and ADR-0076
+still says "no implementation exists"; that pre-existing documentation gap was left untouched.
+
+**Next step:** awaiting the user (R13).
