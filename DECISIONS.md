@@ -3326,3 +3326,52 @@ computes on read).
 row size and growth are measured after live verification, retention is out of scope. A template
 wording change does not create new rows for snapshots that already have one. The proposal's `scope =
 'market'`, `data_quality_state` and `conflict`-from-producer columns are obsolete and not created.
+
+---
+
+## ADR-0078 — Phase 41: decision history is a deterministic comparison of persisted assessments (no new table)
+
+**Status:** Accepted (approved 2026-10-06; ordering decision A)
+
+**Context.** Phase 40 made the deterministic decision assessment durable. "What changed since the
+previous assessment?" is now answerable without recalculating anything. The only open question was
+chronology: every snapshot producer (alerts cycle, analyst, brief, journal, paper) writes through
+`insert_snapshot`, and the analyst and brief routes accept a caller-supplied `as_of`, so insertion
+order and `as_of` order can disagree.
+
+**Decision.**
+- **Ordering is by `snapshot_id`** (the order the system recorded the assessments), the same definition
+  of "current" as `GET /api/v1/decision/current` (latest `ai.snapshot` row by id). A caller-supplied
+  `as_of` never reorders or redefines "current". `snapshot_as_of` is returned exactly as stored, and an
+  entry carries `out_of_order_as_of: true` when its `snapshot_as_of` is earlier than its predecessor's.
+- **Pairing.** Each entry is compared with the row immediately before it **for the same scope** (BTC is
+  never compared with ETH/SOL/XRP). No predecessor: `No Previous Assessment`, no change is invented. A
+  predecessor with a different `methodology_version` or `parameter_version`: `Not Comparable (version
+  change)`, never silently compared (the identity in ADR-0076 / D-M includes both versions).
+  `template_version` is provenance and does not block a comparison.
+- **Comparison is pure and recalculates nothing** (`cfi.decision_history.compare`): it reads the
+  persisted stance, confidence, posture, coverage and the persisted `assessment` JSON. It imports no
+  rule function and no engine entry point; a test enforces both. Six dimensions are compared in a fixed
+  order (stance, confidence, posture, evidence, coverage, risk). The classification is `NO_CHANGE`, the
+  dimension's own label when exactly one differs, or `MULTIPLE_CHANGES`.
+- **Direction** is reported per dimension only where the engine's own orderings define one: stance by
+  conviction magnitude within a family (`strengthened` / `weakened`; opposite families, or moves
+  involving Insufficient Evidence, are `changed` / `insufficient evidence`); confidence by the engine's
+  order; risk by the engine's risk order (`improved` / `deteriorated`; moves to or from "Not assessed"
+  are `changed`); coverage by directional coverage count, then component availability; posture and
+  evidence are `changed` (posture permissiveness is not "better", evidence is itemised instead).
+  Nothing is a market interpretation or a prediction.
+- **No new persistence.** History is derived from `sig.decision_assessment` on read: one `SELECT`
+  (newest `limit + 1` rows of one scope, ordered by `snapshot_id`), no migration, table or index.
+- **API.** `GET /api/v1/decision/history?asset=BTC|ETH|SOL|XRP&limit=1..100` (default 10), contract
+  `decision_history.v0`, read-only. `decision_view.v0` is unchanged. No frontend change.
+
+**Alternatives considered.** Ordering by `as_of` (rejected: it would let a back-dated analyst run
+redefine history and make the history's "current" differ from the Decision Center's); a separate
+history table (rejected: the assessments already are the history); comparing across versions (rejected:
+a parameter change would read as a market change); one history across scopes (rejected).
+
+**Consequences.** A back-dated snapshot appears as the newest entry and is flagged, not hidden. History
+reads scan the unique identity index backwards (every snapshot has one row per scope), which is cheap at
+current volumes; an index on `(scope, snapshot_id DESC)` is a possible later addition, not needed now.
+The persisted rows now have a reader; narration, Q&A and the Opportunity Map remain separate phases.

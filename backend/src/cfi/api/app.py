@@ -18,6 +18,7 @@ from cfi.api.routes import (
     anomaly,
     brief,
     decision,
+    decision_history,
     derivatives,
     divergence,
     health,
@@ -138,4 +139,5 @@ def create_app(
     app.include_router(journal.router)
     app.include_router(intelligence.router)
     app.include_router(decision.router)
+    app.include_router(decision_history.router)
     return app

@@ -3453,3 +3453,46 @@ re-persist snapshots that already have an assessment. Nothing reads the persiste
 still says "no implementation exists"; that pre-existing documentation gap was left untouched.
 
 **Next step:** awaiting the user (R13).
+
+
+---
+
+## Phase 41 — History / Change Intelligence (2026-10-06)
+
+**Scope (as approved).** Use the persisted `sig.decision_assessment` rows (Phase 40) to say what changed
+between the current assessment and the previous one for the same scope. Deterministic, read-only,
+backend/API only. No Opportunity Map, narrative, Q&A, API-key proxy, agent behaviour, new scoring or
+frontend change; no change to the Phase 38.2 engine, 38.3 context, Phase 39 contract or Phase 40
+persistence.
+
+**Decision (ordering A, approved).** Ordering is by `snapshot_id`, the same definition of "current" as
+`/decision/current`; the caller-supplied `as_of` never reorders. `snapshot_as_of` is returned as stored
+and `out_of_order_as_of` flags an entry whose `as_of` is earlier than its predecessor's. Only rows with the
+same methodology and parameter version are compared; otherwise `Not Comparable (version change)`.
+
+**Delivered.**
+- `cfi.decision_history`: `compare.py` (pure comparison of two persisted assessments: stance, confidence,
+  posture, evidence, coverage/data quality, risk; fixed dimension order; classification `NO_CHANGE` /
+  `*_CHANGED` / `MULTIPLE_CHANGES`; per-dimension direction), `history.py` (pure pairing, the three
+  states, `out_of_order_as_of`), `repository.py` (one read-only `SELECT`). It imports no rule function and
+  no engine entry point; tests enforce both.
+- `GET /api/v1/decision/history?asset=BTC|ETH|SOL|XRP&limit=1..100` (default 10), contract
+  `decision_history.v0` (ADR-0078; fields in DATA_DICTIONARY §5s). `decision_view.v0` is untouched.
+- No migration, table or index: history is derived on read from the Phase 40 rows.
+
+**Verification.** Sandbox (local PostgreSQL + TimescaleDB and Redis, isolated `_test` database): full backend
+suite 1596 passed, 0 failed, 0 skipped (72 new: 43 comparison, 14 pairing, 15 integration). ruff, ruff
+format and mypy clean. Seven mutation checks (as_of ordering, scope filter, version check, out-of-order
+flag, template version blocking, limitations ignored, missing predecessor row) are each caught by a test.
+Live (development stack, `api` rebuilt): all four scopes return `decision_history.v0`, 71 entries each
+(snapshots 160-230), the oldest is `No Previous Assessment`, 70 are `Compared`; current is snapshot 230
+for every scope and equals `/decision/current` (row id and stance); `decision_view.v0` unchanged; an
+unsupported asset and `limit=0` are 422.
+
+**Known limitations.** The live data is all `Insufficient Evidence` with the known missing inputs, so every
+live comparison is `NO_CHANGE`; the other classifications, directions, `Not Comparable (version change)`,
+`out_of_order_as_of` and scope isolation are verified by the tests, not by live data. No frontend section.
+History reads scan the identity index backwards; an index on `(scope, snapshot_id DESC)` is a possible
+later addition, not needed at current volumes.
+
+**Next step:** awaiting the user (R13). Phase 42 has not been started.

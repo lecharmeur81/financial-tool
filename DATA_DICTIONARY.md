@@ -1800,7 +1800,52 @@ completeness signal (Phase 39). Retention is not defined (out of scope for Phase
 ```
 metric:            Decision assessment (sig.decision_assessment, no worker task of its own)
 owner_phase:       40 (2026-10-06)
-status:            implemented (ADR-0077); no reader yet - the Phase 39 API still computes on read
+status:            implemented (ADR-0077); read by the Phase 41 history view (§5s); the Phase 39 API still computes on read
+```
+
+---
+
+## 5s. Decision history (implemented in Phase 41)
+
+`GET /api/v1/decision/history?asset=BTC|ETH|SOL|XRP&limit=1..100` (`cfi/api/routes/decision_history.py`,
+contract `decision_history.v0`). Derived on read from `sig.decision_assessment` (§5r); nothing is stored
+and nothing is recalculated. Entries are ordered newest first by `snapshot_id`; each is compared with the
+row recorded immediately before it for the same scope. 404 when the scope has no persisted assessment, 422
+for an unsupported asset or limit.
+
+| Field | Description |
+|---|---|
+| `contract_version`, `asset`, `ordering` (`snapshot_id`), `limit`, `returned` | Envelope |
+| `running_versions` | The methodology / parameter / template versions the running code produces |
+| `current` | The newest entry (equal to `history[0]`) |
+| `history[]` | Entries, newest first |
+
+Entry fields: `snapshot_id`, `snapshot_as_of` (as stored, never altered), `recorded_at` (the row's
+`created_at`), `stance`, `confidence`, `posture`, `decision_input_hash`, `producer_hash_check`,
+`methodology_version`, `parameter_version`, `template_version`, `previous_snapshot_id`,
+`previous_methodology_version` / `previous_parameter_version` (set only for a version change),
+`out_of_order_as_of`, `state`, `change`.
+
+`state`: `Compared`, `No Previous Assessment` (no earlier row; `change` is `null`), or `Not Comparable
+(version change)` (the earlier row has a different methodology or parameter version; `change` is `null`).
+`out_of_order_as_of` is true when `snapshot_as_of` is earlier than the previous entry's; ordering is never
+changed by it.
+
+`change` (state `Compared`): `classification` (`NO_CHANGE`, `STANCE_CHANGED`, `CONFIDENCE_CHANGED`,
+`POSTURE_CHANGED`, `EVIDENCE_CHANGED`, `COVERAGE_CHANGED`, `RISK_CHANGED` or `MULTIPLE_CHANGES`),
+`changed_dimensions` (fixed order), `same_decision_input`, and one block per dimension:
+
+| Block | Content | `direction` values |
+|---|---|---|
+| `stance`, `confidence`, `posture` | `previous`, `current`, `changed`, `direction` | stance/confidence: `strengthened`, `weakened`, `changed`, `unchanged`, `insufficient evidence`; posture: `changed`, `unchanged` |
+| `evidence` | per-domain `items` (`side` supportive/adverse/neutral; `added`/`removed`/`changed` with the changed fields and `strength_direction`), the conflict flag and contradictions added/removed | `changed`, `unchanged` |
+| `coverage` | available/expected counts, directional and context sources that became available/unavailable, per-component status/freshness/flag changes, limitations added/removed | `improved`, `deteriorated`, `changed`, `unchanged` |
+| `risk` | per-dimension level changes and `max` | `improved`, `deteriorated`, `changed`, `unchanged` |
+
+```
+metric:            Decision history / change intelligence (derived view, no table, no worker task)
+owner_phase:       41 (2026-10-06)
+status:            implemented (ADR-0078)
 ```
 
 ---
