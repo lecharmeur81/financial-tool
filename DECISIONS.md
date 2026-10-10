@@ -3446,3 +3446,53 @@ retail task and every macro task run on the `backfill` queue). Liquidity (DefiLl
 trending, Blockchair) start ingesting, so those domains can become available to the decision engine; scoring and
 interpretation are unchanged. Per-domain history loads over several runs (liquidity back to 2017, in 180-day
 chunks; Blockchair 120 days).
+
+## ADR-0081 — Phase 44: the Unified Intelligence Snapshot is a derived view of the stored snapshot
+
+**Status:** Accepted (Phase 44, 2026-10-10)
+
+**Context.** Later phases (cross-domain confirmation, opportunity discovery, risk, decision) need one stable
+input that says, for every evidence domain, what is available, how fresh it is, what quality flags it carries
+and where it came from. Most of that already exists: `ai.snapshot.payload` (Phase 21, immutable, hashed) holds
+every tool result, and the Decision Context (Phase 38.3) already reads it into per-reading status, freshness,
+quality flags, source-freshness records, look-ahead violations and platform limitations. A second snapshot
+store or builder would compete with both.
+
+**Decision.** `unified_snapshot.v0` (`cfi/intelligence/unified_snapshot.py`) is a **pure, derived view** of one
+stored payload. No table, migration or worker task is added, and nothing is stored. It calls the existing
+`build_decision_context` for the four defined scopes and arranges that output unchanged:
+
+- `global_domains`: the evidence that does not depend on the asset (liquidity, macro, market structure, regime,
+  anomaly, retail, similarity, divergence, rotation, market data), each **once**, read from the BTC assessment.
+  Tests pin that the other scopes produce identical global readings, so nothing is copied or invented per asset.
+- `assets`: per scope, only the asset-level domains (institutional, whale where tracked, derivatives).
+  A domain a scope does not track (whale for SOL, XRP) is named in `not_tracked_domains`, never shown as
+  neutral or negative.
+- Every entry carries the engine's own `status`, `freshness`, `quality_flags`, `direction`, `strength`, `band`,
+  the source tool ids, field ids and the source freshness records, plus `evidence_state` (the existing
+  `decision_view.v0` vocabulary: `available`, `available_freshness_not_assessed`, `stale`, `unavailable`,
+  `insufficient_data`, ...) and `insufficient_data` (`status != ok`). Unavailable, insufficient, stale, partial
+  and not-assessed stay distinct; none becomes zero, neutral or positive.
+- `independent_vote` is true only for a Directional reading. Regime is a Context reading and is therefore never
+  a vote (it is derived from the domain scores), nor are Risk and Context readings.
+- Identity and provenance are preserved as the stored row gives them (row id, uuid, `as_of`,
+  `knowledge_time`, version, producer hash and its check, decision input hash), with the snapshot's data-quality
+  state, source conflicts, unavailable / degraded / conflicting tools, look-ahead violations and platform limits.
+
+The contract has no stance, confidence, posture, score or recommendation field, and does not duplicate
+`decision_view.v0` (no reasons, templates, caps or risks).
+
+**Read path.** `GET /api/v1/intelligence/snapshot` (`cfi/api/routes/intelligence_snapshot.py`; the existing
+`/api/v1/intelligence-events` routes are separate) reuses `AnalystRepository.latest_snapshot_row()` through the
+Decision Center's storage dependency. It never builds a snapshot, ingests, calls a provider or a model, or
+writes. No stored snapshot is a 404 `not_found`; a payload the context layer refuses (unsupported
+`snapshot_version`, malformed times or `tool_results`) is a 503 with the reason: the same conventions as
+`/decision/current`.
+
+**Registration is not ingestion.** The view reports only what the stored payload shows. It does not query
+`ops.dataset`, so a registered dataset that never ingested simply appears as `insufficient_data` / `no_data`.
+
+**Consequences.** No new persistence and no change to the snapshot builder, the decision engine or any existing
+contract. While the platform's macro and institutional sources are not configured, the live view will show
+those entries as insufficient, which is the correct state. Phase 45 (cross-domain confirmation) consumes this
+contract and must not count regime, risk or context entries as votes.

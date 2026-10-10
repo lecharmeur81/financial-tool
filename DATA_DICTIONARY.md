@@ -1850,6 +1850,38 @@ status:            implemented (ADR-0078)
 
 ---
 
+## 5t. Unified intelligence snapshot (implemented in Phase 44)
+
+`GET /api/v1/intelligence/snapshot` (`cfi/api/routes/intelligence_snapshot.py`, contract
+`unified_snapshot.v0`). Derived on read from the latest stored `ai.snapshot` row; nothing is stored,
+recalculated or fetched. 404 when no snapshot is stored; 503 when the stored payload is unsupported or
+malformed.
+
+| Field | Description |
+|---|---|
+| `contract_version` | `unified_snapshot.v0` |
+| `snapshot` | `row_id`, `uuid`, `row_created_at`, `as_of`, `knowledge_time`, `snapshot_version`, `producer_payload_hash`, `producer_hash_check` (`verified` / `mismatch` / `unverified`), `decision_input_hash`, `snapshot_data_quality_state`, `source_conflicts` |
+| `global_domains[]` | Evidence that does not depend on the asset, each once: liquidity, macro, market_structure, regime, anomaly, retail (activity, speculation), similarity, divergence, rotation, market_data |
+| `assets.<BTC\|ETH\|SOL\|XRP>` | `domains[]` (institutional, whale where tracked, derivatives) and `not_tracked_domains` (whale for SOL, XRP) |
+| `coverage` | `entries`, `available`, `insufficient`, `by_evidence_state` |
+| `data_quality` | `unavailable_tools`, `degraded_tools`, `conflicting_tools`, `look_ahead_violations`, `platform_limits` |
+
+Entry fields (the Decision Context's own values, unchanged): `domain`, `component`, `role` (`Directional`,
+`Risk`, `Context`), `independent_vote` (true only for `Directional`; regime is never a vote), `status`
+(`ok`, `unavailable`, `insufficient_data`, `not_applicable`, `not_tracked`), `freshness` (`fresh`, `stale`,
+`no_data`, `not_assessed`), `evidence_state` (as in `decision_view.v0`), `insufficient_data` (`status != ok`),
+`quality_flags` (`stale`, `partial`, `flagged`), `direction`, `strength`, `band`, `source_ids`, `field_ids` and
+`freshness_records[]` (`path`, `status`, `latest`, `expected_latest`, `age_seconds`, `rule`, `note`,
+`after_knowledge_time`). Unavailable is never neutral; there is no stance, score or recommendation field.
+
+```
+metric:            Unified intelligence snapshot (derived view, no table, no worker task)
+owner_phase:       44 (2026-10-10)
+status:            implemented (ADR-0081)
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.

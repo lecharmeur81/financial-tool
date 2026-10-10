@@ -3597,3 +3597,45 @@ and is recorded in the next PROGRESS update (it cannot be inside the commit it n
 
 **Next step:** awaiting the user (R13). The next phase is **Phase 44 — Unified Intelligence Snapshot**; it has
 not been started.
+
+## Phase 44 — Unified Intelligence Snapshot (2026-10-10)
+
+**Phase 43 commit:** `36147f1fdf2639a90c852cf7eec51509c6e7e444` (`[P43] register liquidity retail and macro
+datasets`), the base of this phase.
+
+**Scope (as approved).** One deterministic, read-only `unified_snapshot.v0` derived from the existing stored
+`ai.snapshot` payload (ADR-0081). No new table, migration, worker task or snapshot builder; no scoring or
+decision-engine change; no confirmation, opportunity, risk, recommendation or alert logic (Phase 45 onwards);
+no `ops.dataset` query (dataset registration is not evidence of ingestion); no frontend change.
+
+**Delivered.**
+- `backend/src/cfi/intelligence/` (`unified_snapshot.py`, `__init__.py`): pure `build_unified_snapshot(payload,
+  snapshot_ref=None)`. It reuses `build_decision_context` for BTC, ETH, SOL and XRP and arranges the engine's own
+  readings: `global_domains` once (read from the BTC assessment), `assets.<scope>.domains` for institutional,
+  whale (BTC, ETH) and derivatives, `not_tracked_domains` for whale on SOL and XRP, `coverage`, `data_quality`
+  and the snapshot identity. `independent_vote` is false for regime and every Risk or Context reading.
+- `backend/src/cfi/api/routes/intelligence_snapshot.py`, registered in `cfi/api/app.py`:
+  `GET /api/v1/intelligence/snapshot` over `AnalystRepository.latest_snapshot_row()` (no new repository code).
+  404 when no snapshot is stored, 503 with the reason for an unsupported or malformed stored payload.
+- ADR-0081 and DATA_DICTIONARY §5t.
+- Tests: `tests/unit/test_unified_snapshot.py` (20): every domain explicit; global evidence once and not
+  duplicated per asset; global readings equal across scopes; regime and risk/context never votes; unavailable is
+  never neutral; stale, partial and not-assessed stay distinct; the live-state payload reports explicit
+  insufficient data; identity, hashes (verified, mismatch, unverified), platform limits and look-ahead violations
+  preserved; unsupported or malformed payloads refused; deterministic and non-mutating; no stance or
+  recommendation vocabulary; the decision view unchanged. `tests/unit/test_unified_snapshot_route.py` (3): 200,
+  404 and 503 through the real app with an in-memory storage source. `tests/integration/test_unified_snapshot_api.py`
+  (4): the PostgreSQL round trip, 404, 503 and no writes.
+
+**Verification (focused only; the full suite was not rerun).** Unit: 23 new tests passed, plus the existing
+decision read-service, context, golden and identity tests (140 passed in total with the new builder tests).
+`ruff check`, `ruff format --check` and `mypy` clean on the changed files. The 4 integration tests were run by the user in the
+project's Docker environment (`docker compose run --rm api pytest -q tests/integration/test_unified_snapshot_api.py`):
+4 passed.
+
+**Known limitations.** The live view shows macro and institutional entries as insufficient while their sources
+are not configured (no FRED or SoSoValue key), and derivatives stays degraded while Bybit returns 403; these
+are real data states, not defects. Live ingestion of the Phase 43 datasets is still unconfirmed.
+
+**Next step:** awaiting the user's approval to commit (R13). The next phase is **Phase 45 — Cross-Domain
+Confirmation Engine**; it has not been started.
