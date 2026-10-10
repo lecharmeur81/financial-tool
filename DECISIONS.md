@@ -3496,3 +3496,70 @@ writes. No stored snapshot is a 404 `not_found`; a payload the context layer ref
 contract. While the platform's macro and institutional sources are not configured, the live view will show
 those entries as insufficient, which is the correct state. Phase 45 (cross-domain confirmation) consumes this
 contract and must not count regime, risk or context entries as votes.
+
+## ADR-0082 — Phase 45: cross-domain confirmation is a derived view over the unified snapshot
+
+**Status:** Accepted (Phase 45, 2026-10-10)
+
+**Context.** The Decision Center answers "what is the overall stance". Later phases (opportunity discovery,
+risk, decision) also need to know how many *independent, current, complete* domains actually agree, and
+whether opposing evidence exists. That must not be conflated with the stance, and must not count the same
+evidence twice (regime is derived from the domain scores; liquidity, macro and market structure are
+market-wide).
+
+**Decision.** `cross_domain_confirmation.v0` (`cfi/intelligence/confirmation.py`) is a pure, deterministic
+function of `unified_snapshot.v0` (ADR-0081). No table, migration, worker task, snapshot builder or
+persistence is added, and results are not stored or compared over time. Per asset it reports `agreement`:
+`confirmed_supportive`, `confirmed_adverse`, `mixed`, `unconfirmed` or `insufficient_evidence`, with closed
+reason ids (`CF-*`) and every member's state, direction, strength, freshness, quality flags, source and field
+ids and freshness records.
+
+*Eligibility.* Only an entry that is a Directional vote, has status `ok`, is `fresh`, carries no quality flag,
+has a direction of supportive / adverse / neutral and has an evidence family can vote. Anything else keeps an
+explicit state (`unavailable`, `stale`, `partial`, `not_assessed`, `not_tracked`, `unmapped`) and an
+`exclusion_reason`, stays visible, and never becomes neutral, confirming or contradicting. **Partial readings
+are shown but excluded from the counts**; they are not weak confirmation. Regime, risk and context entries are
+never votes and are listed under `excluded`.
+
+*Verified freshness.* A member's top-level `freshness` label is not sufficient. The engine labels a market-wide
+domain `fresh` whenever one enabled source exists and none is stale, even when a source's own freshness is
+missing, `None`, `no_data` or unknown (`decision/evidence.py`, unchanged). Confirmation therefore also requires
+`freshness_records` to be non-empty with every record's status exactly `fresh`; otherwise the member is
+`not_assessed` with `exclusion_reason` `freshness_unverified` and cannot vote or serve as the key-layer
+confirmer. The original records and label are output unchanged. The check is deliberately conservative: a
+disabled source with lagging freshness also excludes the domain.
+
+*Rules (first match wins).* (1) Eligible families on both sides -> `mixed`; this is **not** hidden by the
+coverage floor (`CF-MIXED-LOW-COVERAGE` is added when coverage is also low), and `CF-DECISION-CONFLICT-
+DEFINITION-MET` records when the Decision Center's own DS-02 definition (`is_conflict`) also holds. (2)
+Eligible coverage below the floor -> `insufficient_evidence`. (3) At least `min_families` families on one side,
+none on the other, and an eligible asset-specific confirmer from the key layer (`KEY_CONFIRMATION_DOMAINS`)
+-> `confirmed_*`. (4) Otherwise `unconfirmed` (`CF-TOO-FEW-FAMILIES`, `CF-NO-KEY-LAYER`,
+`CF-NO-DIRECTIONAL-EVIDENCE`).
+
+*Parameters and families.* `confirmation_params.v0`: 2 families, key layer required, eligible-coverage floor
+1/2. They are experimental engineering parameters, not validated predictors or guarantees of future returns;
+the decision engine's parameters are neither reused nor changed (the eligibility rules differ). `evidence_
+families.v0` maps each directional domain to a family by data lineage; domains in one family count once per
+asset and direction. Strength is preserved in the output and does **not** weight the counts. A directional
+domain without a family is excluded as `no_family_mapping` (never counted) and a test pins that every defined
+directional domain is mapped.
+
+*Limitations (stated in the contract).* Family de-duplication is a lineage safeguard, not proof of statistical
+independence. Institutional flows and market structure both use CoinGecko prices; liquidity, macro and market
+structure may respond to common conditions; none of this is modelled and no correlation or causation is
+claimed. Liquidity, macro and market structure are market-wide (market structure is BTC-benchmarked) and are
+marked `shared_across_assets`, so they are not independent observations of SOL or XRP, which is why a
+confirmation also requires an asset-specific key-layer confirmer.
+
+*Relationship to the Decision Center.* The two may differ, by design: the engine keeps stale readings in its
+tally and returns a stance; confirmation excludes stale, partial and not-assessed readings and counts
+families. Neither is derived from the other and neither changes the other.
+
+**Read path.** `GET /api/v1/intelligence/confirmation` builds the unified snapshot from the latest stored row
+through the existing snapshot source and `AnalystRepository.latest_snapshot_row()`; 404 when none is stored,
+503 with the reason for an unsupported payload. It writes nothing.
+
+**Consequences.** No existing contract changed. The live view is `insufficient_evidence` while the macro and
+institutional sources are unconfigured. Phase 46 (opportunity discovery) may consume this contract and must not
+treat `confirmed_*` as a recommendation.

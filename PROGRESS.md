@@ -3639,3 +3639,47 @@ are real data states, not defects. Live ingestion of the Phase 43 datasets is st
 
 **Next step:** awaiting the user's approval to commit (R13). The next phase is **Phase 45 — Cross-Domain
 Confirmation Engine**; it has not been started.
+
+## Phase 45 — Cross-Domain Confirmation Engine (2026-10-10)
+
+**Phase 44 commit:** `834703a5ae8ecf53c67adb179172fe1b04d44ee7` (`[P44] add unified intelligence snapshot`), the
+base of this phase.
+
+**Scope (as approved).** A pure, deterministic `cross_domain_confirmation.v0` over `unified_snapshot.v0`
+(ADR-0082). No table, migration, worker, persistence, history or frontend change; no stance, score, opportunity,
+risk, decision, alert or recommendation; no change to the unified-snapshot contract, the decision engine or its
+parameters.
+
+**Delivered.**
+- `backend/src/cfi/intelligence/confirmation_universe.py`: `evidence_families.v0` (lineage families),
+  `confirmation_params.v0` (2 families, key layer required, coverage floor 1/2; experimental) and the stated
+  limitations.
+- `backend/src/cfi/intelligence/confirmation.py`: `build_confirmation(unified)`. Only fresh (label **and** every
+  freshness record explicitly `fresh`), complete, ok, family-mapped Directional entries vote; stale, partial, not-assessed, unavailable, not-tracked and unmapped
+  entries stay visible with an exclusion reason and never count; regime, risk and context are excluded. `mixed`
+  takes precedence over the coverage floor.
+- `backend/src/cfi/api/routes/intelligence_confirmation.py`, registered in `cfi/api/app.py`:
+  `GET /api/v1/intelligence/confirmation` (404 no snapshot, 503 unsupported payload), reusing the Decision
+  Center's snapshot source and `AnalystRepository.latest_snapshot_row()`.
+- ADR-0082 and DATA_DICTIONARY §5u.
+- Tests: `tests/unit/test_confirmation.py` (rules, coverage boundaries, conflict precedence, every ineligible
+  state, family de-duplication and an unmapped domain, regime/risk never votes, global readings shared, strength
+  never weights, exhaustive 5^5 property check that mixed is never hidden and removing evidence never
+  manufactures agreement, provenance, purity, no stance vocabulary, malformed input, real-chain cases);
+  `tests/unit/test_confirmation_route.py` (200, 404, 503 through the real app); `tests/integration/
+  test_confirmation_api.py` (PostgreSQL round trip, 404, 503, no writes).
+
+**Verification (focused only; the full suite was not rerun).** The new unit and route tests, the Phase 44
+tests, `ruff check`, `ruff format --check` and `mypy` on the changed files passed. The integration tests need
+PostgreSQL and Redis and are to be run in the project's Docker environment.
+
+**Known limitations.** Independence is by data lineage only; institutional flows and market structure share
+CoinGecko prices, and liquidity, macro and market structure may respond to common conditions (not modelled).
+Thresholds are experimental. Confirmation can differ from the Decision Center stance by design. On the live
+stack the result is `insufficient_evidence` while macro and institutional sources are not configured; live
+ingestion of the Phase 43 datasets remains unconfirmed.
+
+**Verified-freshness safeguard (post-audit).** The final audit found the engine labels a market-wide domain `fresh` when a source's own freshness is missing, `None`, `no_data` or unknown. Confirmation now also requires explicit `fresh` freshness records (`freshness_unverified` otherwise); Phase 44 and the decision engine are unchanged.
+
+**Next step:** awaiting the user's approval to commit (R13). The next phase is **Phase 46 — Opportunity
+Discovery Engine**; it has not been started.

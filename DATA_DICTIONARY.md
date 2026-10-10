@@ -1882,6 +1882,47 @@ status:            implemented (ADR-0081)
 
 ---
 
+## 5u. Cross-domain confirmation (implemented in Phase 45)
+
+`GET /api/v1/intelligence/confirmation` (`cfi/api/routes/intelligence_confirmation.py`, contract
+`cross_domain_confirmation.v0`). Derived on read from `unified_snapshot.v0` (§5t); nothing is stored. 404 when no
+snapshot is stored; 503 when the stored payload is unsupported or malformed. No recommendation, score or stance.
+
+| Field | Description |
+|---|---|
+| `contract_version`, `source_contract` | `cross_domain_confirmation.v0`, `unified_snapshot.v0` |
+| `snapshot`, `data_quality` | Copied unchanged from the unified snapshot (identity, hashes, look-ahead violations, platform limits) |
+| `parameters` | `confirmation_params.v0`: `min_families` 2, `require_key_layer` true, `coverage_floor` [1, 2]; `families_version` `evidence_families.v0`. Experimental engineering parameters, not validated predictors |
+| `families` | Directional domain -> `family` and `lineage` (institutional_flows, onchain_large_holders, stablecoin_liquidity, macro_backdrop, price_structure) |
+| `assets.<BTC\|ETH\|SOL\|XRP>` | `agreement`, `reasons`, `supportive_families`, `adverse_families`, `key_layer`, `coverage`, `counts_by_state`, `members[]` |
+| `excluded[]` | Entries that never vote (regime, risk, context): `scope` (`global` or asset), `domain`, `component`, `role`, `reason` `not_a_directional_vote` |
+| `limitations[]` | `id` and `text`: lineage-only independence, price lineage overlap, economic overlap not modelled, market-wide evidence shared, experimental parameters |
+
+`agreement`: `confirmed_supportive`, `confirmed_adverse`, `mixed`, `unconfirmed`, `insufficient_evidence`.
+`reasons`: `CF-CONFIRMED`, `CF-MIXED`, `CF-MIXED-LOW-COVERAGE`, `CF-DECISION-CONFLICT-DEFINITION-MET`,
+`CF-LOW-COVERAGE`, `CF-TOO-FEW-FAMILIES`, `CF-NO-KEY-LAYER`, `CF-NO-DIRECTIONAL-EVIDENCE`.
+
+Member fields: `family`, `domain`, `component`, `scope_basis` (`asset` / `market_wide`), `shared_across_assets`,
+`state` (`supportive`, `adverse`, `neutral` when eligible; otherwise `unavailable`, `stale`, `partial`,
+`not_assessed`, `not_tracked`, `unmapped`), `eligible`, `exclusion_reason`, `direction`, `strength` (preserved,
+never weighted), `freshness`, `evidence_state`, `quality_flags`, `source_ids`, `field_ids`, `freshness_records[]`.
+
+Eligibility: Directional vote, status `ok`, freshness `fresh` **and verified** (`freshness_records` non-empty and
+every record's `status` exactly `fresh`), no quality flag, direction S / A / N, family mapped. The top-level
+`freshness` label alone is not enough: missing, empty, `None`, `no_data` or unknown freshness records give state
+`not_assessed` with `exclusion_reason` `freshness_unverified`, and the member cannot vote or be the key-layer
+confirmer. Records and labels are output unchanged. Partial readings are visible but never counted. A family counts at most once per asset and direction.
+`mixed` is reported whenever eligible families exist on both sides, even below the coverage floor. The result may
+differ from the Decision Center stance (`GET /api/v1/decision/current`) by design.
+
+```
+metric:            Cross-domain confirmation (derived view, no table, no worker task)
+owner_phase:       45 (2026-10-10)
+status:            implemented (ADR-0082)
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.
