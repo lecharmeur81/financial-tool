@@ -3688,3 +3688,95 @@ opportunities from the latest stored row (existing snapshot source) and writes n
 **Consequences.** No existing contract or rule changed. The live result is currently nothing scored while macro
 and institutional sources are unconfigured. The ranking is a research ordering, not a recommendation. Phase 48
 (risk and invalidation) must not treat a higher depth as lower risk.
+
+
+## ADR-0085 — Phase 48: risk and invalidation is a set of explicit findings over existing risk rules
+
+**Status:** Accepted (Phase 48, 2026-10-10)
+
+**Context.** After Phase 47 the platform lists candidates and orders them by evidence depth. Phase 48 states what
+could go wrong with a candidate and what would invalidate it. Investment decisions (Phase 49), historical
+validation (Phase 50) and alerts (Phases 51 and 52) are out of scope. The Decision Context (`cfi.decision`)
+already computes six risk dimensions (RK-01 to RK-06), observed caps (RC-01 to RC-04) and CAP-U ceilings;
+Unified Snapshot, confirmation, opportunity and ranking do not carry them.
+
+**Decision.** `risk_invalidation.v0` (`cfi/intelligence/risk.py`, vocabulary in `risk_universe.py`) is a pure,
+deterministic function of three views of **one** stored snapshot: `opportunity_ranking.v0` (principal input),
+`opportunity_discovery.v0` (which carries the excluded members and Risk and Context entries that ranking drops)
+and `risk_view.v0` (`risk_view.py`). Parameters are `risk_params.v0` (experimental) and the checks are
+`risk_checks.v0`. No table, migration, worker, provider, dependency, frontend work or persistence, and no change
+to Phases 44 to 47. **No competing risk model is defined:** `risk_view.v0` calls the public
+`build_decision_context` that Phase 44 already uses and copies its levels, reason ids, observed caps and CAP-U
+records unchanged. It adds one flag, `caps_evaluated`, because the decision rules evaluate caps only for a
+bullish-family raw stance (decision D-D); without it "no cap observed" could be read as "cap condition absent".
+The raw stance itself is not exposed.
+
+*Findings, not a score.* There is no aggregate risk score, probability of loss, safety rating, recommendation,
+target or sizing. Each check returns one explicit result: `passed` (condition not met **on verified-fresh
+evidence**; never "safe"), `detected` (condition met), `unverified` (evaluable but freshness cannot be verified),
+`unavailable` (data missing or source not evaluable), `not_applicable` or `withheld` (an integrity gate is
+triggered). A level is `detected` at Elevated and High; Moderate is shown (`RI-LEVEL-MODERATE-VISIBLE`) but is not
+detected. The level mappings are the decision engine's v0 design judgments, not probabilities of loss, and no new
+numeric threshold is introduced. Checks: integrity (RI-INT-01 look-ahead, RI-INT-02 producer hash, RI-INT-03
+conflicting or degraded tools); market-wide risks reported once (RI-MKT-01 market, RI-LIQ-01 stablecoin liquidity
+backdrop, RI-VOL-01 volatility, RI-NAR-01 retail speculation); per candidate leverage (RI-LEV-01), data quality
+(RI-DQ-01), evidence (RI-EVD-01 and 02 adverse asset-specific or market-wide evidence, RI-EVD-03 unusable
+expected domains, RI-EVD-04 fewer than two asset-specific families, RI-EVD-05 reliance on shared market-wide
+evidence) and the four caps (RI-CAP-01 to 04). Execution liquidity, numeric derivatives risk, evidence trend,
+event, venue and portfolio concentration are listed as `unavailable` with explicit reason codes
+(`RI-NO-VERIFIED-DATA`, `RI-NOT-KNOWN-TO-PLATFORM`).
+
+*Asymmetric freshness.* An adverse reading is reported even when freshness is unverified, with
+`freshness_verified: false`. A `passed` result requires every contributing source entry to be verified fresh
+(non-empty freshness records, all `fresh`, no quality flags). In current snapshots derivatives, anomaly, retail
+and regime readings carry `not_assessed` freshness and no records, so their Low readings are `unverified`, never
+`passed`. The data-quality dimension is derived from counts and has no dated source: it is `unverified` with
+`RI-FRESHNESS-NOT-APPLICABLE`. Missing evidence is reported (`RI-MISSING-NOT-ADVERSE`) and is never adverse;
+stale evidence is not proof that a thesis failed.
+
+*Caps and invalidation.* Observed cap, binding cap and invalidation trigger are three different things. RC-01 to
+RC-04 are reported as risk findings, with `observed` and `binding` stated separately, and are **not** treated as
+invalidation: the decision rules limit a decision stance; they do not establish that an opportunity candidate is
+invalid. INV-06 is therefore `cannot_evaluate` (`RI-INV-CAP-RELATIONSHIP-NOT-ESTABLISHED`) when a cap is observed,
+and never `triggered`. INV-01 to INV-03 restate existing minimums (Phase 46 asset-specific confirmers, Phase 45
+confirming families, adverse confirmation) and add no new number. INV-04 reports whether every supporting
+member is verified fresh: a snapshot is one point in time and no upstream contract records an earlier verified
+state, so a loss of freshness cannot be observed and stale, missing or unverified freshness is never inferred to
+be one. INV-04 is therefore `not_triggered` (all verified) or `cannot_evaluate`
+(`RI-FRESHNESS-LOSS-NOT-OBSERVABLE`), never `triggered`, and unverified support makes INV-01 and INV-02
+`cannot_evaluate` rather than invalid. RI-EVD-01 and RI-EVD-02 examine only the eligible members Phases 45 and 46
+admitted (their freshness is computed, not assumed; an empty scope is `unavailable`), RI-EVD-04 and RI-EVD-05 are
+family counts, and none of a `passed` result means all relevant evidence was examined or that a thesis is safe.
+INV-05 (integrity
+gate) is `not_triggered` for every assessed candidate because a triggered gate withholds the assessment. Each
+condition carries the field ids to monitor.
+
+*Overlapping evidence.* Ranking, opportunities and the risk view are one body of evidence seen three ways
+(`evidence_dependence.independent_confirmation` is false). Evidence is joined by field id and de-duplicated, so an
+item that appears in several inputs is counted once, and no finding is strengthened or weakened by appearing in
+more than one. Rank and evidence depth are displayed (`used_for_risk: false`) and never lower a risk.
+
+*Scope and integrity.* Only a Phase 46 `candidate` is assessed. Every other asset keeps its Phase 46 status and
+reasons, `assessment: not_applicable` (or `withheld` for `blocked`), and is never described as low risk. A
+triggered look-ahead or producer-hash gate means nothing is assessed: market findings are `withheld`, no
+reassuring result is produced and the gate reasons are reported.
+
+*Fail closed.* The ranking is recomputed from the opportunities and must equal the supplied ranking; the risk
+view must have the supported version and source, the identity of the opportunities' snapshot on all nine
+identity fields, exactly BTC, ETH, SOL and XRP, six well-formed dimensions per scope, and identical market-wide
+dimensions across scopes. A candidate that holds adverse eligible evidence, holds fewer supporting families than the
+Phase 45 and 46 minimums (a contradiction between its status and its evidence, which Phase 47 does not catch), or
+coexists with a triggered gate is inconsistent and refused, so INV-01 and INV-02 are never `triggered` for an
+accepted input. Any such failure raises `RiskInputError`; the route returns 503 with the reason and no partial
+assessment. An integrity failure is distinct from an unavailable check, which is a normal result.
+
+**Deferred.** Execution depth, numeric derivatives magnitudes, evidence trends (history), event and venue risk,
+portfolio concentration, and any rule tying a cap to invalidation.
+
+**Read path.** `GET /api/v1/intelligence/risk-invalidation` derives the unified snapshot, confirmation,
+opportunities, ranking and risk view from the latest stored row (existing snapshot source) and writes nothing.
+No stored snapshot is 404 `not_found`; an unusable payload or input is 503 with the reason.
+
+**Consequences.** No existing contract or rule changed. On the live stack nothing is assessed while macro and
+institutional sources are unconfigured. The findings are not a safety rating: Phase 49 must not read `passed` as
+safe or the absence of a finding as low risk.

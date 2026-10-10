@@ -2012,6 +2012,77 @@ status:            implemented (ADR-0084)
 
 ---
 
+## 5x. Risk and invalidation (implemented in Phase 48)
+
+`GET /api/v1/intelligence/risk-invalidation` (`cfi/api/routes/intelligence_risk.py`, contract
+`risk_invalidation.v0`). Derived on read from `opportunity_ranking.v0` (§5w), `opportunity_discovery.v0` (§5v)
+and `risk_view.v0` (the decision engine's own risk results) of the latest stored snapshot; nothing is stored.
+404 when no snapshot is stored; 503 when the payload or any input is unusable or inconsistent (no partial
+assessment). Explicit findings only: no risk score, probability of loss, safety rating, recommendation, target
+price or position size, and `passed` never means safe.
+
+| Field | Description |
+|---|---|
+| `contract_version`, `source_contracts`, `decision` | `risk_invalidation.v0`; the ranking, opportunity, risk-view, unified, confirmation and parameter versions consumed; the decision engine's methodology and parameter versions |
+| `snapshot`, `gates`, `data_quality` | Copied unchanged from the Phase 46 contract |
+| `parameters` | `risk_params.v0`: `detected_levels` (Elevated, High), `visible_levels` (Moderate), `experimental` true |
+| `checks` | `risk_checks.v0`: every check id, category, scope and condition, with the result and invalidation-result vocabularies |
+| `evidence_dependence` | `single_snapshot` true, the three input contracts, `independent_confirmation` false and a note |
+| `assessment` | `performed` (false when an integrity gate is triggered) and `gate_reasons` (`RI-GATE-LOOK-AHEAD`, `RI-GATE-INTEGRITY`) |
+| `integrity.findings[]` | RI-INT-01 look-ahead, RI-INT-02 producer hash, RI-INT-03 conflicting or degraded tools |
+| `market_risks` | `applies_to` and `findings[]`: RI-MKT-01 market, RI-LIQ-01 stablecoin liquidity backdrop, RI-VOL-01 volatility, RI-NAR-01 retail speculation; market-wide, reported once |
+| `unavailable_checks[]` | Checks with no verified source, result `unavailable`: RI-UNV-EXECUTION, -DERIVATIVES-DETAIL, -EVIDENCE-TREND, -EVENT-RISK, -VENUE (`RI-NO-VERIFIED-DATA`) and -PORTFOLIO (`RI-NOT-KNOWN-TO-PLATFORM`) |
+| `assets.<BTC\|ETH\|SOL\|XRP>` | Fixed order; one block per asset (below) |
+| `notice`, `limitations[]` | The fixed notice that the findings are not a safety rating, and the stated limitations |
+
+Result vocabulary: `passed` (condition not met on verified-fresh evidence), `detected` (condition met, reported
+even when freshness is unverified and then flagged `freshness_verified: false`), `unverified` (evaluable but
+freshness cannot be verified; not reassuring), `unavailable` (data missing or source not evaluable),
+`not_applicable`, `withheld` (integrity gate). Invalidation results: `triggered`, `not_triggered`,
+`cannot_evaluate`, `withheld`.
+
+Asset block: `status`, `discovery_type` and `reasons` (the Phase 46 values, unchanged), `ranking_context`
+(`scored`, `evidence_depth`, `rank`, `rank_scope`, `used_for_risk` false: displayed, never used), `assessment`
+(`assessed` for a Phase 46 candidate; `not_applicable` for any other status; `withheld` for `blocked`) with
+`assessment_reasons` (`RI-ASSESSED`, `RI-NOT-A-CANDIDATE`, `RI-WITHHELD-BLOCKED`), `findings[]`, `counts` per
+result, `invalidation` and `market_risks_detected`. A non-candidate has no findings and no invalidation and is
+never described as low risk. Candidate findings: RI-LEV-01 leverage and RI-DQ-01 data quality (decision engine
+RK-03 and RK-06); RI-EVD-01 and RI-EVD-02 adverse asset-specific or market-wide evidence; RI-EVD-03 unusable
+expected domains (`RI-MISSING-NOT-ADVERSE`); RI-EVD-04 fewer than two asset-specific families; RI-EVD-05 reliance on
+shared market-wide evidence; RI-CAP-01 to RI-CAP-04 for the decision caps RC-01 (derivatives high stress), RC-02
+(critical anomaly), RC-03 (euphoria) and RC-04 (distribution or capitulation). A finding holds `check_id`,
+`category`, `scope`, `applicable`, `result`, `level`, `reason_ids`, `engine_reason_ids` (the decision engine's, unchanged),
+`freshness_verified`, `field_ids`, `source_ids`, `contributors`, `freshness_records` and `detail` (for a cap:
+`observed`, `binding`, `caps_evaluated`, `source_status`).
+
+`invalidation`: `summary` (`triggered`, `not_fully_evaluable`, `none_triggered`), `conditions[]` and `monitor[]`.
+INV-01 asset-specific support lost (Phase 46 minimum), INV-02 confirmation lost (Phase 45 minimum), INV-03 adverse
+confirmation, INV-04 verified-freshness status (`not_triggered` or `cannot_evaluate`, never `triggered`: no contract
+records a transition, so stale or unverified freshness is not an observed loss), INV-05 integrity gate, INV-06
+decision cap. RI-EVD-01 and RI-EVD-02 examine only the eligible members (an empty scope is `unavailable`); RI-EVD-04
+and RI-EVD-05 are family counts with `freshness_verified` null. INV-06 is
+`cannot_evaluate` when a cap is observed (`RI-INV-CAP-RELATIONSHIP-NOT-ESTABLISHED`) and never `triggered`: an
+observed cap, a binding cap and an invalidation trigger are different things. Caps are evaluated by the decision
+rules only for a bullish-family raw stance; otherwise they are `not_applicable`
+(`RI-CAP-NOT-EVALUATED-RAW-NOT-BULLISH`), not absent.
+
+Risk levels and band mappings are the decision engine's v0 design judgments, not probabilities of loss. Live
+derivatives, anomaly, retail and regime readings do not carry verifiable freshness, so their Low readings are
+`unverified`, never `passed`. The inputs overlap (one snapshot): no finding is strengthened by appearing in more
+than one, and evidence is counted once.
+
+`risk_view.v0` (`cfi/intelligence/risk_view.py`, internal): per scope `caps_evaluated`, `risks[]` (dimension,
+level, reason ids, field ids), `max_risk`, `observed_caps[]` (rule id, binding, source field ids, reason id),
+`cap_u[]` and `source_status`, copied from `build_decision_context`; plus the snapshot identity.
+
+```
+metric:            Risk and invalidation (derived view, no table, no worker task)
+owner_phase:       48 (2026-10-10)
+status:            implemented (ADR-0085)
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.

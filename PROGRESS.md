@@ -3776,5 +3776,60 @@ a lower depth inside a group can reflect missing evidence (reported). On the liv
 macro and institutional sources are unconfigured; live ingestion of the Phase 43 datasets remains unconfirmed.
 Freshness age gradients, score magnitudes, relative strength, rotation and divergence are deferred.
 
-**Next step:** awaiting the user's review and approval to commit (R13). The next phase is **Phase 48 — Risk &
-Invalidation**; it has not been started.
+**Next step:** committed as `b8c121c` (`[P47] add opportunity scoring and ranking`). The next phase is **Phase 48 — Risk &
+Invalidation**.
+
+## Phase 48 — Risk & Invalidation (2026-10-10)
+
+**Phase 47 commit:** `b8c121c` (`[P47] add opportunity scoring and ranking`), the base of this phase.
+
+**Scope (as approved).** A pure, deterministic `risk_invalidation.v0` over `opportunity_ranking.v0`,
+`opportunity_discovery.v0` and `risk_view.v0` of one stored snapshot (ADR-0085). No table, migration, worker,
+provider, dependency, frontend change or persistence; no risk score, probability of loss, safety rating,
+recommendation, target or size; no decision, backtest or alert (Phases 49 to 52); no change to Phases 44 to 47.
+
+**Delivered.**
+- `backend/src/cfi/intelligence/risk_universe.py`: `risk_params.v0`, `risk_checks.v0`, the check, cap, invalidation
+  and reason vocabularies, the declared-unavailable checks, the notice and limitations.
+- `backend/src/cfi/intelligence/risk_view.py`: `risk_view.v0`, an adapter over the public `build_decision_context`
+  that copies the decision engine's risk levels, observed caps and CAP-U records unchanged and adds
+  `caps_evaluated` (caps are evaluated only for a bullish-family raw stance). No competing risk model.
+- `backend/src/cfi/intelligence/risk.py`: `build_risk_invalidation(opportunities, ranking, risk_view)`. Only a
+  Phase 46 candidate is assessed; other statuses keep their status and reasons and are never called low risk.
+  Elevated and High are detected, Moderate is visible; a pass needs verified-fresh evidence, INV-04 is never
+  `triggered` (no contract records a freshness transition; unverified support is `cannot_evaluate`), adverse readings are
+  reported even when freshness is unverified; observed and binding caps are risk findings and never an
+  invalidation (INV-06 is `cannot_evaluate`); a triggered integrity gate withholds everything; inputs are
+  cross-validated (ranking recomputed, identity on nine fields, market-wide dimensions identical across scopes)
+  and a failure raises `RiskInputError` (route 503, no partial assessment).
+- `backend/src/cfi/api/routes/intelligence_risk.py`, registered in `cfi/api/app.py`:
+  `GET /api/v1/intelligence/risk-invalidation` (404 no snapshot, 503 unusable payload or input). Additive exports
+  in `cfi/intelligence/__init__.py`.
+- ADR-0085 and DATA_DICTIONARY §5x. The Phase 47 "awaiting approval to commit" line above now records its commit
+  `b8c121c`.
+- Tests: `tests/unit/test_risk.py` (147), `tests/unit/test_risk_view.py` (8), `tests/unit/test_risk_route.py` (5),
+  `tests/integration/test_risk_api.py` (4): every level-to-result mapping and the Elevated, High and Moderate
+  thresholds; fresh, unverified and stale evidence; observed versus binding caps and the cap-never-invalidation
+  rule; unevaluated and unavailable cap sources; INV-01 to INV-06; adverse versus missing evidence; thin and
+  shared evidence; duplicate and repeated evidence counted once; non-candidates and conflicting assets preserved;
+  both integrity gates and the hash and data-quality states; declared-unavailable checks; determinism,
+  immutability and ordering; vocabulary (no score, probability, rating or recommendation field); unsupported
+  versions, mismatched identity, malformed views and contexts, non-mappings and no partial result; the real
+  fixture and live-state chains; route 200, 404 and 503 and the PostgreSQL round trip.
+
+**Verification (focused only; the full suite was not rerun).** The Phase 48 unit and route tests (160 passed) with
+the Phase 44 to 47 unit and route tests (266 passed), `ruff check`, `ruff format --check`, `mypy` and
+`git diff --check` on the changed files. The four integration tests were collected and skipped in the assistant's
+environment (no database or Redis) and Docker was not available there, so the API image build and the integration
+tests are to be run in the project's Docker environment.
+
+**Known limitations.** Risk levels and band mappings are the decision engine's v0 design judgments, not
+probabilities of loss. Live derivatives, anomaly, retail and regime readings carry no verifiable freshness, so their
+low readings are `unverified`, never `passed`. Caps are evaluated only for a bullish raw stance. No rule ties a cap
+to invalidation, so INV-06 is `cannot_evaluate`. Execution liquidity, numeric derivatives risk, evidence trends,
+event risk, venue risk and portfolio concentration are declared unavailable. The inputs overlap and are not
+independent confirmation. On the live stack nothing is assessed while macro and institutional sources are
+unconfigured.
+
+**Next step:** awaiting the user's review and approval to commit (R13). The next phase is **Phase 49**; it has not been
+started.
