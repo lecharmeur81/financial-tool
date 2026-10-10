@@ -3681,5 +3681,52 @@ ingestion of the Phase 43 datasets remains unconfirmed.
 
 **Verified-freshness safeguard (post-audit).** The final audit found the engine labels a market-wide domain `fresh` when a source's own freshness is missing, `None`, `no_data` or unknown. Confirmation now also requires explicit `fresh` freshness records (`freshness_unverified` otherwise); Phase 44 and the decision engine are unchanged.
 
-**Next step:** awaiting the user's approval to commit (R13). The next phase is **Phase 46 — Opportunity
-Discovery Engine**; it has not been started.
+**Next step:** committed as `0cda55a` (`[P45] add cross-domain confirmation engine`). The next phase is
+**Phase 46 — Opportunity Discovery Engine**.
+
+## Phase 46 — Opportunity Discovery Engine (2026-10-10)
+
+**Phase 45 commit:** `0cda55a2f4d3f4d3bb41c1786ececa7dacf18278` (`[P45] add cross-domain confirmation engine`),
+the base of this phase.
+
+**Scope (as approved).** A pure, deterministic `opportunity_discovery.v0` derived only from
+`unified_snapshot.v0` and `cross_domain_confirmation.v0` (ADR-0083). No table, migration, worker, external
+call, frontend change or persistence; no relative-strength, rotation or divergence input; no score, ranking,
+risk or invalidation, decision, recommendation, target price, position sizing, backtest or alert (Phases 47 to
+52); no change to the Phase 44 or Phase 45 contracts, eligibility rules or behaviour.
+
+**Delivered.**
+- `backend/src/cfi/intelligence/opportunity_universe.py`: closed statuses, discovery types and reason ids,
+  `opportunity_params.v0`, the research-only notice and limitations.
+- `backend/src/cfi/intelligence/opportunity.py`: `build_opportunities(unified, confirmation)`. It first checks
+  that both inputs are supported contract versions and describe the same snapshot (identical identity block),
+  else `OpportunityInputError`. Outcomes follow the Phase 45 agreement; a candidate also needs an eligible
+  asset-specific confirmer with verified freshness. Adverse confirmation stays a non-candidate review outcome.
+  Look-ahead violations or a producer-hash `mismatch` set would-be candidates to `blocked`. Shared market-wide
+  evidence and coverage comparability are explicit; Risk and Context entries are displayed, never used.
+- `backend/src/cfi/api/routes/intelligence_opportunities.py`, registered in `cfi/api/app.py`:
+  `GET /api/v1/intelligence/opportunities` (404 no snapshot, 503 unusable payload or input), reusing the existing
+  snapshot source and `AnalystRepository.latest_snapshot_row()`.
+- ADR-0083 and DATA_DICTIONARY §5v.
+- Tests: `tests/unit/test_opportunity.py` (51), `tests/unit/test_opportunity_route.py` (3),
+  `tests/integration/test_opportunities_api.py` (4): every agreement-to-outcome mapping; no candidate from mixed,
+  insufficient, adverse, stale, partial, unavailable, not-tracked, not-assessed or unverified evidence; the
+  asset-specific requirement and defensive checks on a tampered confirmation; both integrity gates;
+  matching and mismatching snapshot identities and unsupported versions; shared market-wide evidence and
+  comparability; provenance preserved; determinism, no input mutation, fixed order, malformed input; no score,
+  rank, recommendation or price-target vocabulary; the real chain; route 200, 404 and 503 and the PostgreSQL
+  round trip.
+
+**Verification (focused only; the full suite was not rerun).** The Phase 46 unit and route tests, the Phase 44
+and 45 tests, `ruff check`, `ruff format --check`, `mypy` and `git diff --check` on the changed files. The
+four integration tests passed in the project's Docker environment (`4 passed in 2.90s`, reported by the user).
+
+**Known limitations.** v0 is intentionally thin: a candidate is a Phase 45 confirmation with asset-specific
+support, with independence and comparability stated. Market-wide evidence is shared across assets, so
+candidates that rely on it are not independent. Parameters are experimental. Relative strength, capital
+rotation and institutional-versus-retail divergence are not used. On the live stack there are currently no
+candidates while macro and institutional sources are unconfigured; live ingestion of the Phase 43 datasets
+remains unconfirmed.
+
+**Next step:** awaiting the user's approval to commit (R13). The next phase is **Phase 47 — Opportunity Scoring &
+Ranking**; it has not been started.

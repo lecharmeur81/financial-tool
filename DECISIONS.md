@@ -3563,3 +3563,64 @@ through the existing snapshot source and `AnalystRepository.latest_snapshot_row(
 **Consequences.** No existing contract changed. The live view is `insufficient_evidence` while the macro and
 institutional sources are unconfigured. Phase 46 (opportunity discovery) may consume this contract and must not
 treat `confirmed_*` as a recommendation.
+
+## ADR-0083 — Phase 46: opportunity discovery is a derived view over the unified snapshot and its confirmation
+
+**Status:** Accepted (Phase 46, 2026-10-10)
+
+**Context.** After Phase 45 the platform can say how many independent, current, verified data families agree
+for an asset. Phase 46 identifies which assets merit further research from that, without scoring, ranking,
+risk assessment, decisions or advice (Phases 47 to 49). No opportunity code existed before this phase.
+
+**Decision.** `opportunity_discovery.v0` (`cfi/intelligence/opportunity.py`) is a pure, deterministic function
+of `unified_snapshot.v0` (ADR-0081) and `cross_domain_confirmation.v0` (ADR-0082). It uses nothing else: no
+table, migration, worker, external call, frontend work, new evidence, relative-strength, rotation or
+institutional-versus-retail divergence input (deferred), and no persistence. Assets are listed in the fixed
+`SCOPE_DOMAINS` order (BTC, ETH, SOL, XRP); there is no score or rank field.
+
+*Input consistency (mandatory).* Both inputs must be the supported contract versions (`confirmation_params.v0`,
+`evidence_families.v0` included) and must describe the **same snapshot**: the identity blocks (row id, uuid,
+hashes, `as_of`, `knowledge_time`, version) must be identical. Otherwise `OpportunityInputError` is raised (the
+route returns 503 with the reason, naming the differing fields). Confirmation from one snapshot is never combined
+with evidence from another. A confirmation whose members disagree with its own family lists is refused.
+
+*Outcomes (from the Phase 45 agreement, nothing recomputed).* `confirmed_supportive` -> `candidate` only when
+the supporting members are eligible with verified freshness records and at least one distinct **asset-specific**
+family supports it (and the key layer is satisfied); type `asset_led_confirmation` (two or more asset-specific
+families) or `market_aligned_confirmation`. Otherwise `no_candidate` (`OD-NO-ASSET-SPECIFIC-CONFIRMER` or
+`OD-UNVERIFIED-SUPPORT`). `mixed` -> `conflicting_evidence`; `insufficient_evidence` -> `insufficient_evidence`;
+`unconfirmed` -> `no_candidate`; `confirmed_adverse` -> `no_candidate` with type `adverse_confirmation`, a review
+outcome that is never an opportunity and is left for Phase 48. Stale, partial, unavailable, not-tracked,
+not-assessed and unverified evidence cannot create a candidate, because Phase 45 does not let it vote.
+
+*Integrity gates.* Any look-ahead violation in the snapshot, or a producer-hash check of `mismatch`, turns every
+would-be candidate into `blocked` with `OD-LOOK-AHEAD-VIOLATION` / `OD-SNAPSHOT-INTEGRITY`; other outcomes keep
+their status and have the gate reasons appended. All violations are treated as applicable (a violation path
+cannot be reliably attributed to one asset). The diagnostics are preserved under `gates`. `blocked` is a status
+added to the plan's vocabulary so that a withheld candidate is not mislabelled as lacking evidence.
+
+*Shared and duplicate evidence.* Market-wide families (liquidity, macro, market structure) are identical for
+every asset. Candidates that rest on the same market-wide family are listed under
+`market_context.shared_market_wide_evidence`, each names the others in `independence`, and
+`candidates_independent_of_each_other` is false. Family de-duplication is inherited from Phase 45. Coverage
+comparability is explicit: SOL and XRP have no whale data, so they are `not_comparable_with` BTC and ETH
+(`OD-NOT-COMPARABLE-COVERAGE`).
+
+*Context.* Risk and Context entries (regime, derivatives, anomaly, retail, ...) are passed through unchanged for
+display with `used_for_discovery: false` and without a direction; a test shows changing them cannot change an
+outcome. Regime is never a vote.
+
+*Parameters.* `opportunity_params.v0`: one asset-specific supporting family minimum, two for
+`asset_led_confirmation`. They are experimental engineering heuristics, not validated predictors. Confirmation
+is evidence agreement, not a prediction of performance; the contract carries a fixed research-only notice and
+its limitations.
+
+**Read path.** `GET /api/v1/intelligence/opportunities` derives the unified snapshot and the confirmation from
+the latest stored row (existing snapshot source and `AnalystRepository.latest_snapshot_row()`) and writes
+nothing. No stored snapshot is 404 `not_found`; an unusable payload or input is 503 with the reason.
+
+**Consequences.** No existing contract or rule changed. The live result is currently no candidates
+(`insufficient_evidence`) while macro and institutional sources are unconfigured, which is correct. v0 is
+intentionally thin: with the evidence the contracts expose, a candidate is a Phase 45 confirmation with
+asset-specific support, framed with independence and comparability. Phase 47 (scoring and ranking) may consume
+it and must not treat a candidate as a recommendation.

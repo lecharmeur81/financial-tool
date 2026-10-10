@@ -1923,6 +1923,52 @@ status:            implemented (ADR-0082)
 
 ---
 
+## 5v. Opportunity discovery (implemented in Phase 46)
+
+`GET /api/v1/intelligence/opportunities` (`cfi/api/routes/intelligence_opportunities.py`, contract
+`opportunity_discovery.v0`). Derived on read from `unified_snapshot.v0` (§5t) and `cross_domain_confirmation.v0`
+(§5u) of the latest stored snapshot; nothing is stored. 404 when no snapshot is stored; 503 when the payload or
+the inputs are unusable (unsupported contract versions, or the two inputs describing different snapshots).
+Research context only: no score, ranking, recommendation, target price or position size.
+
+| Field | Description |
+|---|---|
+| `contract_version`, `source_contracts` | `opportunity_discovery.v0`; the unified, confirmation, confirmation-parameter and family versions consumed |
+| `snapshot`, `data_quality` | Copied unchanged from the unified snapshot (identical to the confirmation's identity block) |
+| `parameters` | `opportunity_params.v0`: `min_asset_specific_confirmers` 1, `asset_led_min_asset_specific` 2, `experimental` true |
+| `discovery_types` | `discovery_types.v0`: `asset_led_confirmation`, `market_aligned_confirmation`, `adverse_confirmation` |
+| `gates` | `look_ahead` (`triggered`, `violations`) and `producer_hash` (`check`, `triggered`) |
+| `assets.<BTC\|ETH\|SOL\|XRP>` | Fixed order; one block per asset (below) |
+| `market_context` | `candidate_assets`, `shared_market_wide_evidence` (`family`, `assets`), `candidates_independent_of_each_other` |
+| `notice`, `limitations[]` | The fixed research-only notice and the stated limitations |
+
+Asset block: `status` (`candidate`, `conflicting_evidence`, `insufficient_evidence`, `no_candidate`, `blocked`),
+`discovery_type` (or null), `reasons`, `notes`, `basis` (the Phase 45 agreement, reasons, families, asset-specific
+and market-wide supporting families, key layer, coverage), `evidence_refs[]` (eligible members with family,
+state, strength, freshness, quality flags, source and field ids and freshness records, unchanged),
+`excluded_members[]` (the non-voting members with their `exclusion_reason`), `context` (`used_for_discovery`
+false; Risk and Context entries without a direction), `comparability` (`expected_domains`,
+`not_tracked_domains`, `comparable_with`, `not_comparable_with`) and `independence`
+(`shares_market_wide_evidence_with`).
+
+`reasons`: `OD-CANDIDATE`, `OD-CONFLICT`, `OD-INSUFFICIENT`, `OD-UNCONFIRMED`, `OD-ADVERSE-CONFIRMATION`,
+`OD-NO-ASSET-SPECIFIC-CONFIRMER`, `OD-UNVERIFIED-SUPPORT`, `OD-LOOK-AHEAD-VIOLATION`, `OD-SNAPSHOT-INTEGRITY`.
+`notes`: `OD-NOT-COMPARABLE-COVERAGE`, `OD-SHARED-MARKET-WIDE-EVIDENCE`.
+
+A candidate needs a Phase 45 `confirmed_supportive`, supporting members that are eligible with verified
+freshness, and at least one distinct asset-specific supporting family. Mixed, insufficient, unconfirmed and
+adverse results are never candidates; adverse confirmation is a review outcome only. A look-ahead violation or a
+producer-hash `mismatch` makes every would-be candidate `blocked`. Candidates that rest on the same market-wide
+family are not independent of each other. Confirmation is evidence agreement, not a prediction of performance. `blocked` means an opportunity candidate was withheld by an integrity gate; it is neither an actionable signal nor a negative investment signal.
+
+```
+metric:            Opportunity discovery (derived view, no table, no worker task)
+owner_phase:       46 (2026-10-10)
+status:            implemented (ADR-0083)
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.
