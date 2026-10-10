@@ -11,8 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from cfi.core.config import Settings
 from cfi.derivatives.universe import all_datasets as derivative_datasets
 from cfi.institutional.universe import all_datasets as institutional_datasets
+from cfi.liquidity.universe import all_datasets as liquidity_datasets
+from cfi.macro.universe import all_datasets as macro_datasets
 from cfi.market.universe import all_datasets
 from cfi.market_structure.universe import all_datasets as market_structure_datasets
+from cfi.retail.universe import all_datasets as retail_datasets
 from cfi.whales.label_store import SEED_FILES, seed_text
 from cfi.whales.labels import parse_label_csv
 from cfi.whales.universe import all_datasets as whale_datasets
@@ -122,6 +125,9 @@ def test_runtime_registers_every_enabled_dataset(test_settings: Settings) -> Non
             "whale_providers": "coinmetrics,blockchair",
             "derivative_providers": "binance_futures,okx_derivatives,deribit",
             "market_structure_providers": "coingecko",
+            "liquidity_providers": "defillama",
+            "retail_providers": "coingecko,blockchair",
+            "macro_providers": "fred",
         }
     )
     runtime = WorkerRuntime(settings)
@@ -140,6 +146,8 @@ def test_runtime_registers_every_enabled_dataset(test_settings: Settings) -> Non
             "binance_futures",
             "okx_derivatives",
             "deribit",
+            "defillama",
+            "fred",
         }
         assert runtime.run(runtime.context()) is ctx  # one context per process
     finally:
@@ -156,6 +164,9 @@ def test_runtime_registers_every_enabled_dataset(test_settings: Settings) -> Non
         | {d.dataset_id for d in whale_datasets()}
         | {d.dataset_id for d in derivative_datasets()}
         | {d.dataset_id for d in market_structure_datasets()}
+        | {d.dataset_id for d in liquidity_datasets()}
+        | {d.dataset_id for d in retail_datasets()}
+        | {d.dataset_id for d in macro_datasets()}
     )
     # the address labels shipped with the code are imported once at start
     assert labels is not None

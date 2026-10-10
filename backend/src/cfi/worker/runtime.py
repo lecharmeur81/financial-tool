@@ -22,11 +22,14 @@ from cfi.ingestion.archive import FileSystemArchive
 from cfi.ingestion.engine import IngestionEngine
 from cfi.ingestion.repository import IngestionRepository, RepositoryRecorder
 from cfi.institutional import sources as institutional
+from cfi.liquidity import sources as liquidity
+from cfi.macro import sources as macro
 from cfi.market.jobs import JobContext
 from cfi.market.sources import ADAPTERS, PRIORITY, datasets_for
 from cfi.market_structure import sources as market_structure
 from cfi.providers.base import ProviderAdapter
 from cfi.providers.http import ProviderHttpClient
+from cfi.retail import sources as retail
 from cfi.whales import sources as whales
 from cfi.whales.label_store import import_seed_files
 
@@ -99,6 +102,22 @@ class WorkerRuntime:
                 await engine.register(
                     ms.dataset, adapter, market_structure.PRIORITY[ms.provider_id]
                 )
+            for lq in liquidity.sources_for(self.settings.liquidity_provider_ids):
+                adapter = liquidity.ADAPTERS[lq.provider_id]
+                client_for(adapter)
+                await engine.register(lq.dataset, adapter, liquidity.PRIORITY[lq.provider_id])
+            for rt_item in retail.sources_for(self.settings.retail_provider_ids):
+                adapter = retail.ADAPTERS[rt_item.provider_id]
+                client_for(adapter)
+                await engine.register(
+                    rt_item.dataset, adapter, retail.PRIORITY[rt_item.provider_id]
+                )
+            # Registered whether or not the FRED key is set: the key is read only when a request
+            # is made, and ``macro.ingest`` skips (never fails) while it is absent.
+            for mc in macro.sources_for(self.settings.macro_provider_ids):
+                adapter = macro.ADAPTERS[mc.provider_id]
+                client_for(adapter)
+                await engine.register(mc.dataset, adapter, macro.PRIORITY[mc.provider_id])
             # Address labels shipped with the code (idempotent; stored labels are never changed).
             await import_seed_files(db, engine.clock())
             self._context = JobContext(engine=engine, db=db, clients=clients)

@@ -3408,3 +3408,41 @@ cap starts accumulating from the first successful run (the source has no history
 register the liquidity (Phase 9), retail (Phase 10) and macro (Phase 11) datasets, and a development
 database has no `obs.series` rows for them. Registering them would start ingestion for those groups (macro also needs
 a FRED key), so it needs its own decision and is outside Phase 42.
+
+## ADR-0080 — Phase 43: the worker runtime registers the liquidity, retail and macro datasets
+
+**Status:** Accepted (Phase 43, 2026-10-10)
+
+**Context.** ADR-0079 recorded that `WorkerRuntime.context()` also did not register the liquidity (Phase 9),
+retail (Phase 10) and macro (Phase 11) datasets. Their ingest tasks (`liquidity.ingest`, `retail.ingest`,
+`macro.ingest`) call `rt.context()` and so would fail on `obs.series`' `series_dataset_id_fkey` exactly as
+`market_structure.ingest` did. A development database had no `obs.series` rows for any of them. Their
+per-domain test harnesses register datasets by hand, which is why nothing caught it.
+
+**Decision.** `WorkerRuntime.context()` registers every dataset of each enabled group's providers
+(`CFI_LIQUIDITY_PROVIDERS` default `defillama`, `CFI_RETAIL_PROVIDERS` default `coingecko,blockchair`,
+`CFI_MACRO_PROVIDERS` default `fred`), in the shape of the existing groups: create the provider client if
+absent, then `engine.register(dataset, adapter, priority)`. Registration is idempotent and a disabled group
+registers nothing. The intended sets come from each module's own `universe.py` / `sources.py`, not from a
+new list: liquidity 1 dataset (`liquidity.stablecoin_supply.1d`, subjects USDT, USDC, TOTAL), retail 2
+(`retail.trending_coin_rank` from CoinGecko, `retail.small_output_count.btc.1d` from Blockchair), macro 18
+FRED datasets. No schema, migration, dataset name, schedule, setting or data contract changed.
+
+**Macro and the FRED key.** Macro is registered whether or not a key is set: the client reads the key only
+when a request is made, and `macro_ingest_task` already returns `skipped` (not `failed`) while it is absent,
+before it touches the runtime. That behaviour is unchanged and no key, secret or configuration was added.
+Registering the datasets therefore makes no macro data available; macro stays unavailable until a key is
+configured by the user.
+
+**Tests.** Registration goes through the real runtime and the real Celery tasks, not a harness (only the HTTP
+transports are the existing in-process fakes): the exact dataset sets and provider links; each group
+registers only its own datasets; nothing is registered when disabled; idempotent across restarts; the
+liquidity and retail tasks ingest end to end with no FK failure; the macro task skips cleanly without a key and
+ingests with a throw-away test key against the fake. Nine of the thirteen new tests fail on the pre-fix runtime
+with the production `ForeignKeyViolation`.
+
+**Consequences.** Existing deployments need the `worker` and `worker-backfill` containers rebuilt (the Blockchair
+retail task and every macro task run on the `backfill` queue). Liquidity (DefiLlama) and retail (CoinGecko
+trending, Blockchair) start ingesting, so those domains can become available to the decision engine; scoring and
+interpretation are unchanged. Per-domain history loads over several runs (liquidity back to 2017, in 180-day
+chunks; Blockchair 120 days).

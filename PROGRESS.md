@@ -3539,3 +3539,61 @@ separate decision. The `worker-backfill`, `beat` and `api` containers still run 
 need the change. Total market cap has no history source, so it accumulates from the first run.
 
 **Next step:** awaiting the user (R13). Phase 43 has not been started.
+
+## Phase 43 — Runtime Dataset Registration: liquidity, retail, macro (2026-10-10)
+
+**Scope (as approved).** Register the existing liquidity, retail and macro datasets in the worker runtime, the
+same fix Phase 42 made for market structure. Registration and ingestion plumbing only: no new provider, data
+source, credential or configuration; no change to snapshot cadence, retention, Bybit, the decision engine,
+Decision Center/history, the API contracts, the schema or the frontend; no advisor, opportunity, alert or
+cross-domain functionality.
+
+**Finding.** ADR-0079 recorded that `WorkerRuntime.context()` did not register these three groups. Their ingest
+tasks (`liquidity.ingest`, `retail.ingest`, `macro.ingest`) use that context, so each would fail on
+`obs.series`' `series_dataset_id_fkey`; a development database had no `obs.series` rows for any of them. The
+per-domain harnesses register datasets by hand, which hid the gap.
+
+**Delivered (ADR-0080).**
+- `cfi/worker/runtime.py` (+19 lines): three loops in the shape of the existing groups (provider client if absent,
+  then `engine.register`), driven by `CFI_LIQUIDITY_PROVIDERS` (default `defillama`), `CFI_RETAIL_PROVIDERS`
+  (default `coingecko,blockchair`) and `CFI_MACRO_PROVIDERS` (default `fred`). Idempotent; a disabled group
+  registers nothing. No schema, migration, dataset name, schedule, setting or contract change.
+- Datasets registered (taken from each module's own `universe.py` / `sources.py`, 21 in total): **liquidity (1)**
+  `liquidity.stablecoin_supply.1d` (DefiLlama; subjects USDT, USDC, TOTAL); **retail (2)**
+  `retail.trending_coin_rank` (CoinGecko) and `retail.small_output_count.btc.1d` (Blockchair); **macro (18, all
+  FRED)** `macro.dxy_broad_proxy.1d`, `macro.ust_yield_2y.1d`, `macro.ust_yield_10y.1d`,
+  `macro.fed_funds_effective.1d`, `macro.vix.1d`, `macro.sp500.1d`, `macro.nasdaq_composite.1d`,
+  `macro.oil_wti.1d`, `macro.reverse_repo.1d`, `macro.fed_balance_sheet.1w`, `macro.treasury_general_account.1w`,
+  `macro.m2_money_stock.1w`, `macro.cpi.1mo`, `macro.pce_price_index.1mo`, `macro.unemployment_rate.1mo`,
+  `macro.m2_money_stock.1mo`, `macro.fed_funds_target_upper.event`, `macro.fed_funds_target_lower.event`.
+- Tests: `tests/integration/test_domain_registration.py` (13, through the real runtime and real Celery tasks;
+  only the HTTP transports are the existing in-process fakes): the exact dataset sets are pinned; registration and
+  provider links; each group registers only its own datasets (3, parametrised); nothing is registered when
+  disabled; idempotent across restarts; a provider client exists for every group without a FRED key; the
+  liquidity and retail tasks ingest with no FK failure; the macro task skips cleanly without a key and ingests
+  against the fake with a throw-away test key; a disabled group's task is skipped without building a runtime
+  context. `test_worker.py::test_runtime_registers_every_enabled_dataset` now covers the three groups. Nine of the
+  new tests fail on the pre-fix runtime with the production `ForeignKeyViolation`.
+
+**Verification.** Sandbox (local PostgreSQL + TimescaleDB, Redis, isolated `_test` database): focused tests 13
+passed; full backend suite 1615 passed, 0 failed (1602 + 13 new); ruff, ruff format and mypy clean. On the
+development machine: `test_domain_registration.py` 13 passed, `test_worker.py` 11 passed, full backend suite 1615
+passed, `ruff check .`, `ruff format --check .` (439 files) and `mypy src` (251 files) clean, `git diff --check`
+clean. Live (development stack): the `worker` and `worker-backfill` containers were recreated from
+`cfi-backend:dev` and are running; `ops.dataset` holds all 21 expected datasets (1 liquidity linked to
+DefiLlama, 2 retail linked to CoinGecko and Blockchair, 18 macro linked to FRED) and all 21 `ops.dataset_provider`
+links are enabled at priority 10.
+
+**Known limitations.** Registration and provider links are verified live; **live ingestion of the 21 datasets is
+not claimed**. Whether each dataset receives observations depends on provider configuration and availability.
+Macro stays unavailable until the user configures a FRED key: with none, `macro.ingest` returns `skipped` (not
+`failed`) and no macro series exist. Bybit backfill requests still receive HTTP 403; that is a separate, standing
+provider issue and was not touched. The `api`, `beat` and `frontend` containers still run their earlier images;
+they do not need this change. Per-domain history loads over several runs. The Phase 42 note that these groups were
+unregistered is now resolved; the original Phase 42 text is left as written.
+
+**Commit.** `[P43] register liquidity retail and macro datasets` — the hash is assigned when the commit is created
+and is recorded in the next PROGRESS update (it cannot be inside the commit it names).
+
+**Next step:** awaiting the user (R13). The next phase is **Phase 44 — Unified Intelligence Snapshot**; it has
+not been started.
