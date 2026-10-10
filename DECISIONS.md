@@ -3780,3 +3780,78 @@ No stored snapshot is 404 `not_found`; an unusable payload or input is 503 with 
 **Consequences.** No existing contract or rule changed. On the live stack nothing is assessed while macro and
 institutional sources are unconfigured. The findings are not a safety rating: Phase 49 must not read `passed` as
 safe or the absence of a finding as low risk.
+
+
+## ADR-0086 — Phase 49: the investment decision is a state classification over the existing evidence and risk contracts
+
+**Status:** Accepted (Phase 49, 2026-10-10)
+
+**Context.** After Phase 48 the platform lists candidates, orders them by evidence depth and states their risk
+and invalidation findings. Phase 49 combines them into one explainable state per opportunity. Historical
+validation (Phase 50) and alerts (Phases 51 and 52) are out of scope. The Decision Intelligence layer
+(`cfi.decision`, Phases 38 to 41: stance, confidence, posture) already exists and is separate.
+
+**Decision.** `investment_decision.v0` (`cfi/intelligence/investment.py`, vocabulary in
+`investment_universe.py`) is a pure, deterministic function of `opportunity_discovery.v0`,
+`opportunity_ranking.v0`, `risk_invalidation.v0` and `risk_view.v0` of one stored snapshot. Parameters are
+`investment_params.v0` (experimental) and the state vocabulary is `investment_states.v0`. No table, migration,
+worker, provider, dependency, frontend work, persistence or change to Phases 43 to 48. It does not read, show or
+alter the Decision Intelligence stance, confidence or posture, and it defines no score, rank, probability,
+expected return, target or recommendation. The Phase 47 evidence depth and rank are copied as context and never
+choose a state (`used_for_decision: false`).
+
+*Verified, not replaced.* `build_investment_decision(opportunities, ranking, risk_invalidation, risk_view)` calls
+the public `build_risk_invalidation`, which already recomputes the ranking from the opportunities and requires
+equality (so the ranking is validated without a second ranking pass), and requires the supplied risk output to
+equal its result. A mismatch raises `InvestmentInputError`; the supplied results are reported and never silently
+substituted. Unsupported versions, mismatched identities, malformed contracts and evidence members, and Phase 48
+refusals (including a candidate below the supporting-family minimums) are refused; the route returns 503 with the
+reason and no partial result.
+
+*States and precedence.* Eight closed states, chosen by the first applicable rule: `withheld_integrity_gate` (a
+triggered look-ahead or producer-hash gate, for every asset, with the Phase 46 status preserved),
+`candidate_invalidation_triggered`, `contradicted_evidence` (Phase 46 `conflicting_evidence`),
+`insufficient_evidence`, `no_opportunity`, `candidate_risk_findings_detected` (any detected Phase 48 integrity,
+market-wide or asset finding other than the evidence limitations below), `candidate_unresolved` and
+`candidate_no_findings_detected`. A risk finding is never an invalidation: only a Phase 48 invalidation summary of
+`triggered` gives `candidate_invalidation_triggered`. Evidence-coverage findings (`RI-EVD-03` unusable domains,
+`RI-EVD-04` thin support, `RI-EVD-05` shared market-wide evidence) are limitations, not risk: they keep a candidate
+`candidate_unresolved` and are never adverse evidence. Missing evidence is never adverse and insufficient evidence
+is distinct from contradicted evidence. `candidate_unresolved` applies when any check is unverified, unavailable or
+not applicable, or an invalidation condition is `cannot_evaluate`. `candidate_no_findings_detected` requires no
+detected finding, every evaluated check `passed` on verified-fresh evidence and no invalidation triggered. It means
+only that; it is not a confirmed thesis, not a safety rating and not a recommendation, and the declared-unavailable
+checks remain unevaluated (`DI-CANDIDATE-IS-NOT-A-THESIS`, `DI-DECLARED-CHECKS-NOT-EVALUATED` on every candidate).
+
+*Nothing Phase 48 returns is hidden.* Whatever state takes precedence, Phase 49 preserves the information Phase 48
+actually returns. For an assessed candidate that is every finding grouped by result with its level, engine and check
+reason ids, freshness verification, field and source ids, and the full invalidation block. For every asset it is
+the Phase 48 `risk_assessment` (`assessed`, `withheld` or `not_applicable`, its reasons and counts, copied
+unchanged), the supporting, contradicting, other eligible and missing or unusable evidence references, the Phase 46
+status and reasons, and `why_not_conclusive`. At the top level it is the integrity findings, the market-wide
+findings, the declared-unavailable checks and the Phase 48 limitations. A gated candidate and a non-candidate have no
+per-asset findings and no invalidation block upstream (Phase 48 returns `findings: []`, `invalidation: null` and zero
+counts for them), so `risk_findings` and `invalidation` are null there: null means not assessed, never "assessed with
+nothing found", and zero counts are not a clean result. `why_not_conclusive` is never empty for such an asset: a
+gated asset lists each gate reason (`DI-GATE-WITHHELD`) and a non-candidate lists its own state reason, each with
+`DI-NO-RISK-ASSESSMENT`. Under a gate the market-wide findings keep the engine's `level` but their result is
+`withheld`: the level is the decision engine's reading, not an assessed risk result, and is not a detected risk.
+
+*Reassessment.* Items restate Phase 48 monitor fields, name the checks whose freshness must become verifiable, and
+list checks that cannot be evaluated (`evaluable: false`). No price target, numeric threshold, timing rule or
+trigger is invented.
+
+**Limitations.** `candidate_no_findings_detected` is not reachable on live data: `RI-DQ-01` is always unverified
+(its level comes from counts, with no dated source) and live risk-role freshness cannot be verified.
+`candidate_invalidation_triggered` is not reachable for any input Phase 48 accepts, because Phase 48 refuses the
+inputs that would trigger `INV-01`, `INV-02`, `INV-03` and `INV-04` and never triggers `INV-05` or `INV-06`. Both
+states stay in the contract and are tested through the isolated classification logic only; no Phase 48 protection
+was weakened. The inputs overlap (one snapshot) and are not independent confirmation.
+
+**Read path.** `GET /api/v1/intelligence/investment-decision` derives every contract from the latest stored row
+(existing snapshot source) and writes nothing. No stored snapshot is 404 `not_found`; an unusable payload or input
+is 503 with the reason.
+
+**Consequences.** No existing contract or rule changed. On the live stack the states are currently
+`insufficient_evidence` or `no_opportunity` while macro and institutional sources are unconfigured. The state is
+research context for a human, not an instruction.

@@ -6,6 +6,7 @@ from cfi.intelligence.confirmation import (
     ConfirmationInputError,
     build_confirmation,
 )
+from cfi.intelligence.investment import InvestmentInputError, build_investment_decision
 from cfi.intelligence.opportunity import OpportunityInputError, build_opportunities
 from cfi.intelligence.ranking import RankingInputError, build_ranking
 from cfi.intelligence.risk import RiskInputError, build_risk_invalidation
@@ -18,10 +19,12 @@ from cfi.intelligence.unified_snapshot import (
 __all__ = [
     "CONTRACT_VERSION",
     "ConfirmationInputError",
+    "InvestmentInputError",
     "OpportunityInputError",
     "RankingInputError",
     "RiskInputError",
     "build_confirmation",
+    "build_investment_decision",
     "build_opportunities",
     "build_ranking",
     "build_risk_invalidation",

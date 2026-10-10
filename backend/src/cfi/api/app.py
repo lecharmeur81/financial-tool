@@ -26,6 +26,7 @@ from cfi.api.routes import (
     institutional,
     intelligence,
     intelligence_confirmation,
+    intelligence_investment,
     intelligence_opportunities,
     intelligence_ranking,
     intelligence_risk,
@@ -148,6 +149,7 @@ def create_app(
     app.include_router(intelligence_opportunities.router)
     app.include_router(intelligence_ranking.router)
     app.include_router(intelligence_risk.router)
+    app.include_router(intelligence_investment.router)
     app.include_router(decision.router)
     app.include_router(decision_history.router)
     return app

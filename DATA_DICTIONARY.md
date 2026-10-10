@@ -2083,6 +2083,79 @@ status:            implemented (ADR-0085)
 
 ---
 
+## 5y. Investment decision (implemented in Phase 49)
+
+`GET /api/v1/intelligence/investment-decision` (`cfi/api/routes/intelligence_investment.py`, contract
+`investment_decision.v0`). Derived on read from `opportunity_discovery.v0` (§5v), `opportunity_ranking.v0` (§5w),
+`risk_invalidation.v0` (§5x) and `risk_view.v0` of the latest stored snapshot; nothing is stored. 404 when no
+snapshot is stored; 503 when the payload or any input is unusable or inconsistent (no partial result). A research
+classification only: no score, probability, expected return, target price, position size or recommendation, no
+confirmed thesis and no safety rating. It is separate from the Decision Intelligence stance, confidence and
+posture, which it neither reads nor shows.
+
+| Field | Description |
+|---|---|
+| `contract_version`, `source_contracts`, `risk_decision_engine` | `investment_decision.v0`; the risk, ranking, opportunity, risk-view, unified, confirmation, parameter and check versions consumed; the decision engine versions behind the risk levels |
+| `snapshot`, `gates`, `data_quality` | Copied unchanged from the Phase 46 contract |
+| `parameters` | `investment_params.v0`: `states_version` `investment_states.v0`, `precedence`, `experimental` true |
+| `states[]` | The eight state ids and meanings, most restrictive first |
+| `evidence_dependence` | Copied from Phase 48: `single_snapshot` true, `independent_confirmation` false |
+| `assessment` | `performed` (false when an integrity gate is triggered) and `gate_reasons` (`DI-GATE-LOOK-AHEAD`, `DI-GATE-INTEGRITY`) |
+| `integrity[]`, `market_risks[]` | Phase 48 finding references (check id, category, scope, result, level, reason ids, engine reason ids, `freshness_verified`, field ids, source ids) |
+| `declared_unavailable[]` | The Phase 48 checks with no verified source |
+| `assets.<BTC\|ETH\|SOL\|XRP>` | Fixed order; one block per asset (below) |
+| `counts` | Number of assets per state (no ordering) |
+| `upstream_limitations[]`, `notice`, `limitations[]` | The Phase 48 limitations, the fixed notice that a state is not a recommendation, and the Phase 49 limitations |
+
+Decision states (`investment_states.v0`, chosen by the first applicable rule in this order):
+`withheld_integrity_gate` (a triggered gate; every asset), `candidate_invalidation_triggered` (Phase 48 invalidation
+summary `triggered`), `contradicted_evidence` (Phase 46 `conflicting_evidence`), `insufficient_evidence`,
+`no_opportunity`, `candidate_risk_findings_detected` (any detected integrity, market-wide or asset finding other than
+the evidence limitations), `candidate_unresolved` (unverified, unavailable or not-applicable checks, a detected
+evidence limitation or an invalidation that cannot be evaluated), `candidate_no_findings_detected` (no detected
+finding, every evaluated check passed on verified-fresh evidence, nothing triggered). A risk finding is not an
+invalidation; missing, thin or shared evidence is a limitation (`RI-EVD-03`, `-04`, `-05`), not adverse evidence;
+insufficient evidence is not contradicted evidence. `candidate_no_findings_detected` is not a confirmed thesis and
+not safe, and the declared-unavailable checks stay unevaluated.
+
+Asset block: `status`, `discovery_type` and `reasons` (the Phase 46 values, unchanged), `ranking_context`
+(Phase 47 `scored`, `evidence_depth`, `rank`, `rank_scope`, `used_for_risk` and `used_for_decision`, both false),
+`decision_state`, `decision_reasons` (`DI-*`), `evidence` (`supporting`, `contradicting`, `other_eligible`,
+`missing_or_unusable` references with domain, family, state, strength, freshness, `freshness_verified`, quality
+flags, source ids, field ids and exclusion reason), `risk_assessment` (the Phase 48 per-asset `assessment` as `state`
+(`assessed`, `withheld` or `not_applicable`), its `reasons` and `counts`, copied unchanged and present for every
+asset), `risk_findings` (Phase 48 findings of an assessed candidate grouped as `detected`, `unverified`,
+`unavailable`, `not_applicable`, `withheld`, `passed`), `invalidation` (the Phase 48 block), `market_risks_detected`,
+`why_not_conclusive[]` (`reason_id` and the check, condition, gate reason or status it refers to) and `reassessment[]` (`kind` `monitor_condition`,
+`verify_freshness` or `cannot_evaluate`, `ref`, `condition_result`, `when`, `field_ids`, `evaluable`).
+
+`risk_findings` and `invalidation` are null for a gated candidate and for a non-candidate because Phase 48 returns
+`findings: []`, `invalidation: null` and zero counts for them: null means not assessed (see `risk_assessment.state`),
+never "assessed with nothing found", and zero counts are not a clean result. `why_not_conclusive` is never empty for
+them: a gated asset lists each gate reason as `DI-GATE-WITHHELD` and a non-candidate lists its state reason, each
+with `DI-NO-RISK-ASSESSMENT`. Under a gate `market_risks[]` keeps the engine's `level` with result `withheld`; the
+level is the decision engine's reading, not an assessed risk result and not a detected risk. `reassessment` is empty
+for them: no gate-clearing trigger exists in the contracts.
+
+Reason codes: `DI-GATE-WITHHELD`, `DI-GATE-LOOK-AHEAD`, `DI-GATE-INTEGRITY`, `DI-UNDERLYING-STATUS`,
+`DI-INVALIDATION-TRIGGERED`, `DI-CONTRADICTED`, `DI-INSUFFICIENT-EVIDENCE`, `DI-NO-OPPORTUNITY`,
+`DI-RISK-FINDINGS-DETECTED`, `DI-SOURCE-CONFLICT`, `DI-UNRESOLVED`, `DI-UNVERIFIED-CHECKS`, `DI-UNAVAILABLE-CHECKS`,
+`DI-NOT-APPLICABLE-CHECKS`, `DI-INVALIDATION-NOT-FULLY-EVALUABLE`, `DI-EVIDENCE-INCOMPLETE`, `DI-EVIDENCE-THIN`,
+`DI-SHARED-EVIDENCE`, `DI-NO-FINDINGS-DETECTED`, `DI-CANDIDATE-IS-NOT-A-THESIS`,
+`DI-DECLARED-CHECKS-NOT-EVALUATED`, `DI-NO-RISK-ASSESSMENT`.
+
+On live data `candidate_no_findings_detected` is not reachable (`RI-DQ-01` is always unverified and risk-role
+freshness cannot be verified) and `candidate_invalidation_triggered` is not reachable for any input Phase 48
+accepts; both remain in the contract.
+
+```
+metric:            Investment decision (derived view, no table, no worker task)
+owner_phase:       49 (2026-10-10)
+status:            implemented (ADR-0086)
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.

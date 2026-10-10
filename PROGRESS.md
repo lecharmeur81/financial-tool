@@ -3831,5 +3831,61 @@ event risk, venue risk and portfolio concentration are declared unavailable. The
 independent confirmation. On the live stack nothing is assessed while macro and institutional sources are
 unconfigured.
 
-**Next step:** awaiting the user's review and approval to commit (R13). The next phase is **Phase 49**; it has not been
-started.
+**Next step:** committed as `dfe4da0` (`[P48] add risk and invalidation engine`). The next phase is **Phase 49**.
+
+## Phase 49 — Investment Decision (2026-10-10)
+
+**Phase 48 commit:** `dfe4da0` (`[P48] add risk and invalidation engine`), the base of this phase.
+
+**Scope (as approved).** A pure, deterministic `investment_decision.v0` over `opportunity_discovery.v0`,
+`opportunity_ranking.v0`, `risk_invalidation.v0` and `risk_view.v0` of one stored snapshot (ADR-0086). Separate from
+the Decision Intelligence stance and posture, which it neither reads nor shows. No table, migration, worker,
+provider, dependency, frontend change or persistence; no score, probability, expected return, target, position size
+or recommendation; no backtest or alert (Phases 50 to 52); no change to Phases 43 to 48.
+
+**Delivered.**
+- `backend/src/cfi/intelligence/investment_universe.py`: `investment_params.v0`, `investment_states.v0`, the eight
+  states and their precedence, the `DI-*` reason codes, the notice and limitations.
+- `backend/src/cfi/intelligence/investment.py`: `build_investment_decision(opportunities, ranking, risk_invalidation,
+  risk_view)`. It calls the public `build_risk_invalidation` (which validates the ranking) and requires the supplied
+  risk output to equal it; supplied results are reported, never replaced. One state per asset by fixed precedence
+  (gate, invalidation triggered, contradicted, insufficient, no opportunity, risk findings detected, unresolved, no
+  findings detected). Phase 49 preserves the information Phase 48 actually returns: the per-asset
+  `risk_assessment` (`assessed`, `withheld` or `not_applicable`, reasons and counts, copied), every finding and the
+  invalidation block of an assessed candidate, evidence references (supporting, contradicting, other, missing), the
+  integrity and market-wide findings, declared-unavailable checks and `why_not_conclusive`. A gated candidate and a
+  non-candidate have no per-asset findings or invalidation upstream, so `risk_findings` and `invalidation` are null
+  (not assessed, never a clean result) and `why_not_conclusive` states the gate reason or state reason plus
+  `DI-NO-RISK-ASSESSMENT`. A withheld market level is the engine's reading, not an assessed risk result.
+  Reassessment items restate Phase 48 monitor fields and list what cannot be evaluated; no threshold or target is
+  invented. Inconsistent input raises `InvestmentInputError` (route 503, no partial result).
+- `backend/src/cfi/api/routes/intelligence_investment.py`, registered in `cfi/api/app.py`:
+  `GET /api/v1/intelligence/investment-decision` (404 no snapshot, 503 unusable payload or input). Additive exports
+  in `cfi/intelligence/__init__.py`.
+- ADR-0086 and DATA_DICTIONARY §5y. The Phase 48 "awaiting approval to commit" line above now records its commit
+  `dfe4da0`.
+- Tests: `tests/unit/test_investment.py` (82), `tests/unit/test_investment_route.py` (6),
+  `tests/integration/test_investment_api.py` (4): each reachable state end to end; the two unreachable states and
+  every precedence rule through the isolated classification logic; a favourable finding never hiding an unresolved
+  check; missing, thin and shared evidence as limitations and never adverse; risk findings and observed caps never
+  an invalidation; the gates; unverified or stale evidence never moving a state up; preservation of findings,
+  invalidation, evidence and declared-unavailable checks; ranking as context only; reassessment content;
+  vocabulary (no score, probability, recommendation, stance or posture field); determinism, immutability and
+  aliasing; refusals (risk or ranking not derived, versions, identity, malformed contracts and evidence, non-mapping
+  arguments, no partial result); the real fixture and live-state chains; route 200, 404 and 503 and the PostgreSQL
+  round trip.
+
+**Verification (focused only; the full suite was not rerun).** The Phase 49 unit and route tests (88 passed) with
+the Phase 44 to 48 unit and route tests (426 passed in all), `ruff check`, `ruff format --check`, `mypy` and
+`git diff --check` on the changed files. The four integration tests were collected and skipped in the assistant's
+environment (no database or Redis); Docker was not run.
+
+**Known limitations.** `candidate_no_findings_detected` is not reachable on live data (`RI-DQ-01` is always
+unverified and risk-role freshness cannot be verified) and `candidate_invalidation_triggered` is not reachable for
+any input Phase 48 accepts; both stay in the contract and are tested through the isolated classification logic. The
+state is not a confirmed thesis, a safety rating or a recommendation. Reassessment is observational only. The inputs
+overlap and are not independent confirmation. On the live stack the states are currently `insufficient_evidence` or
+`no_opportunity` while macro and institutional sources are unconfigured.
+
+**Next step:** awaiting the user's review and approval to commit (R13). The next phase is **Phase 50**; it has not
+been started.
