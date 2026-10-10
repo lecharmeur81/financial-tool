@@ -7,6 +7,7 @@ from cfi.intelligence.confirmation import (
     build_confirmation,
 )
 from cfi.intelligence.opportunity import OpportunityInputError, build_opportunities
+from cfi.intelligence.ranking import RankingInputError, build_ranking
 from cfi.intelligence.unified_snapshot import (
     CONTRACT_VERSION,
     build_unified_snapshot,
@@ -16,7 +17,9 @@ __all__ = [
     "CONTRACT_VERSION",
     "ConfirmationInputError",
     "OpportunityInputError",
+    "RankingInputError",
     "build_confirmation",
     "build_opportunities",
+    "build_ranking",
     "build_unified_snapshot",
 ]

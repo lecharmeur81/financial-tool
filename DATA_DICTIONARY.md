@@ -1967,6 +1967,49 @@ owner_phase:       46 (2026-10-10)
 status:            implemented (ADR-0083)
 ```
 
+## 5w. Opportunity ranking (implemented in Phase 47)
+
+`GET /api/v1/intelligence/opportunity-ranking` (`cfi/api/routes/intelligence_ranking.py`, contract
+`opportunity_ranking.v0`). Derived on read from `opportunity_discovery.v0` (§5v) of the latest stored snapshot;
+nothing is stored. 404 when no snapshot is stored; 503 when the payload or the Phase 46 input is unusable or
+inconsistent (no partial ranking). Research context only: no probability, confidence, recommendation, target
+price or position size.
+
+| Field | Description |
+|---|---|
+| `contract_version`, `source_contracts` | `opportunity_ranking.v0`; the opportunity, opportunity-parameter, discovery-type, unified, confirmation, confirmation-parameter and family versions consumed |
+| `snapshot`, `gates`, `data_quality`, `market_context` | Copied unchanged from the Phase 46 contract |
+| `parameters` | `ranking_params.v0`: `family_base_points` 1, `strong_bonus_points` 1, `market_wide_points` 0, `min_scored_to_rank` 2, `experimental` true |
+| `components` | `ranking_components.v0`: `family_base`, `strong_bonus`, `market_wide_context` |
+| `scoring` | `performed` (false when an integrity gate is triggered) and `gate_reasons` (`RK-GATE-LOOK-AHEAD`, `RK-GATE-INTEGRITY`) |
+| `assets.<BTC\|ETH\|SOL\|XRP>` | Fixed order; one block per asset (below) |
+| `groups[]` | `group_id` (e.g. `BTC+ETH`), `members`, `comparability_verified`, `expected_domains`, `scored_assets` (rank order), `ranked`, `eligible_coverage` |
+| `notice`, `limitations[]` | The fixed notice that the index is not a forecast, and the stated limitations |
+
+Asset block: `status`, `discovery_type` and `reasons` (the Phase 46 values, unchanged), `ranking_reasons`
+(`RK-SCORED`, `RK-RANKED`, `RK-NOT-RANKED-SOLE-IN-GROUP`, `RK-NOT-RANKED-COMPARABILITY-UNVERIFIED`,
+`RK-WITHHELD-NOT-CANDIDATE`, `RK-WITHHELD-BLOCKED`, plus any gate reasons), `notes`
+(`RK-UNEQUAL-ELIGIBLE-COVERAGE`, `RK-SHARED-MARKET-WIDE-EVIDENCE`, `RK-NOT-COMPARABLE-ACROSS-GROUPS`), `scored`,
+`evidence_depth` (integer or null), `max_attainable_depth` (4 for BTC and ETH, 2 for SOL and XRP),
+`score_withheld_reason`, `components` (`asset_specific_families`, `strong_families`, `base_points`,
+`strong_bonus_points`, `market_wide` with its families and 0 points, and `family_detail[]` with each family's
+points, member count and members with source ids, field ids, freshness records and quality flags unchanged),
+`rank` (integer or null), `tied_with`, `rank_scope` (null when an integrity gate is triggered), `not_ranked_against`, `coverage` and `comparability`
+(`group_id`, `verified`, `comparable_with`).
+
+`evidence_depth` = distinct eligible asset-specific supporting families + distinct such families with an eligible
+Strong member. Duplicate members never add points, and market-wide evidence adds none. A withheld score is
+`null`, never 0, and `blocked` is never converted. Ranks exist only within a verified comparability group with
+at least two scored assets; equal `(evidence_depth, family count)` share a rank. There is no order across
+groups. The index is an experimental ordinal heuristic, not a probability, a confidence or a prediction of
+performance.
+
+```
+metric:            Opportunity ranking (derived view, no table, no worker task)
+owner_phase:       47 (2026-10-10)
+status:            implemented (ADR-0084)
+```
+
 ---
 
 ## 6. Metric definition template (L2)

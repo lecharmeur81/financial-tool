@@ -3624,3 +3624,67 @@ nothing. No stored snapshot is 404 `not_found`; an unusable payload or input is 
 intentionally thin: with the evidence the contracts expose, a candidate is a Phase 45 confirmation with
 asset-specific support, framed with independence and comparability. Phase 47 (scoring and ranking) may consume
 it and must not treat a candidate as a recommendation.
+
+## ADR-0084 — Phase 47: opportunity scoring and ranking is a derived view over the opportunity discovery contract
+
+**Status:** Accepted (Phase 47, 2026-10-10)
+
+**Context.** After Phase 46 the platform lists which assets are research candidates and why. Phase 47 orders
+those candidates against each other. Risk and invalidation (Phase 48), investment decisions (Phase 49),
+historical validation (Phase 50) and alerts (Phases 51 and 52) are out of scope. No ranking code existed before
+this phase.
+
+**Decision.** `opportunity_ranking.v0` (`cfi/intelligence/ranking.py`, vocabulary in `ranking_universe.py`) is a
+pure, deterministic function of `opportunity_discovery.v0` (ADR-0083) and nothing else: no table, migration,
+worker, external call, frontend work, new evidence, persistence, or change to Phases 44 to 46. Parameters are
+`ranking_params.v0` (experimental) and the component vocabulary is `ranking_components.v0`.
+
+*Evidence depth.* `evidence_depth = |F| + |F_strong|`, an integer, where `F` is the set of distinct, eligible,
+verified-fresh **asset-specific** supporting families of a Phase 46 candidate (institutional flows, on-chain
+large holders) and `F_strong` the families of `F` with at least one eligible `Strong` member. A family counts
+once and earns at most one Strong bonus however many members it has, so duplicate members cannot inflate the
+index. Market-wide families (liquidity, macro, price structure) are shown as context and contribute zero points:
+they are identical for every asset and may be correlated. BTC and ETH can reach 4, SOL and XRP at most 2 (no
+whale data); a scored candidate is always at least 1. The index is ordinal and coarse by design: the contracts
+carry no measured magnitudes (`strength` is a band-derived Strong or Moderate label), so a finer scale would
+be invented precision. It measures the depth of verified asset-specific support under an experimental
+heuristic. It is not a probability, a confidence, an expected return or a recommendation, and it has not been
+validated against outcomes. Equal one-point rules are a design choice, not an estimate.
+
+*Eligibility and integrity.* Only a Phase 46 `candidate` is scored. Every other status keeps its Phase 46
+status, discovery type and reasons verbatim and gets `evidence_depth: null`, `rank: null`, and
+`score_withheld_reason` (`blocked_by_integrity_gate`, or the Phase 46 status): a withheld score is never 0 and
+`blocked` is never converted. A triggered gate (look-ahead violation, producer-hash `mismatch`) means no asset is
+scored or ranked; `scoring.performed` is false and the gate reasons `RK-GATE-*` are reported.
+
+*Fail closed.* A candidate is re-verified from the Phase 46 fields (domain, family and `shared_across_assets`
+agree with the Phase 45 mapping; supportive, direction `S`, no quality flags, non-empty all-`fresh`
+freshness records, strength Strong or Moderate; the family set equals `basis.asset_specific_supporting_families`;
+the discovery type matches the family count; no adverse evidence). Unsupported versions or parameter values,
+contradictory gate fields, malformed shapes, a candidate beside a triggered gate, `blocked` without a gate, or any
+candidate that fails these checks raise `RankingInputError`; the route returns 503 with the reason and no partial
+ranking. Nothing is repaired.
+
+*Comparability and rank.* Groups are re-derived from each asset's `expected_domains` (checked against
+`SCOPE_DOMAINS`), giving BTC+ETH and SOL+XRP, and Phase 46's declared `comparable_with` / `not_comparable_with`
+must agree and be reciprocal. Assets whose relationships are inconsistent or one-sided, and the other end of the
+claim, become unverified singleton groups: they keep their evidence depth and get no rank
+(`RK-NOT-RANKED-COMPARABILITY-UNVERIFIED`). Malformed comparability blocks are refused. Ranks exist only inside a
+verified group with at least two scored assets; the key is `(evidence_depth, family count)`, equal keys share a
+rank (dense ranking) and name each other in `tied_with`; a sole scored asset keeps its depth with `rank: null`
+(`RK-NOT-RANKED-SOLE-IN-GROUP`). There is no cross-group order, stated per asset in `not_ranked_against`.
+Groups are structural; unequal eligible coverage inside a group is reported with the coverage values
+(`RK-UNEQUAL-ELIGIBLE-COVERAGE`) because a lower depth can reflect missing evidence. Missing evidence can only
+lower a depth. Shared market-wide evidence is passed through from Phase 46 (`RK-SHARED-MARKET-WIDE-EVIDENCE`).
+Display order is fixed (BTC, ETH, SOL, XRP; groups in that order).
+
+**Deferred.** Freshness age gradients, underlying domain score magnitudes, relative strength, rotation,
+institutional-versus-retail divergence and historical performance.
+
+**Read path.** `GET /api/v1/intelligence/opportunity-ranking` derives the unified snapshot, confirmation and
+opportunities from the latest stored row (existing snapshot source) and writes nothing. No stored snapshot is 404
+`not_found`; an unusable payload or input is 503 with the reason.
+
+**Consequences.** No existing contract or rule changed. The live result is currently nothing scored while macro
+and institutional sources are unconfigured. The ranking is a research ordering, not a recommendation. Phase 48
+(risk and invalidation) must not treat a higher depth as lower risk.

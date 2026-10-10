@@ -3728,5 +3728,53 @@ rotation and institutional-versus-retail divergence are not used. On the live st
 candidates while macro and institutional sources are unconfigured; live ingestion of the Phase 43 datasets
 remains unconfirmed.
 
-**Next step:** awaiting the user's approval to commit (R13). The next phase is **Phase 47 — Opportunity Scoring &
-Ranking**; it has not been started.
+**Next step:** committed as `ce38f02` (`[P46] add opportunity discovery engine`). The next phase is **Phase 47 —
+Opportunity Scoring & Ranking**.
+
+## Phase 47 — Opportunity Scoring & Ranking (2026-10-10)
+
+**Phase 46 commit:** `ce38f0242091927289dc2a4b9ede4d0475d757b9` (`[P46] add opportunity discovery engine`), the base
+of this phase.
+
+**Scope (as approved).** A pure, deterministic `opportunity_ranking.v0` derived only from
+`opportunity_discovery.v0` (ADR-0084). No table, migration, worker, external call, frontend change or persistence;
+no probability, confidence, recommendation, target, size or profitability claim; no risk, invalidation, decision,
+backtest or alert (Phases 48 to 52); no change to Phases 44 to 46.
+
+**Delivered.**
+- `backend/src/cfi/intelligence/ranking_universe.py`: `ranking_params.v0`, `ranking_components.v0`, closed
+  `RK-*` reason and note ids, the notice and limitations.
+- `backend/src/cfi/intelligence/ranking.py`: `build_ranking(opportunities)`. `evidence_depth` = distinct eligible
+  asset-specific supporting families + distinct such families with an eligible Strong member (0 to 4 possible,
+  at least 1 once scored; SOL and XRP at most 2). Market-wide evidence contributes zero. Only a Phase 46
+  `candidate` is scored; other statuses keep their Phase 46 status and reasons with `evidence_depth: null`
+  (never 0); a triggered integrity gate means nothing is scored or ranked. Candidates are re-verified from the
+  Phase 46 fields and an inconsistent input raises `RankingInputError` (route 503, no partial ranking).
+  Comparability groups are re-derived from `expected_domains` and checked against Phase 46's declared,
+  reciprocal relationships; inconsistent assets are isolated and unranked. Ranks only inside a verified group
+  with two scored assets, equal keys share a rank, a sole scored asset has `rank: null`.
+- `backend/src/cfi/api/routes/intelligence_ranking.py`, registered in `cfi/api/app.py`:
+  `GET /api/v1/intelligence/opportunity-ranking` (404 no snapshot, 503 unusable payload or input).
+- ADR-0084 and DATA_DICTIONARY §5w. The Phase 46 "awaiting approval to commit" line above now records its
+  commit `ce38f02`.
+- Tests: `tests/unit/test_ranking.py` (121), `tests/unit/test_ranking_route.py` (4),
+  `tests/integration/test_ranking_api.py` (4): the formula and attainable maxima; duplicate-family and
+  market-wide non-inflation; relabelled and tampered members; every non-candidate status withheld without a
+  zero; both gates and contradictory gate fields; versions, malformed input and comparability blocks; group
+  derivation, non-reciprocal and disagreeing declarations; dense and tied ranks, sole-in-group, no cross-group
+  order; unequal coverage and shared-evidence notes; determinism, purity, ordering and vocabulary; the real
+  chain and the live state; route 200, 404 and 503 and the PostgreSQL round trip.
+
+**Verification (focused only; the full suite was not rerun).** The Phase 47 unit and route tests (125) with the Phase
+44 to 46 unit and route tests (266 passed in all), `ruff check`, `ruff format --check`,
+`mypy` and `git diff --check`. The four integration tests were not run by the assistant (no Docker in its
+environment); they are to be run in the project's Docker environment after building the API image.
+
+**Known limitations.** The index is ordinal and coarse (strength is band-derived; domain score magnitudes are not
+used), so many assets tie, and it has not been validated against outcomes (Phase 50). Groups are structural, so
+a lower depth inside a group can reflect missing evidence (reported). On the live stack nothing is scored while
+macro and institutional sources are unconfigured; live ingestion of the Phase 43 datasets remains unconfirmed.
+Freshness age gradients, score magnitudes, relative strength, rotation and divergence are deferred.
+
+**Next step:** awaiting the user's review and approval to commit (R13). The next phase is **Phase 48 — Risk &
+Invalidation**; it has not been started.
