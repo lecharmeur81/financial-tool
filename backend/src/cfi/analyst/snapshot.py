@@ -15,6 +15,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -24,6 +26,9 @@ from cfi.analyst import tools
 from cfi.analyst.universe import KNOWN_PLATFORM_LIMITATIONS, SNAPSHOT_VERSION, TOOLS
 from cfi.core.config import Settings
 from cfi.core.errors import ComputationError
+from cfi.core.logging import get_logger
+
+log = get_logger(__name__)
 
 _NUMERIC_STRING = re.compile(r"^-?\d+(\.\d+)?$")
 _MAX_STRING_FIELD_LEN = 200  # longer strings are prose/context, not a citable atomic fact
@@ -128,6 +133,27 @@ def _flatten(
         out.append(SnapshotField(field_id=prefix, display=value, value=_parse_numeric(value)))
 
 
+async def _timed(tool_id: str, call: Awaitable[tools.ToolResult]) -> tools.ToolResult:
+    """Await one tool and log how long it took (tool id, status, milliseconds; never the payload).
+
+    Purely observational: the tool's result is returned untouched and any exception, including
+    time-limit and cancellation signals, propagates unchanged after the timing line is logged.
+    """
+    started = time.perf_counter()
+    status = "raised"
+    try:
+        result = await call
+        status = str(result.get("status", "unknown"))
+        return result
+    finally:
+        log.info(
+            "analyst_snapshot_tool_timing",
+            tool_id=tool_id,
+            status=status,
+            elapsed_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
+
+
 async def build_snapshot(
     engine: Any,
     settings: Settings,
@@ -140,29 +166,64 @@ async def build_snapshot(
     narrow user question (Phase 21 foundation scope, Section 18: establish the analyst foundation;
     a later phase can add tool *selection* without changing this snapshot's shape or field IDs)."""
     results: list[tools.ToolResult] = [
-        await tools.get_market_data(engine, as_of=as_of, knowledge_time=knowledge_time),
-        await tools.get_institutional_flows(
-            engine, settings, as_of=as_of, knowledge_time=knowledge_time
+        await _timed(
+            "get_market_data",
+            tools.get_market_data(engine, as_of=as_of, knowledge_time=knowledge_time),
         ),
-        await tools.get_whale_activity(
-            engine, settings, as_of=as_of, knowledge_time=knowledge_time
+        await _timed(
+            "get_institutional_flows",
+            tools.get_institutional_flows(
+                engine, settings, as_of=as_of, knowledge_time=knowledge_time
+            ),
         ),
-        await tools.get_retail_activity(
-            engine, settings, as_of=as_of, knowledge_time=knowledge_time
+        await _timed(
+            "get_whale_activity",
+            tools.get_whale_activity(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
         ),
-        await tools.get_derivatives(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
-        await tools.get_liquidity(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
-        await tools.get_macro(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
-        await tools.get_market_structure(
-            engine, settings, as_of=as_of, knowledge_time=knowledge_time
+        await _timed(
+            "get_retail_activity",
+            tools.get_retail_activity(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
         ),
-        await tools.calculate_divergence(engine, as_of=as_of, knowledge_time=knowledge_time),
-        await tools.get_market_regime(engine, as_of=as_of, knowledge_time=knowledge_time),
-        await tools.find_historical_similar_periods(
-            engine, as_of=as_of, knowledge_time=knowledge_time
+        await _timed(
+            "get_derivatives",
+            tools.get_derivatives(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
         ),
-        await tools.get_anomalies(engine, as_of=as_of, knowledge_time=knowledge_time),
-        await tools.get_capital_rotation(engine, as_of=as_of, knowledge_time=knowledge_time),
+        await _timed(
+            "get_liquidity",
+            tools.get_liquidity(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
+        ),
+        await _timed(
+            "get_macro",
+            tools.get_macro(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
+        ),
+        await _timed(
+            "get_market_structure",
+            tools.get_market_structure(
+                engine, settings, as_of=as_of, knowledge_time=knowledge_time
+            ),
+        ),
+        await _timed(
+            "calculate_divergence",
+            tools.calculate_divergence(engine, as_of=as_of, knowledge_time=knowledge_time),
+        ),
+        await _timed(
+            "get_market_regime",
+            tools.get_market_regime(engine, as_of=as_of, knowledge_time=knowledge_time),
+        ),
+        await _timed(
+            "find_historical_similar_periods",
+            tools.find_historical_similar_periods(
+                engine, as_of=as_of, knowledge_time=knowledge_time
+            ),
+        ),
+        await _timed(
+            "get_anomalies",
+            tools.get_anomalies(engine, as_of=as_of, knowledge_time=knowledge_time),
+        ),
+        await _timed(
+            "get_capital_rotation",
+            tools.get_capital_rotation(engine, as_of=as_of, knowledge_time=knowledge_time),
+        ),
     ]
     quality = tools.check_data_quality(results)
     results.append(quality)

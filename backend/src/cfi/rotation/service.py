@@ -26,6 +26,7 @@ against.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -89,6 +90,11 @@ def _canonical(a: str, b: str) -> tuple[str, str]:
 class RotationService:
     engine: Any
     _cache: dict[tuple[str, str | None], m.Series] = field(default_factory=dict, init=False)
+    # Node readings reused within ONE ``matrix`` call (keyed by every input that affects a
+    # reading); ``None`` outside ``matrix``, so direct ``pair`` calls always recompute.
+    _reading_memo: dict[tuple[str, int, datetime, datetime], dict[str, Any]] | None = field(
+        default=None, init=False
+    )
 
     def __post_init__(self) -> None:
         self.adapters = Adapters(self.engine)
@@ -236,6 +242,22 @@ class RotationService:
     # ------------------------------------------------------------------ per-node reading
 
     async def _node_reading(
+        self, node: NodeDef, window_days: int, as_of: datetime, knowledge_time: datetime
+    ) -> dict[str, Any]:
+        memo = self._reading_memo
+        if memo is None:
+            return await self._compute_node_reading(node, window_days, as_of, knowledge_time)
+        key = (node.node_id, window_days, as_of, knowledge_time)
+        cached = memo.get(key)
+        if cached is None:
+            cached = await self._compute_node_reading(node, window_days, as_of, knowledge_time)
+            memo[key] = cached
+        # Hand every caller its own copy: ``pair`` pops ``_rolling`` from the dict it receives and
+        # the result is returned to API callers, so the stored reading must never be shared or
+        # mutated. The (read-only, frozen) rolling series itself is shared.
+        return {k: (v if k == "_rolling" else deepcopy(v)) for k, v in cached.items()}
+
+    async def _compute_node_reading(
         self, node: NodeDef, window_days: int, as_of: datetime, knowledge_time: datetime
     ) -> dict[str, Any]:
         series, unavailable_reason = await self._node_series(node, as_of, knowledge_time)
@@ -389,6 +411,19 @@ class RotationService:
         self, *, window_days: int, as_of: datetime, knowledge_time: datetime
     ) -> dict[str, Any]:
         self._cache.clear()
+        # Every node appears in several pairs; compute each node's reading once per matrix call
+        # and discard it when the call ends (normally or by exception).
+        self._reading_memo = {}
+        try:
+            return await self._matrix(
+                window_days=window_days, as_of=as_of, knowledge_time=knowledge_time
+            )
+        finally:
+            self._reading_memo = None
+
+    async def _matrix(
+        self, *, window_days: int, as_of: datetime, knowledge_time: datetime
+    ) -> dict[str, Any]:
         window_days = max(WINDOW_DAYS_MIN, min(window_days, WINDOW_DAYS_MAX))
         pairs = []
         node_ids = list(_MATRIX_ELIGIBLE)

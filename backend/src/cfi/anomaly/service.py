@@ -56,6 +56,15 @@ def _iso(value: datetime | None) -> str | None:
 class AnomalyService:
     engine: Any
     _cache: dict[tuple[str, str | None], Series] = field(default_factory=dict, init=False)
+    # Readings reused within ONE ``scan`` call (keyed by every argument of ``_reading``); ``None``
+    # outside ``scan``, so ``detail`` and every other caller always recompute.
+    _scan_memo: (
+        dict[
+            tuple[str, str, datetime, datetime],
+            tuple[AnomalyMetricDef, m.CurrentReading, m.DurationResult, m.QualitySummary],
+        ]
+        | None
+    ) = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         self.adapters = Adapters(self.engine)
@@ -120,6 +129,21 @@ class AnomalyService:
     # ------------------------------------------------------------------ single metric
 
     async def _reading(
+        self, metric_id: str, asset: str, as_of: datetime, knowledge_time: datetime
+    ) -> tuple[AnomalyMetricDef, m.CurrentReading, m.DurationResult, m.QualitySummary]:
+        memo = self._scan_memo
+        if memo is None:
+            return await self._compute_reading(metric_id, asset, as_of, knowledge_time)
+        key = (metric_id, asset, as_of, knowledge_time)
+        cached = memo.get(key)
+        if cached is None:
+            cached = await self._compute_reading(metric_id, asset, as_of, knowledge_time)
+            memo[key] = cached
+        # Frozen readings: sharing the same objects between a metric's own entry and every
+        # counterpart reference to it is safe.
+        return cached
+
+    async def _compute_reading(
         self, metric_id: str, asset: str, as_of: datetime, knowledge_time: datetime
     ) -> tuple[AnomalyMetricDef, m.CurrentReading, m.DurationResult, m.QualitySummary]:
         try:
@@ -229,6 +253,21 @@ class AnomalyService:
     # ------------------------------------------------------------------ full scan (13 categories)
 
     async def scan(
+        self,
+        *,
+        asset: str | None,
+        as_of: datetime,
+        knowledge_time: datetime,
+    ) -> dict[str, Any]:
+        # A metric's reading is also needed as the counterpart of other metrics; compute each
+        # reading once per scan and discard it when the call ends (normally or by exception).
+        self._scan_memo = {}
+        try:
+            return await self._scan(asset=asset, as_of=as_of, knowledge_time=knowledge_time)
+        finally:
+            self._scan_memo = None
+
+    async def _scan(
         self,
         *,
         asset: str | None,

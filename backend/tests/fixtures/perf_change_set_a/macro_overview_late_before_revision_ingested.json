@@ -1,0 +1,599 @@
+{
+ "as_of": "2026-09-20T09:00:00+00:00",
+ "knowledge_time": "2026-09-20T02:30:00+00:00",
+ "evidence_note": "Stored FRED values are observed data; the yield-curve slope, real policy rate, CPI/PCE year-over-year change, VIX condition, equity/dollar/oil trend, the US net-liquidity proxy and the Macro Environment Score are calculated metrics with published formulas and parameters. Every reading describes the conventional macro backdrop (monetary-policy stance, risk appetite in traditional markets, USD strength, US liquidity conditions, inflation pressure) \u2014 never a crypto price forecast, and nothing here is a recommendation.",
+ "score": {
+  "score_id": "macro_environment_score",
+  "version": "macro_score_v1",
+  "calculated_at": "2026-09-30T12:00:00+00:00",
+  "evidence_category": "Calculated Metric",
+  "status": "ok",
+  "score": "-15.2",
+  "band": "tightening macro backdrop",
+  "semantic_note": "Higher Macro Environment Score means a more accommodative macro backdrop by conventional measures (a steeper/normal yield curve, a lower real policy rate, calmer equity-market volatility, rising equities, a weaker US dollar, expanding US liquidity, and easing commodity-inflation pressure). It describes current macroeconomic conditions using standard indicators; it is not a crypto price prediction and does not convert macro data into a deterministic crypto forecast.",
+  "vintage_risk_note": "Every component here is sourced from FRED and reflects FRED's CURRENT, most-revised figure for each historical date \u2014 not the value as it was first published. This platform does not yet track FRED's own real-time ('ALFRED') vintages (ADR-0054, a documented, accepted limitation; RED_TEAM_REPORT.md finding #2), so a historical reading of this score, and anything built on it (regime classification, historical similarity, a domain-score-based backtest), can reflect a later revision that would not actually have been knowable on that date \u2014 most plausibly around initial-vs-final GDP/CPI prints or seasonal re-benchmarking of the Fed's own balance-sheet series.",
+  "available_weight": "0.85",
+  "reason": null,
+  "components": [
+   {
+    "component_id": "yield_curve_slope",
+    "label": "US Treasury yield curve slope (10y \u2212 2y)",
+    "weight": "0.20",
+    "scale": "1.00",
+    "unit": "percentage points",
+    "definition": "10-year Treasury yield minus 2-year Treasury yield.",
+    "evidence": "Calculated metric from direct evidence (FRED DGS10, DGS2)",
+    "direction_note": "Steeper/positive slope -> more accommodative; inverted/negative slope -> more restrictive.",
+    "status": "ok",
+    "reason": null,
+    "value": "11.590000",
+    "sub_score": "1.0000",
+    "effective_weight": "0.2353",
+    "contribution": "23.53",
+    "calculation": "value = +11.590000; sub-score = clip(+11.590000 \u00f7 1.00, \u22121, +1) = +1.0000"
+   },
+   {
+    "component_id": "real_policy_rate",
+    "label": "Approximate real policy rate (effective fed funds \u2212 CPI YoY)",
+    "weight": "0.20",
+    "scale": "2.00",
+    "unit": "percentage points",
+    "definition": "Effective federal funds rate minus trailing 12-month CPI inflation.",
+    "evidence": "Calculated metric derived from direct evidence (FRED DFF, CPIAUCSL)",
+    "direction_note": "Higher real rate -> more restrictive (negative contribution); lower/negative real rate -> more accommodative.",
+    "status": "ok",
+    "reason": null,
+    "value": "115.630000",
+    "sub_score": "-1.0000",
+    "effective_weight": "0.2353",
+    "contribution": "-23.53",
+    "calculation": "value = +115.630000; sub-score = clip(-+115.630000 \u00f7 2.00, \u22121, +1) = -1.0000"
+   },
+   {
+    "component_id": "vix_level",
+    "label": "CBOE Volatility Index (VIX), vs. its long-run reference level",
+    "weight": "0.15",
+    "scale": "10",
+    "unit": "index points from reference",
+    "definition": "VIX close minus a reference level of 20 (a commonly cited long-run average).",
+    "evidence": "Calculated metric from direct evidence (FRED VIXCLS)",
+    "direction_note": "Higher VIX -> more risk-off (negative contribution); lower VIX -> more risk-on.",
+    "status": "ok",
+    "reason": null,
+    "value": "131.350000",
+    "sub_score": "-1.0000",
+    "effective_weight": "0.1765",
+    "contribution": "-17.65",
+    "calculation": "value = +131.350000; sub-score = clip(-+131.350000 \u00f7 10, \u22121, +1) = -1.0000"
+   },
+   {
+    "component_id": "equity_trend",
+    "label": "S&P 500, 90-day change",
+    "weight": "0.15",
+    "scale": "0.10",
+    "unit": "ratio (90-day relative change)",
+    "definition": "S&P 500 close now \u00f7 S&P 500 close 90 days earlier \u2212 1.",
+    "evidence": "Calculated metric from direct evidence (FRED SP500)",
+    "direction_note": "Rising equities -> more risk-on; falling equities -> more risk-off.",
+    "status": "ok",
+    "reason": null,
+    "value": "0.034277",
+    "sub_score": "0.3428",
+    "effective_weight": "0.1765",
+    "contribution": "6.05",
+    "calculation": "value = +0.034277; sub-score = clip(+0.034277 \u00f7 0.10, \u22121, +1) = +0.3428"
+   },
+   {
+    "component_id": "dollar_trend",
+    "label": "Broad US Dollar Index proxy, 90-day change",
+    "weight": "0.10",
+    "scale": "0.05",
+    "unit": "ratio (90-day relative change)",
+    "definition": "DTWEXBGS now \u00f7 DTWEXBGS 90 days earlier \u2212 1 (DXY SUBSTITUTE \u2014 see cfi.macro.universe).",
+    "evidence": "Calculated metric from direct evidence (FRED DTWEXBGS)",
+    "direction_note": "A strengthening dollar -> tighter global conditions (negative contribution); a weakening dollar -> looser conditions.",
+    "status": "ok",
+    "reason": null,
+    "value": "0.008646",
+    "sub_score": "-0.1729",
+    "effective_weight": "0.1176",
+    "contribution": "-2.03",
+    "calculation": "value = +0.008646; sub-score = clip(-+0.008646 \u00f7 0.05, \u22121, +1) = -0.1729"
+   },
+   {
+    "component_id": "net_liquidity_trend",
+    "label": "US net-liquidity proxy, 90-day change (Fed balance sheet \u2212 TGA \u2212 reverse repo)",
+    "weight": "0.15",
+    "scale": "0.05",
+    "unit": "ratio (90-day relative change)",
+    "definition": "(Fed balance sheet \u2212 Treasury General Account \u2212 overnight reverse repo) now \u00f7 the same composite 90 days earlier \u2212 1. US-only proxy, not a true global aggregate \u2014 see cfi.macro.universe.",
+    "evidence": "Calculated metric derived from direct evidence (FRED WALCL, WTREGEN, RRPONTSYD)",
+    "direction_note": "Expanding net liquidity -> more accommodative; contracting -> more restrictive.",
+    "status": "unavailable",
+    "reason": "base net-liquidity level is not positive",
+    "value": null,
+    "sub_score": null,
+    "effective_weight": null,
+    "contribution": null,
+    "calculation": ""
+   },
+   {
+    "component_id": "oil_trend",
+    "label": "WTI crude oil, 90-day change",
+    "weight": "0.05",
+    "scale": "0.15",
+    "unit": "ratio (90-day relative change)",
+    "definition": "WTI spot price now \u00f7 WTI spot price 90 days earlier \u2212 1.",
+    "evidence": "Calculated metric from direct evidence (FRED DCOILWTICO)",
+    "direction_note": "Rising oil -> inflationary pressure, more restrictive-leaning (negative contribution); falling oil -> disinflationary, more accommodative-leaning.",
+    "status": "ok",
+    "reason": null,
+    "value": "0.040241",
+    "sub_score": "-0.2683",
+    "effective_weight": "0.0588",
+    "contribution": "-1.58",
+    "calculation": "value = +0.040241; sub-score = clip(-+0.040241 \u00f7 0.15, \u22121, +1) = -0.2683"
+   }
+  ]
+ },
+ "yield_curve": {
+  "status": "ok",
+  "reason": null,
+  "ust_10y_pct": "128.17",
+  "ust_2y_pct": "116.58",
+  "slope_pp": "11.59",
+  "time": "2026-09-19T00:00:00+00:00",
+  "condition": "normal",
+  "condition_reason": "10y - 2y at or above the steep/normal threshold",
+  "calculation": "10-year Treasury yield \u2212 2-year Treasury yield"
+ },
+ "real_policy_rate": {
+  "status": "ok",
+  "reason": null,
+  "fed_funds_effective_pct": "139.76",
+  "cpi_year_over_year_pct": "24.13",
+  "real_rate_pp": "115.63",
+  "time": "2026-09-19T00:00:00+00:00",
+  "calculation": "effective federal funds rate \u2212 trailing 12-month CPI inflation (an approximation; not the Fed's own preferred real-rate measure)"
+ },
+ "cpi_year_over_year": {
+  "metric": "cpi_yoy",
+  "status": "ok",
+  "reason": null,
+  "now_value": "244.07",
+  "now_time": "2026-09-19T00:00:00+00:00",
+  "then_value": "196.62",
+  "then_time": "2025-09-19T00:00:00+00:00",
+  "change_pct": "24.1328",
+  "condition": "up",
+  "condition_reason": "rose the \u00b13.00% threshold over the window",
+  "calculation": "(value now \u00f7 value ~90 days earlier \u2212 1); CPI year-over-year uses ~365 days"
+ },
+ "vix": {
+  "status": "ok",
+  "reason": null,
+  "value": "151.35",
+  "time": "2026-09-19T00:00:00+00:00",
+  "condition": "elevated",
+  "condition_reason": "VIX at or above the elevated (risk-off) threshold"
+ },
+ "equity_trend": {
+  "metric": "sp500",
+  "status": "ok",
+  "reason": null,
+  "now_value": "162.94",
+  "now_time": "2026-09-19T00:00:00+00:00",
+  "then_value": "157.54",
+  "then_time": "2026-06-21T00:00:00+00:00",
+  "change_pct": "3.4277",
+  "condition": "up",
+  "condition_reason": "rose the \u00b13.00% threshold over the window",
+  "calculation": "(value now \u00f7 value ~90 days earlier \u2212 1); CPI year-over-year uses ~365 days"
+ },
+ "dollar_trend": {
+  "metric": "dxy_broad_proxy",
+  "status": "ok",
+  "reason": null,
+  "now_value": "104.99",
+  "now_time": "2026-09-19T00:00:00+00:00",
+  "then_value": "104.09",
+  "then_time": "2026-06-21T00:00:00+00:00",
+  "change_pct": "0.8646",
+  "condition": "flat",
+  "condition_reason": "changed less than the \u00b13.00% threshold over the window",
+  "calculation": "(value now \u00f7 value ~90 days earlier \u2212 1); CPI year-over-year uses ~365 days"
+ },
+ "oil_trend": {
+  "metric": "oil_wti",
+  "status": "ok",
+  "reason": null,
+  "now_value": "186.12",
+  "now_time": "2026-09-19T00:00:00+00:00",
+  "then_value": "178.92",
+  "then_time": "2026-06-21T00:00:00+00:00",
+  "change_pct": "4.0241",
+  "condition": "up",
+  "condition_reason": "rose the \u00b13.00% threshold over the window",
+  "calculation": "(value now \u00f7 value ~90 days earlier \u2212 1); CPI year-over-year uses ~365 days"
+ },
+ "us_net_liquidity": {
+  "status": "ok",
+  "reason": null,
+  "fed_balance_sheet_usd_b": "0.2",
+  "treasury_general_account_usd_b": "0.2",
+  "reverse_repo_usd_b": "197.71",
+  "net_liquidity_usd_b": "-197.7",
+  "time": "2026-09-19T00:00:00+00:00",
+  "calculation": "Fed balance sheet \u2212 Treasury General Account \u2212 overnight reverse repo, USD billions (US-only proxy, not a true global aggregate)"
+ },
+ "us_net_liquidity_trend": {
+  "metric": "net_liquidity",
+  "status": "unavailable",
+  "reason": "base net-liquidity level is not positive",
+  "now_value": null,
+  "now_time": null,
+  "then_value": null,
+  "then_time": null,
+  "change_pct": null,
+  "condition": "unknown",
+  "condition_reason": "",
+  "calculation": "(value now \u00f7 value ~90 days earlier \u2212 1); CPI year-over-year uses ~365 days"
+ },
+ "data_quality": {
+  "sources": [
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.dxy_broad_proxy.1d",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 432000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.ust_yield_2y.1d",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 432000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.ust_yield_10y.1d",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 432000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.fed_funds_effective.1d",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 432000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.vix.1d",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 432000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.sp500.1d",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 432000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.nasdaq_composite.1d",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 432000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.oil_wti.1d",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 432000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.reverse_repo.1d",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 432000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.fed_balance_sheet.1w",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 1468800,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.treasury_general_account.1w",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 1468800,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.m2_money_stock.1w",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 1641600,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.cpi.1mo",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 7776000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.pce_price_index.1mo",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 9072000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.unemployment_rate.1mo",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 6912000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.m2_money_stock.1mo",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 8208000,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.fed_funds_target_upper.event",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 345600,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   },
+   {
+    "provider_id": "fred",
+    "provider_name": "FRED (Federal Reserve Bank of St. Louis)",
+    "dataset_id": "macro.fed_funds_target_lower.event",
+    "enabled": false,
+    "credential_configured": false,
+    "latest_event_time": "2026-09-19T00:00:00+00:00",
+    "freshness": "fresh",
+    "freshness_limit_seconds": 345600,
+    "flagged_points": 0,
+    "backfilled_points": 0,
+    "missing_points": 0,
+    "last_run": {
+     "status": "succeeded",
+     "started_at": "2026-09-20T08:00:00+00:00",
+     "error_code": null,
+     "error_detail": null
+    }
+   }
+  ],
+  "note": "Points loaded for the last 430 days. 'backfilled' = history as the provider shows it today (FRED's current, most-revised vintage \u2014 may include later corrections); flagged = suspect or conflicting."
+ },
+ "not_tracked": [
+  {
+   "item": "Gold spot price",
+   "reason": "FRED's only free daily gold series (LBMA fixing, GOLDAMGBD228NLBM / GOLDPMGBD228NLBM) was discontinued in January 2022 at the rights holder's (ICE Benchmark Administration) request. No other verified, officially documented, $0/keyless gold-price source was found; every free alternative located is an unofficial third-party aggregator whose provenance and terms are unverified. A business decision for the user."
+  },
+  {
+   "item": "True global liquidity aggregate (Fed + ECB + BOJ + PBOC)",
+   "reason": "Only US components are tracked (Fed balance sheet, TGA, reverse repo, M2). A genuine multi-central-bank aggregate would need additional sources (ECB/BOJ/PBOC balance sheets) not yet verified here \u2014 a scope decision, not a silent gap."
+  }
+ ]
+}

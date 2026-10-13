@@ -72,7 +72,9 @@ async def gather_snapshot(
     derivatives = await adapters.derivatives().asset(
         asset=asset, as_of=as_of, knowledge_time=knowledge_time
     )
-    macro = await MacroService(MacroQueries(adapters.engine)).overview(
+    # Only ``macro['score']`` is consumed below, so skip the data-quality section (and its
+    # per-source job queries); ``overview_score`` is otherwise identical to ``overview``.
+    macro = await MacroService(MacroQueries(adapters.engine)).overview_score(
         as_of=as_of, knowledge_time=knowledge_time
     )
     market_structure = await adapters.market_structure().overview(

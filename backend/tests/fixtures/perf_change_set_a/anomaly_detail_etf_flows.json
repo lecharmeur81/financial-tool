@@ -1,0 +1,53 @@
+{
+ "metric_id": "etf_flows",
+ "category": "ETF flows",
+ "label": "Institutional US spot ETF net flow",
+ "asset": "BTC",
+ "unit": "usd/day",
+ "source": "cfi.institutional (SoSoValue/provider ETF flow filings)",
+ "evidence_class": "direct",
+ "proxy_caveat": null,
+ "as_of": "2026-09-20T09:00:00+00:00",
+ "knowledge_time": "2026-09-20T09:00:00+00:00",
+ "timestamp": "2026-09-19T00:00:00+00:00",
+ "status": "ok",
+ "reason": null,
+ "current_value": "7610.50",
+ "historical_percentile": {
+  "status": "ok",
+  "percentile": "100.0",
+  "sample_size": 402
+ },
+ "band": "extreme_high",
+ "magnitude": {
+  "value": "90.12",
+  "method": "modified_zscore_mad_v1: (current - median) / (1.4826 * median absolute deviation) of the same historical readings used for the percentile rank (current excluded)."
+ },
+ "duration": {
+  "days": 2,
+  "capped": false,
+  "since": "2026-09-19T09:00:00+00:00"
+ },
+ "possible_interpretations": [
+  "Daily ETF net creations are unusually large relative to their own history; this can reflect a concentrated inflow event, a rebalancing, or a reporting correction."
+ ],
+ "contradicting_evidence": [
+  {
+   "metric_id": "institutional_flows",
+   "label": "Listed-company BTC treasury purchases",
+   "band": "extreme_low",
+   "comparison": "contradiction"
+  },
+  {
+   "metric_id": "whale_flows",
+   "label": "Whale-to-exchange net flow",
+   "band": "extreme_high",
+   "comparison": "consistent"
+  }
+ ],
+ "data_quality": {
+  "status": "degraded",
+  "points_considered": 392,
+  "flagged_points": 13
+ }
+}

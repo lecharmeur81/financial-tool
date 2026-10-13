@@ -1,0 +1,44 @@
+{
+ "asset": "BTC",
+ "as_of": "2026-09-20 09:00:00+00:00",
+ "knowledge_time": "2026-09-20 09:00:00+00:00",
+ "metrics": {
+  "institutional_score": {
+   "status": "ok",
+   "value": null
+  },
+  "whale_score": {
+   "status": "ok",
+   "value": null
+  },
+  "retail_activity_score": {
+   "status": "ok",
+   "value": "44.5"
+  },
+  "liquidity_score": {
+   "status": "ok",
+   "value": "52.75"
+  },
+  "macro_score": {
+   "status": "ok",
+   "value": "-15.2"
+  },
+  "market_structure_score": {
+   "status": "ok",
+   "value": "52.75"
+  },
+  "funding_annualised_7d_pct": {
+   "status": "ok",
+   "value": "12.5"
+  },
+  "oi_change_7d_pct": {
+   "status": "ok",
+   "value": "3.25"
+  },
+  "volatility_percentile": {
+   "status": "ok",
+   "value": "72.5"
+  }
+ },
+ "volatility_annualized_pct": "48.2"
+}

@@ -1,0 +1,85 @@
+{
+ "asset": "BTC",
+ "as_of": "2026-09-20 09:00:00+00:00",
+ "knowledge_time": "2026-09-20 09:00:00+00:00",
+ "metrics": {
+  "institutional_score": {
+   "status": "ok",
+   "value": null,
+   "condition": null,
+   "reason": null
+  },
+  "whale_score": {
+   "status": "ok",
+   "value": null,
+   "condition": null,
+   "reason": null
+  },
+  "retail_activity_score": {
+   "status": "ok",
+   "value": "44.5",
+   "condition": null,
+   "reason": null
+  },
+  "retail_speculation_score": {
+   "status": "ok",
+   "value": "37.25",
+   "condition": null,
+   "reason": null
+  },
+  "liquidity_score": {
+   "status": "ok",
+   "value": "52.75",
+   "condition": null,
+   "reason": null
+  },
+  "derivatives_health": {
+   "status": "ok",
+   "value": "58.25",
+   "condition": null,
+   "reason": null
+  },
+  "macro_score": {
+   "status": "ok",
+   "value": "-15.2",
+   "condition": null,
+   "reason": null
+  },
+  "market_structure_score": {
+   "status": "ok",
+   "value": "52.75",
+   "condition": null,
+   "reason": null
+  },
+  "btc_trend": {
+   "status": "ok",
+   "value": null,
+   "condition": "uptrend",
+   "reason": null
+  },
+  "btc_rsi": {
+   "status": "ok",
+   "value": "61.2",
+   "condition": "neutral",
+   "reason": null
+  },
+  "btc_volatility_percentile": {
+   "status": "ok",
+   "value": "72.5",
+   "condition": "elevated",
+   "reason": null
+  },
+  "market_breadth": {
+   "status": "ok",
+   "value": null,
+   "condition": "broad",
+   "reason": null
+  },
+  "derivatives_liquidation_event": {
+   "status": "ok",
+   "value": null,
+   "condition": "inactive",
+   "reason": null
+  }
+ }
+}

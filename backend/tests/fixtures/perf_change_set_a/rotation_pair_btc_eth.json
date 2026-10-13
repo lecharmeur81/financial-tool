@@ -1,0 +1,101 @@
+{
+ "from_node": {
+  "node_id": "btc",
+  "label": "BTC",
+  "measurement_class": "observed",
+  "scope_note": "BTC market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100 (CoinGecko's global figure, the same denominator Phase 12's own BTC/ETH dominance already uses) \u2014 now available as ranged daily history via CoinGecko's per-asset market-cap chart (MARKET_CAP_USD_1D).",
+  "status": "ok",
+  "reason": null,
+  "direction": "down",
+  "first_time": "2026-08-21T00:00:00+00:00",
+  "first_value": "60.86253369272237196765498652",
+  "last_time": "2026-09-19T00:00:00+00:00",
+  "last_value": "59.58786936236391912908242613",
+  "delta": "-1.27466433035845283857256039",
+  "change_pct": "-2.094333332874162989860141296",
+  "magnitude": "1.27466433035845283857256039",
+  "historical_percentile": {
+   "status": "ok",
+   "reason": null,
+   "percentile": "4.6",
+   "sample_size": 370
+  },
+  "data_quality": {
+   "status": "degraded",
+   "points_in_window": 28,
+   "flagged_points": 1
+  }
+ },
+ "to_node": {
+  "node_id": "eth",
+  "label": "ETH",
+  "measurement_class": "observed",
+  "scope_note": "ETH market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+  "status": "ok",
+  "reason": null,
+  "direction": "down",
+  "first_time": "2026-08-21T00:00:00+00:00",
+  "first_value": "8.086253369272237196765498652",
+  "last_time": "2026-09-19T00:00:00+00:00",
+  "last_value": "7.861586314152410575427682737",
+  "delta": "-0.224667055119826621337815915",
+  "change_pct": "-2.778382581648522550544323482",
+  "magnitude": "0.224667055119826621337815915",
+  "historical_percentile": {
+   "status": "ok",
+   "reason": null,
+   "percentile": "0.5",
+   "sample_size": 370
+  },
+  "data_quality": {
+   "status": "degraded",
+   "points_in_window": 28,
+   "flagged_points": 1
+  }
+ },
+ "window_days": 30,
+ "as_of": "2026-09-20T09:00:00+00:00",
+ "knowledge_time": "2026-09-20T09:00:00+00:00",
+ "observed_capital_flow": {
+  "from_node_direction": "down",
+  "to_node_direction": "down"
+ },
+ "inferred_capital_rotation": {
+  "status": "no_rotation_signal",
+  "evidence_class": null,
+  "hypothesis": null
+ },
+ "duration": {
+  "days": 1,
+  "capped": false,
+  "since": "2026-09-20T09:00:00+00:00"
+ },
+ "historical_examples": [
+  {
+   "start": "2026-09-16T09:00:00+00:00",
+   "end": "2026-09-16T09:00:00+00:00",
+   "days": 1,
+   "peak_abs_delta_from_node": "4.05188099763571461684669231",
+   "peak_percentile_from_node": "78.4"
+  },
+  {
+   "start": "2026-09-10T09:00:00+00:00",
+   "end": "2026-09-10T09:00:00+00:00",
+   "days": 1,
+   "peak_abs_delta_from_node": "4.17584401516519227297346091",
+   "peak_percentile_from_node": "79.7"
+  },
+  {
+   "start": "2026-09-04T09:00:00+00:00",
+   "end": "2026-09-05T09:00:00+00:00",
+   "days": 2,
+   "peak_abs_delta_from_node": "4.30750987122096928321238363",
+   "peak_percentile_from_node": "81.6"
+  }
+ ],
+ "flow_corroboration": {
+  "supporting_evidence": [],
+  "contradicting_evidence": []
+ },
+ "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+}

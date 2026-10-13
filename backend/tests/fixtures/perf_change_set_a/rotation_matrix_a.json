@@ -1,0 +1,2166 @@
+{
+ "as_of": "2026-09-20T09:00:00+00:00",
+ "knowledge_time": "2026-09-20T09:00:00+00:00",
+ "window_days": 30,
+ "pairs": [
+  {
+   "from_node": {
+    "node_id": "btc",
+    "label": "BTC",
+    "measurement_class": "observed",
+    "scope_note": "BTC market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100 (CoinGecko's global figure, the same denominator Phase 12's own BTC/ETH dominance already uses) \u2014 now available as ranged daily history via CoinGecko's per-asset market-cap chart (MARKET_CAP_USD_1D).",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "60.86253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "59.58786936236391912908242613",
+    "delta": "-1.27466433035845283857256039",
+    "change_pct": "-2.094333332874162989860141296",
+    "magnitude": "1.27466433035845283857256039",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "4.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "eth",
+    "label": "ETH",
+    "measurement_class": "observed",
+    "scope_note": "ETH market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "8.086253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "7.861586314152410575427682737",
+    "delta": "-0.224667055119826621337815915",
+    "change_pct": "-2.778382581648522550544323482",
+    "magnitude": "0.224667055119826621337815915",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "0.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-16T09:00:00+00:00",
+     "end": "2026-09-16T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.05188099763571461684669231",
+     "peak_percentile_from_node": "78.4"
+    },
+    {
+     "start": "2026-09-10T09:00:00+00:00",
+     "end": "2026-09-10T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.17584401516519227297346091",
+     "peak_percentile_from_node": "79.7"
+    },
+    {
+     "start": "2026-09-04T09:00:00+00:00",
+     "end": "2026-09-05T09:00:00+00:00",
+     "days": 2,
+     "peak_abs_delta_from_node": "4.30750987122096928321238363",
+     "peak_percentile_from_node": "81.6"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "btc",
+    "label": "BTC",
+    "measurement_class": "observed",
+    "scope_note": "BTC market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100 (CoinGecko's global figure, the same denominator Phase 12's own BTC/ETH dominance already uses) \u2014 now available as ranged daily history via CoinGecko's per-asset market-cap chart (MARKET_CAP_USD_1D).",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "60.86253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "59.58786936236391912908242613",
+    "delta": "-1.27466433035845283857256039",
+    "change_pct": "-2.094333332874162989860141296",
+    "magnitude": "1.27466433035845283857256039",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "4.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "sol",
+    "label": "SOL",
+    "measurement_class": "observed",
+    "scope_note": "SOL market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "7.210242587601078167115902965",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "6.521513737687921202695697252",
+    "delta": "-0.688728849913156964420205713",
+    "change_pct": "-9.552089843655373226164348393",
+    "magnitude": "0.688728849913156964420205713",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "60.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-16T09:00:00+00:00",
+     "end": "2026-09-16T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.05188099763571461684669231",
+     "peak_percentile_from_node": "78.4"
+    },
+    {
+     "start": "2026-09-10T09:00:00+00:00",
+     "end": "2026-09-10T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.17584401516519227297346091",
+     "peak_percentile_from_node": "79.7"
+    },
+    {
+     "start": "2026-09-04T09:00:00+00:00",
+     "end": "2026-09-05T09:00:00+00:00",
+     "days": 2,
+     "peak_abs_delta_from_node": "4.30750987122096928321238363",
+     "peak_percentile_from_node": "81.6"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "btc",
+    "label": "BTC",
+    "measurement_class": "observed",
+    "scope_note": "BTC market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100 (CoinGecko's global figure, the same denominator Phase 12's own BTC/ETH dominance already uses) \u2014 now available as ranged daily history via CoinGecko's per-asset market-cap chart (MARKET_CAP_USD_1D).",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "60.86253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "59.58786936236391912908242613",
+    "delta": "-1.27466433035845283857256039",
+    "change_pct": "-2.094333332874162989860141296",
+    "magnitude": "1.27466433035845283857256039",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "4.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "xrp",
+    "label": "XRP",
+    "measurement_class": "observed",
+    "scope_note": "XRP market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "2.695417789757412398921832884",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "1.894764126490409538621047175",
+    "delta": "-0.800653663267002860300785709",
+    "change_pct": "-29.70425090720580611715914980",
+    "magnitude": "0.800653663267002860300785709",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "73.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-04T09:00:00+00:00",
+     "end": "2026-09-04T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.30750987122096928321238363",
+     "peak_percentile_from_node": "81.6"
+    },
+    {
+     "start": "2026-08-19T09:00:00+00:00",
+     "end": "2026-08-19T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "5.20016438946829439189371278",
+     "peak_percentile_from_node": "98.4"
+    },
+    {
+     "start": "2026-08-12T09:00:00+00:00",
+     "end": "2026-08-12T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.36273457171076296031634324",
+     "peak_percentile_from_node": "83.2"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "btc",
+    "label": "BTC",
+    "measurement_class": "observed",
+    "scope_note": "BTC market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100 (CoinGecko's global figure, the same denominator Phase 12's own BTC/ETH dominance already uses) \u2014 now available as ranged daily history via CoinGecko's per-asset market-cap chart (MARKET_CAP_USD_1D).",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "60.86253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "59.58786936236391912908242613",
+    "delta": "-1.27466433035845283857256039",
+    "change_pct": "-2.094333332874162989860141296",
+    "magnitude": "1.27466433035845283857256039",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "4.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoins_total",
+    "label": "Stablecoins (total)",
+    "measurement_class": "observed",
+    "scope_note": "TOTAL tracked stablecoin circulating supply's own trailing growth (net minting vs. redemption, cfi.liquidity's established proxy for stablecoin flow) \u2014 a genuine OBSERVED FLOW reading, not a market-share ratio, so 'up' here means net supply growth, not gained share of some denominator.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "310000000000",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "308750000000",
+    "delta": "-1250000000",
+    "change_pct": "-0.4032258064516129032258064516",
+    "magnitude": "1250000000",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "0.9",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-04T09:00:00+00:00",
+     "end": "2026-09-04T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.30750987122096928321238363",
+     "peak_percentile_from_node": "81.6"
+    },
+    {
+     "start": "2026-08-12T09:00:00+00:00",
+     "end": "2026-08-12T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.36273457171076296031634324",
+     "peak_percentile_from_node": "83.2"
+    },
+    {
+     "start": "2026-06-27T09:00:00+00:00",
+     "end": "2026-06-27T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.47754284900375077151945811",
+     "peak_percentile_from_node": "85.7"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "btc",
+    "label": "BTC",
+    "measurement_class": "observed",
+    "scope_note": "BTC market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100 (CoinGecko's global figure, the same denominator Phase 12's own BTC/ETH dominance already uses) \u2014 now available as ranged daily history via CoinGecko's per-asset market-cap chart (MARKET_CAP_USD_1D).",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "60.86253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "59.58786936236391912908242613",
+    "delta": "-1.27466433035845283857256039",
+    "change_pct": "-2.094333332874162989860141296",
+    "magnitude": "1.27466433035845283857256039",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "4.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoin_usdt",
+    "label": "USDT",
+    "measurement_class": "observed",
+    "scope_note": "USDT circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "32.41935483870967741935483871",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "31.66315789473684210526315789",
+    "delta": "-0.75619694397283531409168082",
+    "change_pct": "-2.332547787378894998690756758",
+    "magnitude": "0.75619694397283531409168082",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "38.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-04T09:00:00+00:00",
+     "end": "2026-09-04T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.30750987122096928321238363",
+     "peak_percentile_from_node": "81.6"
+    },
+    {
+     "start": "2026-08-19T09:00:00+00:00",
+     "end": "2026-08-19T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "5.20016438946829439189371278",
+     "peak_percentile_from_node": "98.4"
+    },
+    {
+     "start": "2026-08-12T09:00:00+00:00",
+     "end": "2026-08-12T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.36273457171076296031634324",
+     "peak_percentile_from_node": "83.2"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "btc",
+    "label": "BTC",
+    "measurement_class": "observed",
+    "scope_note": "BTC market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100 (CoinGecko's global figure, the same denominator Phase 12's own BTC/ETH dominance already uses) \u2014 now available as ranged daily history via CoinGecko's per-asset market-cap chart (MARKET_CAP_USD_1D).",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "60.86253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "59.58786936236391912908242613",
+    "delta": "-1.27466433035845283857256039",
+    "change_pct": "-2.094333332874162989860141296",
+    "magnitude": "1.27466433035845283857256039",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "4.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoin_usdc",
+    "label": "USDC",
+    "measurement_class": "observed",
+    "scope_note": "USDC circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "up",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "26.96774193548387096774193548",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "29.34736842105263157894736842",
+    "delta": "2.37962648556876061120543294",
+    "change_pct": "8.823973810123394610929236980",
+    "magnitude": "2.37962648556876061120543294",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "86.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "up"
+   },
+   "inferred_capital_rotation": {
+    "status": "possible_rotation",
+    "evidence_class": "inferred",
+    "hypothesis": "BTC decreased while USDC increased over the same window \u2014 consistent with (but not proof of) capital rotating from the former into the latter. No transfer between these is directly observed; this is a hypothesis from two correlated directional readings only."
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-16T09:00:00+00:00",
+     "end": "2026-09-16T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.05188099763571461684669231",
+     "peak_percentile_from_node": "78.4"
+    },
+    {
+     "start": "2026-09-10T09:00:00+00:00",
+     "end": "2026-09-11T09:00:00+00:00",
+     "days": 2,
+     "peak_abs_delta_from_node": "4.17584401516519227297346091",
+     "peak_percentile_from_node": "79.7"
+    },
+    {
+     "start": "2026-09-05T09:00:00+00:00",
+     "end": "2026-09-05T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "4.14439507860560492139439508",
+     "peak_percentile_from_node": "78.9"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [
+     "BTC's institutional ETF net flow was also 'down' over the same window \u2014 OBSERVED FLOW data is directionally consistent with the share move (still not proof that this flow caused the share change).",
+     "BTC's whale exchange net flow was also 'down' over the same window \u2014 OBSERVED FLOW data is directionally consistent with the share move (still not proof that this flow caused the share change)."
+    ],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "eth",
+    "label": "ETH",
+    "measurement_class": "observed",
+    "scope_note": "ETH market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "8.086253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "7.861586314152410575427682737",
+    "delta": "-0.224667055119826621337815915",
+    "change_pct": "-2.778382581648522550544323482",
+    "magnitude": "0.224667055119826621337815915",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "0.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "sol",
+    "label": "SOL",
+    "measurement_class": "observed",
+    "scope_note": "SOL market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "7.210242587601078167115902965",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "6.521513737687921202695697252",
+    "delta": "-0.688728849913156964420205713",
+    "change_pct": "-9.552089843655373226164348393",
+    "magnitude": "0.688728849913156964420205713",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "60.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-06-04T09:00:00+00:00",
+     "end": "2026-06-10T09:00:00+00:00",
+     "days": 7,
+     "peak_abs_delta_from_node": "2.243211787877527323763309200",
+     "peak_percentile_from_node": "99.7"
+    },
+    {
+     "start": "2026-03-04T09:00:00+00:00",
+     "end": "2026-03-10T09:00:00+00:00",
+     "days": 7,
+     "peak_abs_delta_from_node": "2.342010340693190424273651223",
+     "peak_percentile_from_node": "100.0"
+    },
+    {
+     "start": "2026-02-25T09:00:00+00:00",
+     "end": "2026-02-25T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.389510515381356669897109434",
+     "peak_percentile_from_node": "72.4"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "eth",
+    "label": "ETH",
+    "measurement_class": "observed",
+    "scope_note": "ETH market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "8.086253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "7.861586314152410575427682737",
+    "delta": "-0.224667055119826621337815915",
+    "change_pct": "-2.778382581648522550544323482",
+    "magnitude": "0.224667055119826621337815915",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "0.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "xrp",
+    "label": "XRP",
+    "measurement_class": "observed",
+    "scope_note": "XRP market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "2.695417789757412398921832884",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "1.894764126490409538621047175",
+    "delta": "-0.800653663267002860300785709",
+    "change_pct": "-29.70425090720580611715914980",
+    "magnitude": "0.800653663267002860300785709",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "73.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-06-09T09:00:00+00:00",
+     "end": "2026-06-09T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "2.243211787877527323763309200",
+     "peak_percentile_from_node": "99.7"
+    },
+    {
+     "start": "2026-03-08T09:00:00+00:00",
+     "end": "2026-03-09T09:00:00+00:00",
+     "days": 2,
+     "peak_abs_delta_from_node": "2.342010340693190424273651223",
+     "peak_percentile_from_node": "100.0"
+    },
+    {
+     "start": "2026-02-11T09:00:00+00:00",
+     "end": "2026-02-11T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.382398583588815074953459319",
+     "peak_percentile_from_node": "70.0"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "eth",
+    "label": "ETH",
+    "measurement_class": "observed",
+    "scope_note": "ETH market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "8.086253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "7.861586314152410575427682737",
+    "delta": "-0.224667055119826621337815915",
+    "change_pct": "-2.778382581648522550544323482",
+    "magnitude": "0.224667055119826621337815915",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "0.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoins_total",
+    "label": "Stablecoins (total)",
+    "measurement_class": "observed",
+    "scope_note": "TOTAL tracked stablecoin circulating supply's own trailing growth (net minting vs. redemption, cfi.liquidity's established proxy for stablecoin flow) \u2014 a genuine OBSERVED FLOW reading, not a market-share ratio, so 'up' here means net supply growth, not gained share of some denominator.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "310000000000",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "308750000000",
+    "delta": "-1250000000",
+    "change_pct": "-0.4032258064516129032258064516",
+    "magnitude": "1250000000",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "0.9",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-06-09T09:00:00+00:00",
+     "end": "2026-06-09T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "2.243211787877527323763309200",
+     "peak_percentile_from_node": "99.7"
+    },
+    {
+     "start": "2026-02-11T09:00:00+00:00",
+     "end": "2026-02-11T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.382398583588815074953459319",
+     "peak_percentile_from_node": "70.0"
+    },
+    {
+     "start": "2026-02-09T09:00:00+00:00",
+     "end": "2026-02-09T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.396669920872206455530239555",
+     "peak_percentile_from_node": "73.8"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "eth",
+    "label": "ETH",
+    "measurement_class": "observed",
+    "scope_note": "ETH market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "8.086253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "7.861586314152410575427682737",
+    "delta": "-0.224667055119826621337815915",
+    "change_pct": "-2.778382581648522550544323482",
+    "magnitude": "0.224667055119826621337815915",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "0.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoin_usdt",
+    "label": "USDT",
+    "measurement_class": "observed",
+    "scope_note": "USDT circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "32.41935483870967741935483871",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "31.66315789473684210526315789",
+    "delta": "-0.75619694397283531409168082",
+    "change_pct": "-2.332547787378894998690756758",
+    "magnitude": "0.75619694397283531409168082",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "38.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-06-09T09:00:00+00:00",
+     "end": "2026-06-09T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "2.243211787877527323763309200",
+     "peak_percentile_from_node": "99.7"
+    },
+    {
+     "start": "2026-03-08T09:00:00+00:00",
+     "end": "2026-03-09T09:00:00+00:00",
+     "days": 2,
+     "peak_abs_delta_from_node": "2.342010340693190424273651223",
+     "peak_percentile_from_node": "100.0"
+    },
+    {
+     "start": "2026-02-25T09:00:00+00:00",
+     "end": "2026-02-25T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.389510515381356669897109434",
+     "peak_percentile_from_node": "72.4"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "eth",
+    "label": "ETH",
+    "measurement_class": "observed",
+    "scope_note": "ETH market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "8.086253369272237196765498652",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "7.861586314152410575427682737",
+    "delta": "-0.224667055119826621337815915",
+    "change_pct": "-2.778382581648522550544323482",
+    "magnitude": "0.224667055119826621337815915",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "0.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoin_usdc",
+    "label": "USDC",
+    "measurement_class": "observed",
+    "scope_note": "USDC circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "up",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "26.96774193548387096774193548",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "29.34736842105263157894736842",
+    "delta": "2.37962648556876061120543294",
+    "change_pct": "8.823973810123394610929236980",
+    "magnitude": "2.37962648556876061120543294",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "86.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "up"
+   },
+   "inferred_capital_rotation": {
+    "status": "possible_rotation",
+    "evidence_class": "inferred",
+    "hypothesis": "ETH decreased while USDC increased over the same window \u2014 consistent with (but not proof of) capital rotating from the former into the latter. No transfer between these is directly observed; this is a hypothesis from two correlated directional readings only."
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-06-05T09:00:00+00:00",
+     "end": "2026-06-10T09:00:00+00:00",
+     "days": 6,
+     "peak_abs_delta_from_node": "2.243211787877527323763309200",
+     "peak_percentile_from_node": "99.7"
+    },
+    {
+     "start": "2026-03-05T09:00:00+00:00",
+     "end": "2026-03-10T09:00:00+00:00",
+     "days": 6,
+     "peak_abs_delta_from_node": "2.342010340693190424273651223",
+     "peak_percentile_from_node": "100.0"
+    },
+    {
+     "start": "2026-02-25T09:00:00+00:00",
+     "end": "2026-02-25T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.389510515381356669897109434",
+     "peak_percentile_from_node": "72.4"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [
+     "ETH's institutional ETF net flow was also 'down' over the same window \u2014 OBSERVED FLOW data is directionally consistent with the share move (still not proof that this flow caused the share change).",
+     "ETH's whale exchange net flow was also 'down' over the same window \u2014 OBSERVED FLOW data is directionally consistent with the share move (still not proof that this flow caused the share change)."
+    ],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "sol",
+    "label": "SOL",
+    "measurement_class": "observed",
+    "scope_note": "SOL market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "7.210242587601078167115902965",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "6.521513737687921202695697252",
+    "delta": "-0.688728849913156964420205713",
+    "change_pct": "-9.552089843655373226164348393",
+    "magnitude": "0.688728849913156964420205713",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "60.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "xrp",
+    "label": "XRP",
+    "measurement_class": "observed",
+    "scope_note": "XRP market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "2.695417789757412398921832884",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "1.894764126490409538621047175",
+    "delta": "-0.800653663267002860300785709",
+    "change_pct": "-29.70425090720580611715914980",
+    "magnitude": "0.800653663267002860300785709",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "73.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 2,
+    "capped": false,
+    "since": "2026-09-19T09:00:00+00:00"
+   },
+   "historical_examples": [],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "sol",
+    "label": "SOL",
+    "measurement_class": "observed",
+    "scope_note": "SOL market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "7.210242587601078167115902965",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "6.521513737687921202695697252",
+    "delta": "-0.688728849913156964420205713",
+    "change_pct": "-9.552089843655373226164348393",
+    "magnitude": "0.688728849913156964420205713",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "60.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoins_total",
+    "label": "Stablecoins (total)",
+    "measurement_class": "observed",
+    "scope_note": "TOTAL tracked stablecoin circulating supply's own trailing growth (net minting vs. redemption, cfi.liquidity's established proxy for stablecoin flow) \u2014 a genuine OBSERVED FLOW reading, not a market-share ratio, so 'up' here means net supply growth, not gained share of some denominator.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "310000000000",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "308750000000",
+    "delta": "-1250000000",
+    "change_pct": "-0.4032258064516129032258064516",
+    "magnitude": "1250000000",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "0.9",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 2,
+    "capped": false,
+    "since": "2026-09-19T09:00:00+00:00"
+   },
+   "historical_examples": [],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "sol",
+    "label": "SOL",
+    "measurement_class": "observed",
+    "scope_note": "SOL market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "7.210242587601078167115902965",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "6.521513737687921202695697252",
+    "delta": "-0.688728849913156964420205713",
+    "change_pct": "-9.552089843655373226164348393",
+    "magnitude": "0.688728849913156964420205713",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "60.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoin_usdt",
+    "label": "USDT",
+    "measurement_class": "observed",
+    "scope_note": "USDT circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "32.41935483870967741935483871",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "31.66315789473684210526315789",
+    "delta": "-0.75619694397283531409168082",
+    "change_pct": "-2.332547787378894998690756758",
+    "magnitude": "0.75619694397283531409168082",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "38.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "sol",
+    "label": "SOL",
+    "measurement_class": "observed",
+    "scope_note": "SOL market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "7.210242587601078167115902965",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "6.521513737687921202695697252",
+    "delta": "-0.688728849913156964420205713",
+    "change_pct": "-9.552089843655373226164348393",
+    "magnitude": "0.688728849913156964420205713",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "60.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoin_usdc",
+    "label": "USDC",
+    "measurement_class": "observed",
+    "scope_note": "USDC circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "up",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "26.96774193548387096774193548",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "29.34736842105263157894736842",
+    "delta": "2.37962648556876061120543294",
+    "change_pct": "8.823973810123394610929236980",
+    "magnitude": "2.37962648556876061120543294",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "86.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "up"
+   },
+   "inferred_capital_rotation": {
+    "status": "possible_rotation",
+    "evidence_class": "inferred",
+    "hypothesis": "SOL decreased while USDC increased over the same window \u2014 consistent with (but not proof of) capital rotating from the former into the latter. No transfer between these is directly observed; this is a hypothesis from two correlated directional readings only."
+   },
+   "duration": {
+    "days": 5,
+    "capped": false,
+    "since": "2026-09-16T09:00:00+00:00"
+   },
+   "historical_examples": [],
+   "flow_corroboration": {
+    "supporting_evidence": [
+     "SOL's institutional ETF net flow was also 'down' over the same window \u2014 OBSERVED FLOW data is directionally consistent with the share move (still not proof that this flow caused the share change)."
+    ],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "xrp",
+    "label": "XRP",
+    "measurement_class": "observed",
+    "scope_note": "XRP market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "2.695417789757412398921832884",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "1.894764126490409538621047175",
+    "delta": "-0.800653663267002860300785709",
+    "change_pct": "-29.70425090720580611715914980",
+    "magnitude": "0.800653663267002860300785709",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "73.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoins_total",
+    "label": "Stablecoins (total)",
+    "measurement_class": "observed",
+    "scope_note": "TOTAL tracked stablecoin circulating supply's own trailing growth (net minting vs. redemption, cfi.liquidity's established proxy for stablecoin flow) \u2014 a genuine OBSERVED FLOW reading, not a market-share ratio, so 'up' here means net supply growth, not gained share of some denominator.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "310000000000",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "308750000000",
+    "delta": "-1250000000",
+    "change_pct": "-0.4032258064516129032258064516",
+    "magnitude": "1250000000",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "0.9",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 2,
+    "capped": false,
+    "since": "2026-09-19T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-14T09:00:00+00:00",
+     "end": "2026-09-14T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.430638921591964264652586116",
+     "peak_percentile_from_node": "75.7"
+    },
+    {
+     "start": "2026-09-09T09:00:00+00:00",
+     "end": "2026-09-09T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.418538413907017329927421130",
+     "peak_percentile_from_node": "75.4"
+    },
+    {
+     "start": "2026-09-06T09:00:00+00:00",
+     "end": "2026-09-06T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.487612873350312572354711739",
+     "peak_percentile_from_node": "78.9"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "xrp",
+    "label": "XRP",
+    "measurement_class": "observed",
+    "scope_note": "XRP market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "2.695417789757412398921832884",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "1.894764126490409538621047175",
+    "delta": "-0.800653663267002860300785709",
+    "change_pct": "-29.70425090720580611715914980",
+    "magnitude": "0.800653663267002860300785709",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "73.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoin_usdt",
+    "label": "USDT",
+    "measurement_class": "observed",
+    "scope_note": "USDT circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "32.41935483870967741935483871",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "31.66315789473684210526315789",
+    "delta": "-0.75619694397283531409168082",
+    "change_pct": "-2.332547787378894998690756758",
+    "magnitude": "0.75619694397283531409168082",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "38.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-14T09:00:00+00:00",
+     "end": "2026-09-14T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.430638921591964264652586116",
+     "peak_percentile_from_node": "75.7"
+    },
+    {
+     "start": "2026-09-09T09:00:00+00:00",
+     "end": "2026-09-09T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.418538413907017329927421130",
+     "peak_percentile_from_node": "75.4"
+    },
+    {
+     "start": "2026-09-06T09:00:00+00:00",
+     "end": "2026-09-06T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.487612873350312572354711739",
+     "peak_percentile_from_node": "78.9"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "xrp",
+    "label": "XRP",
+    "measurement_class": "observed",
+    "scope_note": "XRP market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "2.695417789757412398921832884",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "1.894764126490409538621047175",
+    "delta": "-0.800653663267002860300785709",
+    "change_pct": "-29.70425090720580611715914980",
+    "magnitude": "0.800653663267002860300785709",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "73.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoin_usdc",
+    "label": "USDC",
+    "measurement_class": "observed",
+    "scope_note": "USDC circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "up",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "26.96774193548387096774193548",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "29.34736842105263157894736842",
+    "delta": "2.37962648556876061120543294",
+    "change_pct": "8.823973810123394610929236980",
+    "magnitude": "2.37962648556876061120543294",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "86.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "up"
+   },
+   "inferred_capital_rotation": {
+    "status": "possible_rotation",
+    "evidence_class": "inferred",
+    "hypothesis": "XRP decreased while USDC increased over the same window \u2014 consistent with (but not proof of) capital rotating from the former into the latter. No transfer between these is directly observed; this is a hypothesis from two correlated directional readings only."
+   },
+   "duration": {
+    "days": 2,
+    "capped": false,
+    "since": "2026-09-19T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-09T09:00:00+00:00",
+     "end": "2026-09-09T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.418538413907017329927421130",
+     "peak_percentile_from_node": "75.4"
+    },
+    {
+     "start": "2026-09-06T09:00:00+00:00",
+     "end": "2026-09-06T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "1.487612873350312572354711739",
+     "peak_percentile_from_node": "78.9"
+    },
+    {
+     "start": "2026-08-30T09:00:00+00:00",
+     "end": "2026-08-30T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "0.821282716100423357118167907",
+     "peak_percentile_from_node": "73.8"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": [
+     "XRP's institutional ETF net flow was 'up' while its market share moved 'down' over the same window \u2014 the share move is not corroborated by this OBSERVED FLOW data."
+    ]
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "large_caps",
+    "label": "Large Caps",
+    "measurement_class": "observed",
+    "scope_note": "Combined (BTC+ETH+SOL+XRP) market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100 \u2014 this platform's full tracked-asset universe, not a broad large-cap index (see NOT_TRACKED). Never compared against BTC/ETH/SOL/XRP individually: it is their own sum, not an independent bucket, so that pair would be a definitional identity, not a rotation signal.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "78.85444743935309973045822102",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "75.86573354069466044582685329",
+    "delta": "-2.98871389865843928463136773",
+    "change_pct": "-3.790165292778263457864424638",
+    "magnitude": "2.98871389865843928463136773",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "59.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "ok",
+     "points_in_window": 28,
+     "flagged_points": 0
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoins_total",
+    "label": "Stablecoins (total)",
+    "measurement_class": "observed",
+    "scope_note": "TOTAL tracked stablecoin circulating supply's own trailing growth (net minting vs. redemption, cfi.liquidity's established proxy for stablecoin flow) \u2014 a genuine OBSERVED FLOW reading, not a market-share ratio, so 'up' here means net supply growth, not gained share of some denominator.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "310000000000",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "308750000000",
+    "delta": "-1250000000",
+    "change_pct": "-0.4032258064516129032258064516",
+    "magnitude": "1250000000",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "0.9",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-04T09:00:00+00:00",
+     "end": "2026-09-04T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "7.37640222373046800527716559",
+     "peak_percentile_from_node": "95.7"
+    },
+    {
+     "start": "2026-08-12T09:00:00+00:00",
+     "end": "2026-08-12T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "7.47304658411619141797463817",
+     "peak_percentile_from_node": "95.9"
+    },
+    {
+     "start": "2026-06-27T09:00:00+00:00",
+     "end": "2026-06-27T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "7.67412600693180559292259484",
+     "peak_percentile_from_node": "96.2"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "large_caps",
+    "label": "Large Caps",
+    "measurement_class": "observed",
+    "scope_note": "Combined (BTC+ETH+SOL+XRP) market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100 \u2014 this platform's full tracked-asset universe, not a broad large-cap index (see NOT_TRACKED). Never compared against BTC/ETH/SOL/XRP individually: it is their own sum, not an independent bucket, so that pair would be a definitional identity, not a rotation signal.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "78.85444743935309973045822102",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "75.86573354069466044582685329",
+    "delta": "-2.98871389865843928463136773",
+    "change_pct": "-3.790165292778263457864424638",
+    "magnitude": "2.98871389865843928463136773",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "59.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "ok",
+     "points_in_window": 28,
+     "flagged_points": 0
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoin_usdt",
+    "label": "USDT",
+    "measurement_class": "observed",
+    "scope_note": "USDT circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "32.41935483870967741935483871",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "31.66315789473684210526315789",
+    "delta": "-0.75619694397283531409168082",
+    "change_pct": "-2.332547787378894998690756758",
+    "magnitude": "0.75619694397283531409168082",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "38.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "down"
+   },
+   "inferred_capital_rotation": {
+    "status": "no_rotation_signal",
+    "evidence_class": null,
+    "hypothesis": null
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-04T09:00:00+00:00",
+     "end": "2026-09-04T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "7.37640222373046800527716559",
+     "peak_percentile_from_node": "95.7"
+    },
+    {
+     "start": "2026-08-19T09:00:00+00:00",
+     "end": "2026-08-19T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "6.28101551882779144481788188",
+     "peak_percentile_from_node": "91.9"
+    },
+    {
+     "start": "2026-08-12T09:00:00+00:00",
+     "end": "2026-08-12T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "7.47304658411619141797463817",
+     "peak_percentile_from_node": "95.9"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "large_caps",
+    "label": "Large Caps",
+    "measurement_class": "observed",
+    "scope_note": "Combined (BTC+ETH+SOL+XRP) market cap \u00f7 genuine global crypto TOTAL market cap \u00d7 100 \u2014 this platform's full tracked-asset universe, not a broad large-cap index (see NOT_TRACKED). Never compared against BTC/ETH/SOL/XRP individually: it is their own sum, not an independent bucket, so that pair would be a definitional identity, not a rotation signal.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "78.85444743935309973045822102",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "75.86573354069466044582685329",
+    "delta": "-2.98871389865843928463136773",
+    "change_pct": "-3.790165292778263457864424638",
+    "magnitude": "2.98871389865843928463136773",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "59.5",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "ok",
+     "points_in_window": 28,
+     "flagged_points": 0
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoin_usdc",
+    "label": "USDC",
+    "measurement_class": "observed",
+    "scope_note": "USDC circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "up",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "26.96774193548387096774193548",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "29.34736842105263157894736842",
+    "delta": "2.37962648556876061120543294",
+    "change_pct": "8.823973810123394610929236980",
+    "magnitude": "2.37962648556876061120543294",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "86.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "up"
+   },
+   "inferred_capital_rotation": {
+    "status": "possible_rotation",
+    "evidence_class": "inferred",
+    "hypothesis": "Large Caps decreased while USDC increased over the same window \u2014 consistent with (but not proof of) capital rotating from the former into the latter. No transfer between these is directly observed; this is a hypothesis from two correlated directional readings only."
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-09-16T09:00:00+00:00",
+     "end": "2026-09-16T09:00:00+00:00",
+     "days": 1,
+     "peak_abs_delta_from_node": "5.18320709412047319422962648",
+     "peak_percentile_from_node": "78.1"
+    },
+    {
+     "start": "2026-09-09T09:00:00+00:00",
+     "end": "2026-09-11T09:00:00+00:00",
+     "days": 3,
+     "peak_abs_delta_from_node": "5.35666671295846237171386115",
+     "peak_percentile_from_node": "79.2"
+    },
+    {
+     "start": "2026-09-05T09:00:00+00:00",
+     "end": "2026-09-06T09:00:00+00:00",
+     "days": 2,
+     "peak_abs_delta_from_node": "5.31698564593301435406698565",
+     "peak_percentile_from_node": "78.9"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [
+     "Large Caps's institutional ETF net flow was also 'down' over the same window \u2014 OBSERVED FLOW data is directionally consistent with the share move (still not proof that this flow caused the share change).",
+     "Large Caps's whale exchange net flow was also 'down' over the same window \u2014 OBSERVED FLOW data is directionally consistent with the share move (still not proof that this flow caused the share change)."
+    ],
+    "contradicting_evidence": []
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  },
+  {
+   "from_node": {
+    "node_id": "stablecoin_usdt",
+    "label": "USDT",
+    "measurement_class": "observed",
+    "scope_note": "USDT circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "down",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "32.41935483870967741935483871",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "31.66315789473684210526315789",
+    "delta": "-0.75619694397283531409168082",
+    "change_pct": "-2.332547787378894998690756758",
+    "magnitude": "0.75619694397283531409168082",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "38.6",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "to_node": {
+    "node_id": "stablecoin_usdc",
+    "label": "USDC",
+    "measurement_class": "observed",
+    "scope_note": "USDC circulating supply \u00f7 TOTAL tracked stablecoin circulating supply \u00d7 100 \u2014 cfi.liquidity's own established market-share metric, reused unchanged.",
+    "status": "ok",
+    "reason": null,
+    "direction": "up",
+    "first_time": "2026-08-21T00:00:00+00:00",
+    "first_value": "26.96774193548387096774193548",
+    "last_time": "2026-09-19T00:00:00+00:00",
+    "last_value": "29.34736842105263157894736842",
+    "delta": "2.37962648556876061120543294",
+    "change_pct": "8.823973810123394610929236980",
+    "magnitude": "2.37962648556876061120543294",
+    "historical_percentile": {
+     "status": "ok",
+     "reason": null,
+     "percentile": "86.8",
+     "sample_size": 370
+    },
+    "data_quality": {
+     "status": "degraded",
+     "points_in_window": 28,
+     "flagged_points": 1
+    }
+   },
+   "window_days": 30,
+   "as_of": "2026-09-20T09:00:00+00:00",
+   "knowledge_time": "2026-09-20T09:00:00+00:00",
+   "observed_capital_flow": {
+    "from_node_direction": "down",
+    "to_node_direction": "up"
+   },
+   "inferred_capital_rotation": {
+    "status": "possible_rotation",
+    "evidence_class": "inferred",
+    "hypothesis": "USDT decreased while USDC increased over the same window \u2014 consistent with (but not proof of) capital rotating from the former into the latter. No transfer between these is directly observed; this is a hypothesis from two correlated directional readings only."
+   },
+   "duration": {
+    "days": 1,
+    "capped": false,
+    "since": "2026-09-20T09:00:00+00:00"
+   },
+   "historical_examples": [
+    {
+     "start": "2026-08-05T09:00:00+00:00",
+     "end": "2026-08-06T09:00:00+00:00",
+     "days": 2,
+     "peak_abs_delta_from_node": "3.17564137739629854279178959",
+     "peak_percentile_from_node": "71.1"
+    },
+    {
+     "start": "2026-08-02T09:00:00+00:00",
+     "end": "2026-08-03T09:00:00+00:00",
+     "days": 2,
+     "peak_abs_delta_from_node": "3.15042024464009094814306976",
+     "peak_percentile_from_node": "70.0"
+    },
+    {
+     "start": "2026-07-13T09:00:00+00:00",
+     "end": "2026-07-14T09:00:00+00:00",
+     "days": 2,
+     "peak_abs_delta_from_node": "3.23673639195586708262069074",
+     "peak_percentile_from_node": "73.2"
+    }
+   ],
+   "flow_corroboration": {
+    "supporting_evidence": [],
+    "contradicting_evidence": [
+     "No institutional ETF or whale exchange flow data is tracked for either node in this pair \u2014 this hypothesis has no OBSERVED FLOW corroboration check available."
+    ]
+   },
+   "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it."
+  }
+ ],
+ "evidence_note": "Each node's own market-share reading (direction, magnitude, historical percentile) is OBSERVED CAPITAL FLOW \u2014 a direct calculation over data this platform ingested. An edge between two nodes is always an INFERRED CAPITAL ROTATION hypothesis, never a stated fact: this system never claims capital moved from one asset to another solely because one node's share increased while the other's decreased. 'flow_corroboration' checks the hypothesis against a second, independently observed data point (institutional ETF / whale exchange net flow) \u2014 supporting or contradicting it, never proving it.",
+ "not_tracked": [
+  "Mid-cap assets: no tracked mid-cap asset universe (this platform tracks BTC/ETH/SOL/XRP only \u2014 see cfi.market.universe.ASSET_SYMBOLS).",
+  "DeFi-sector assets: no tracked DeFi-token universe.",
+  "AI-related assets: no tracked AI-token universe.",
+  "Meme assets: no price, market-cap or flow data is ingested for meme coins. The 'meme_assets' node uses retail's meme-coin trending-mention count as a retail-ATTENTION proxy only \u2014 never a capital-flow or market-share measure, and excluded from the pairwise rotation matrix.",
+  "'Large Caps' here means only this platform's own 4-asset universe (BTC+ETH+SOL+XRP), not a broad market large-cap index \u2014 a scope decision, not a claim that no other large-cap assets exist.",
+  "The residual share of the genuine global crypto TOTAL market cap not held by BTC/ETH/SOL/XRP (i.e. everything the global TOTAL includes but this platform does not individually track) cannot be decomposed into mid-cap / DeFi / AI / meme sub-shares with this platform's current data \u2014 it is reported once as an informational 'untracked_share_pct' figure, never split further.",
+  "Stablecoin exchange balances and exchange flows are not tracked (cfi.liquidity.universe's own NOT_TRACKED) \u2014 only aggregate circulating supply."
+ ]
+}

@@ -167,8 +167,12 @@ class MacroService:
 
     # ------------------------------------------------------------------ overview
 
-    async def overview(self, *, as_of: datetime, knowledge_time: datetime) -> dict[str, Any]:
-        b = await self._load(as_of, knowledge_time)
+    def _overview_sections(self, b: _Bundle) -> dict[str, Any]:
+        """Every ``overview`` section except ``data_quality`` and ``not_tracked``, computed from an
+        already-loaded bundle. Shared by ``overview`` and ``overview_score`` so both return exactly
+        the same values for the same inputs."""
+        as_of = b.as_of
+        knowledge_time = b.knowledge_time
         p = b.points
         yield_curve = m.yield_curve_slope(
             p[UST_YIELD_10Y.dataset_id], p[UST_YIELD_2Y.dataset_id], as_of
@@ -219,9 +223,24 @@ class MacroService:
             "oil_trend": self._trend(oil_trend),
             "us_net_liquidity": self._net_liquidity(net_liquidity),
             "us_net_liquidity_trend": self._trend(net_liquidity_trend),
+        }
+
+    async def overview(self, *, as_of: datetime, knowledge_time: datetime) -> dict[str, Any]:
+        b = await self._load(as_of, knowledge_time)
+        return {
+            **self._overview_sections(b),
             "data_quality": await self._quality(b),
             "not_tracked": list(NOT_TRACKED),
         }
+
+    async def overview_score(self, *, as_of: datetime, knowledge_time: datetime) -> dict[str, Any]:
+        """``overview`` without its ``data_quality`` section: the same sections, values and key
+        order for the same inputs, minus ``data_quality``. It loads the same observations (one query
+        per dataset, identical cut-offs) but skips the per-source ``last_job`` queries that only
+        ``data_quality`` uses. For callers that consume the score alone (the similarity and regime
+        snapshot gatherers); everything else keeps calling ``overview``."""
+        b = await self._load(as_of, knowledge_time)
+        return {**self._overview_sections(b), "not_tracked": list(NOT_TRACKED)}
 
     # ------------------------------------------------------------------ sections
 
