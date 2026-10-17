@@ -41,11 +41,13 @@ Formulas (every one is also shown in the API's ``calculation`` field, per compon
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
-from typing import Literal
+from decimal import Decimal, getcontext
+from functools import lru_cache
+from typing import Any, Literal
 
 Status = Literal["ok", "unavailable", "insufficient_history"]
 
@@ -313,22 +315,62 @@ class VolatilityReading:
     time: datetime | None = None
 
 
+# Memoisation of the two pure, expensive steps of the rolling volatility (``Decimal.ln`` and the
+# per-window standard deviation). Historical snapshots re-read overlapping daily-bar histories, so
+# the same ratios and the same 30-return windows recur across snapshots. Exactness: a cache key is
+# the *text* of the input (``str(Decimal)`` keeps sign, digits AND exponent, unlike ``==`` which
+# treats 1.0 and 1.00 as equal) plus every Decimal-context setting that can change a result, and a
+# hit returns the value an identical computation produced. Bounded (LRU); exceptions are never
+# cached. Values are immutable ``Decimal``s, so sharing them is safe.
+_LN_MEMO_SIZE = 4096
+_WINDOW_MEMO_SIZE = 8192
+
+
+def _decimal_context_key() -> tuple[Any, ...]:
+    ctx = getcontext()
+    return (
+        ctx.prec,
+        ctx.rounding,
+        ctx.Emin,
+        ctx.Emax,
+        ctx.capitals,
+        ctx.clamp,
+        tuple(signal for signal, enabled in ctx.traps.items() if enabled),
+    )
+
+
+@lru_cache(maxsize=_LN_MEMO_SIZE)
+def _ln_of(ratio_text: str, context_key: tuple[Any, ...]) -> Decimal:
+    return Decimal(ratio_text).ln()
+
+
+@lru_cache(maxsize=_WINDOW_MEMO_SIZE)
+def _window_annualized(
+    return_texts: tuple[str, ...], window: int, context_key: tuple[Any, ...]
+) -> Decimal:
+    chunk = [Decimal(t) for t in return_texts]
+    mean = sum(chunk, Decimal(0)) / window
+    variance = sum(((x - mean) ** 2 for x in chunk), Decimal(0)) / (window - 1)
+    return variance.sqrt() * ANNUALISATION_DAYS.sqrt()
+
+
 def realized_volatility_series(
     bars: Sequence[Bar], window: int = VOLATILITY_WINDOW
 ) -> list[tuple[datetime, Decimal]]:
     """(time, annualized stdev of daily log returns) for a rolling ``window``-day lookback, at
     every bar once enough history exists. ``log_returns[j]`` pairs with ``bars[j + 1]``; a window
     ending at ``log_returns[i - 1]`` (i.e. ``log_returns[i - window:i]``) pairs with ``bars[i]``."""
+    context_key = _decimal_context_key()
     closes = [b.close for b in bars]
     log_returns = [
-        (closes[i] / closes[i - 1]).ln() for i in range(1, len(closes)) if closes[i - 1] > 0
+        _ln_of(str(closes[i] / closes[i - 1]), context_key)
+        for i in range(1, len(closes))
+        if closes[i - 1] > 0
     ]
+    texts = [sys.intern(str(x)) for x in log_returns]
     out = []
     for i in range(window, len(log_returns) + 1):
-        chunk = log_returns[i - window : i]
-        mean = sum(chunk, Decimal(0)) / window
-        variance = sum(((x - mean) ** 2 for x in chunk), Decimal(0)) / (window - 1)
-        annualized = variance.sqrt() * ANNUALISATION_DAYS.sqrt()
+        annualized = _window_annualized(tuple(texts[i - window : i]), window, context_key)
         out.append((bars[i].time, annualized))
     return out
 

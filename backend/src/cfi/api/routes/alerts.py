@@ -83,7 +83,7 @@ def _to_status(row: dict[str, Any]) -> AlertStatus:
 @router.post("/evaluate", response_model=EvaluateResponse, dependencies=[Depends(require_api_key)])
 @limiter.limit(MUTATION_LIMIT)
 async def evaluate(request: Request) -> EvaluateResponse:
-    send_task(request.app.state.settings, "alerts.evaluate", args=(), queue="ingest")
+    send_task(request.app.state.settings, "alerts.evaluate", args=(), queue="alerts")
     return EvaluateResponse(status="queued")
 
 

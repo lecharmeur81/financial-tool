@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.cache.redis import create_redis
 from cfi.core.config import Settings
+from cfi.core.logging import get_logger
 from cfi.db.engine import create_engine
 from cfi.derivatives import sources as derivatives
 from cfi.ingestion.archive import FileSystemArchive
@@ -33,6 +34,12 @@ from cfi.retail import sources as retail
 from cfi.whales import sources as whales
 from cfi.whales.label_store import import_seed_files
 
+log = get_logger(__name__)
+
+# How long ``run_guarded`` waits for an interrupted coroutine to finish its cleanup. Celery's hard
+# limit follows the soft limit by 20 s for ``alerts.evaluate``, so cleanup must be shorter.
+DRAIN_TIMEOUT_SECONDS = 10.0
+
 
 class WorkerRuntime:
     def __init__(self, settings: Settings) -> None:
@@ -44,6 +51,44 @@ class WorkerRuntime:
 
     def run[T](self, coro: Coroutine[Any, Any, T]) -> T:
         return self.loop.run_until_complete(coro)
+
+    def run_guarded[T](
+        self, coro: Coroutine[Any, Any, T], *, drain_timeout: float = DRAIN_TIMEOUT_SECONDS
+    ) -> T:
+        """Like :meth:`run`, but an interruption never leaves the coroutine alive on the loop.
+
+        ``run_until_complete`` does not cancel its task when an exception (Celery's
+        ``SoftTimeLimitExceeded``, raised by a signal handler while the loop is idle) leaves it
+        from the loop machinery: the coroutine stays suspended on this process-long loop and resumes
+        inside the next task, still holding its locks and connections. Here, any such exception
+        cancels the task and drives the loop until the task has run its ``finally`` blocks (at most
+        ``drain_timeout`` seconds), then the original exception is re-raised unchanged. Nothing is
+        suppressed. Used only by tasks that opt in; :meth:`run` is unchanged."""
+        task = self.loop.create_task(coro)
+        try:
+            return self.loop.run_until_complete(task)
+        except BaseException:
+            if not task.done():
+                self._cancel_and_drain(task, drain_timeout)
+            raise
+
+    def _cancel_and_drain(self, task: asyncio.Task[Any], drain_timeout: float) -> None:
+        task.cancel()
+        try:
+            done, _pending = self.loop.run_until_complete(
+                asyncio.wait({task}, timeout=drain_timeout)
+            )
+        except BaseException:
+            log.error("worker_task_drain_interrupted", exc_info=True)
+            raise
+        if not done:
+            log.error("worker_task_drain_timed_out", drain_timeout_seconds=drain_timeout)
+            return
+        if task.cancelled():
+            log.warning("worker_task_cancelled_after_interrupt")
+        elif (error := task.exception()) is not None:
+            # Cleanup itself failed; the interrupt that caused it is what the caller must see.
+            log.error("worker_task_cleanup_failed", error_type=type(error).__name__)
 
     def redis(self) -> Redis:
         """One Redis client per process (Phase 35, "Real-Time Intelligence"), the same broker

@@ -52,6 +52,9 @@ class _Svc:
             "market_breadth": {"status": "ok", "condition": "broad"},
         }
 
+    async def overview_score(self, **_k: Any) -> dict[str, Any]:
+        return await self.overview()
+
     async def asset(self, **_k: Any) -> dict[str, Any]:
         return {
             "score": {"status": "ok", "health": "58.25"},

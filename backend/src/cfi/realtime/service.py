@@ -25,13 +25,16 @@ standard one for exactly this problem (``SET key value NX EX ttl`` on the broker
 
 from __future__ import annotations
 
+import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from cfi.alerts.service import AlertService, EvaluationResult
+from cfi.alerts.stage_timing import status_for
 from cfi.analyst.repository import AnalystRepository
 from cfi.core.config import Settings
 from cfi.core.logging import get_logger
@@ -53,9 +56,24 @@ from cfi.realtime.universe import (
 from cfi.worker.client import send_task
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
     from redis.asyncio import Redis
 
 log = get_logger(__name__)
+
+# An automatic (data-arrival) evaluation that has waited this long in the ``alerts`` queue is
+# stale: the worker discards it on receipt instead of running it, and a later trigger or the
+# scheduled run evaluates fresher data. Manual API triggers and Beat are deliberately unaffected.
+DATA_ARRIVAL_ALERT_EXPIRES_SECONDS = 180
+
+# Release the cycle lock only if it still holds this cycle's token (atomic compare-and-delete): a
+# cycle whose lock already expired and was re-acquired by another cycle must not delete that
+# cycle's lock. Returns 1 if deleted, 0 if the lock was absent or owned by someone else.
+_RELEASE_IF_OWNER_LUA = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] "
+    "then return redis.call('del', KEYS[1]) else return 0 end"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,9 +99,18 @@ class RealtimeIntelligenceService:
     async def process_cycle(
         self, *, as_of: datetime, knowledge_time: datetime, now: datetime
     ) -> ProcessResult:
+        started = time.monotonic()
         token = await self._acquire_lock()
-        if not token:
+        lock_acquired_at = time.monotonic()
+        if token is None:
             log.info("realtime_cycle_locked_out")
+            log.info(
+                "realtime_cycle_timing",
+                status="locked_out",
+                lock="not_acquired",
+                lock_release="not_applicable",
+                elapsed_ms=round((lock_acquired_at - started) * 1000),
+            )
             return ProcessResult(
                 locked_out=True,
                 alerts=None,
@@ -91,6 +118,8 @@ class RealtimeIntelligenceService:
                 events_deduplicated=0,
                 ai_requested=0,
             )
+        error: BaseException | None = None
+        lock_release: str
         try:
             result = await self.alerts.evaluate(as_of=as_of, knowledge_time=knowledge_time, now=now)
             events_created, events_deduplicated = await self._record_events(result, now=now)
@@ -112,8 +141,19 @@ class RealtimeIntelligenceService:
                 events_deduplicated=events_deduplicated,
                 ai_requested=ai_requested,
             )
+        except BaseException as exc:
+            error = exc
+            raise
         finally:
-            await self._release_lock()
+            lock_release = await self._release_lock(token)
+            log.info(
+                "realtime_cycle_timing",
+                status=status_for(error),
+                lock="acquired",
+                lock_release=lock_release,
+                elapsed_ms=round((time.monotonic() - started) * 1000),
+                lock_held_ms=round((time.monotonic() - lock_acquired_at) * 1000),
+            )
 
     # ------------------------------------------------------------------ change detection -> events
 
@@ -210,16 +250,36 @@ class RealtimeIntelligenceService:
 
     # ------------------------------------------------------------------ cycle lock
 
-    async def _acquire_lock(self) -> bool:
+    async def _acquire_lock(self) -> str | None:
+        """Take the global cycle lock; return this cycle's unique ownership token, or ``None`` if
+        another cycle holds it. With no Redis client configured (e.g. a unit test) the cycle is the
+        only runner and gets a token that is never released anywhere."""
+        token = uuid.uuid4().hex
         if self.redis is None:
-            return True  # no lock configured (e.g. a unit test) — proceed as the only runner
-        acquired = await self.redis.set(CYCLE_LOCK_KEY, "1", nx=True, ex=CYCLE_LOCK_TTL_SECONDS)
-        return bool(acquired)
+            return token
+        acquired = await self.redis.set(CYCLE_LOCK_KEY, token, nx=True, ex=CYCLE_LOCK_TTL_SECONDS)
+        return token if acquired else None
 
-    async def _release_lock(self) -> None:
+    async def _release_lock(self, token: str) -> str:
+        """Release the lock only if it still carries ``token``. Returns ``released``, ``not_owner``
+        (expired or taken over by another cycle — left untouched) or ``failed`` (Redis error: the
+        TTL expires the lock; the error is logged, never allowed to replace the cycle's own
+        outcome or exception)."""
         if self.redis is None:
-            return
-        await self.redis.delete(CYCLE_LOCK_KEY)
+            return "no_lock"
+        try:
+            # redis-py types ``eval`` as ``Awaitable[str] | str`` (one stub for sync and async)
+            deleted = await cast(
+                "Awaitable[Any]",
+                self.redis.eval(_RELEASE_IF_OWNER_LUA, 1, CYCLE_LOCK_KEY, token),
+            )
+        except Exception:
+            log.warning("realtime_cycle_lock_release_failed", exc_info=True)
+            return "failed"
+        if int(deleted) == 1:
+            return "released"
+        log.warning("realtime_cycle_lock_not_owner")
+        return "not_owner"
 
 
 async def trigger_cycle_if_due(redis: Redis, settings: Settings) -> bool:
@@ -233,7 +293,13 @@ async def trigger_cycle_if_due(redis: Redis, settings: Settings) -> bool:
     )
     if not acquired:
         return False
-    send_task(settings, "alerts.evaluate", args=(), queue="ingest")
+    send_task(
+        settings,
+        "alerts.evaluate",
+        args=(),
+        queue="alerts",
+        expires=DATA_ARRIVAL_ALERT_EXPIRES_SECONDS,
+    )
     return True
 
 

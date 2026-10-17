@@ -136,10 +136,13 @@ class RetailService:
         )
         history: list[Decimal] = []
         cutoff = before - span
+        # The series are indexed once; each poll time then costs a few binary searches rather
+        # than a full scan of every series (same result as ``m.derivatives_proxy`` at ``t``).
+        series = m.DerivativesProxySeries(b.funding_by_asset, b.ratio_by_asset)
         for t in candidate_times:
             if t < cutoff:
                 continue
-            proxy = m.derivatives_proxy(b.funding_by_asset, b.ratio_by_asset, t)
+            proxy = series.at(t)
             if proxy.status == "ok" and proxy.account_ratio_avg is not None:
                 history.append(abs(proxy.account_ratio_avg - 1))
         return history
@@ -230,6 +233,21 @@ class RetailService:
 
     async def overview(self, *, as_of: datetime, knowledge_time: datetime) -> dict[str, Any]:
         b = await self._load(as_of, knowledge_time)
+        return {
+            **self._overview_sections(b),
+            "data_quality": await self._quality(b),
+            "not_tracked": list(NOT_TRACKED),
+        }
+
+    async def overview_score(self, *, as_of: datetime, knowledge_time: datetime) -> dict[str, Any]:
+        """``overview`` without ``data_quality`` (and its per-source job queries): every other
+        key, in the same order, with the same values. For callers that read only the scores
+        (the regime and similarity snapshot gatherers)."""
+        b = await self._load(as_of, knowledge_time)
+        return {**self._overview_sections(b), "not_tracked": list(NOT_TRACKED)}
+
+    def _overview_sections(self, b: _Bundle) -> dict[str, Any]:
+        as_of, knowledge_time = b.as_of, b.knowledge_time
         calculated_at = utc_now()
 
         derivatives = m.derivatives_proxy(b.funding_by_asset, b.ratio_by_asset, as_of)
@@ -305,8 +323,6 @@ class RetailService:
                 "meme_trending": self._percentile(meme_pct),
                 "derivatives_turnover": self._percentile(turnover_pct),
             },
-            "data_quality": await self._quality(b),
-            "not_tracked": list(NOT_TRACKED),
         }
 
     # ------------------------------------------------------------------ sentiment

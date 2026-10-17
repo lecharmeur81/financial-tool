@@ -14,7 +14,8 @@ structurally impossible to present it identically to today's proxies.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from bisect import bisect_left, bisect_right
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -59,6 +60,33 @@ class Point:
 def latest(points: Sequence[Point], as_of: datetime, tolerance: timedelta) -> Point | None:
     usable = [p for p in points if p.has_value and as_of - tolerance <= p.time <= as_of]
     return max(usable, key=lambda p: p.time) if usable else None
+
+
+class LatestIndex:
+    """``latest`` for one series, answerable many times without rescanning it.
+
+    The series is filtered to points that carry a value and stably sorted by time once; each
+    lookup is then a binary search. ``at(as_of, tolerance)`` returns exactly what
+    ``latest(points, as_of, tolerance)`` returns for the same inputs, including which point wins
+    when several share the newest time (the first of them in the original order, as ``max`` does).
+    """
+
+    __slots__ = ("_points", "_times", "lookups")
+
+    def __init__(self, points: Sequence[Point]) -> None:
+        self._points = sorted((p for p in points if p.has_value), key=lambda p: p.time)
+        self._times = [p.time for p in self._points]
+        self.lookups = 0
+
+    def at(self, as_of: datetime, tolerance: timedelta) -> Point | None:
+        self.lookups += 1
+        end = bisect_right(self._times, as_of)
+        if end == 0:
+            return None
+        newest = self._times[end - 1]
+        if newest < as_of - tolerance:
+            return None
+        return self._points[bisect_left(self._times, newest, 0, end)]
 
 
 # --------------------------------------------------------------------------- historical percentile
@@ -134,12 +162,51 @@ def derivatives_proxy(
     """Average, across every tracked perp with a fresh reading, of Binance's funding rate and
     "global" (all-account) long/short account ratio — both proxies, never retail-exclusive data
     (see module and ``retail/universe.py`` docstrings)."""
+    return _derivatives_proxy(
+        sorted(set(funding_by_asset) | set(ratio_by_asset)),
+        lambda asset: latest(funding_by_asset.get(asset, ()), as_of, DERIVATIVES_LATEST_TOLERANCE),
+        lambda asset: latest(ratio_by_asset.get(asset, ()), as_of, DERIVATIVES_LATEST_TOLERANCE),
+        as_of,
+    )
+
+
+class DerivativesProxySeries:
+    """``derivatives_proxy`` evaluated at many ``as_of`` times over the same input series.
+
+    Indexes every series once (``LatestIndex``) so each evaluation costs a few binary searches
+    instead of a full scan of every series. ``at(t)`` equals
+    ``derivatives_proxy(funding_by_asset, ratio_by_asset, t)`` for every ``t``."""
+
+    def __init__(
+        self,
+        funding_by_asset: Mapping[str, Sequence[Point]],
+        ratio_by_asset: Mapping[str, Sequence[Point]],
+    ) -> None:
+        self._assets = sorted(set(funding_by_asset) | set(ratio_by_asset))
+        self._funding = {a: LatestIndex(funding_by_asset.get(a, ())) for a in self._assets}
+        self._ratio = {a: LatestIndex(ratio_by_asset.get(a, ())) for a in self._assets}
+
+    def at(self, as_of: datetime) -> DerivativesProxy:
+        return _derivatives_proxy(
+            self._assets,
+            lambda asset: self._funding[asset].at(as_of, DERIVATIVES_LATEST_TOLERANCE),
+            lambda asset: self._ratio[asset].at(as_of, DERIVATIVES_LATEST_TOLERANCE),
+            as_of,
+        )
+
+
+def _derivatives_proxy(
+    assets: Sequence[str],
+    funding_latest: Callable[[str], Point | None],
+    ratio_latest: Callable[[str], Point | None],
+    as_of: datetime,
+) -> DerivativesProxy:
     funding_values: list[Decimal] = []
     ratio_values: list[Decimal] = []
     assets_used: list[str] = []
-    for asset in sorted(set(funding_by_asset) | set(ratio_by_asset)):
-        f = latest(funding_by_asset.get(asset, ()), as_of, DERIVATIVES_LATEST_TOLERANCE)
-        r = latest(ratio_by_asset.get(asset, ()), as_of, DERIVATIVES_LATEST_TOLERANCE)
+    for asset in assets:
+        f = funding_latest(asset)
+        r = ratio_latest(asset)
         used = False
         if f is not None and f.value is not None:
             funding_values.append(f.value)

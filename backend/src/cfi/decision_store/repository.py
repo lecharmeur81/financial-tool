@@ -13,6 +13,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from celery.exceptions import SoftTimeLimitExceeded, TimeLimitExceeded
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -111,14 +112,21 @@ class DecisionAssessmentRepository:
 async def persist_assessments_safely(
     engine: AsyncEngine, snapshot_id: int, *, created_at: datetime
 ) -> int:
-    """``record_for_snapshot`` that can never raise into the caller.
+    """``record_for_snapshot`` that never raises an *ordinary* failure into the caller.
 
     Used at the shared snapshot-insert boundary: failing to assess a snapshot must never change,
-    delay-fail or undo the creation of the snapshot itself. The failure is logged, not hidden."""
+    delay-fail or undo the creation of the snapshot itself. The failure is logged, not hidden.
+
+    A Celery time-limit signal is not a persistence failure: ``SoftTimeLimitExceeded`` and
+    ``TimeLimitExceeded`` derive from ``Exception``, so they are re-raised explicitly, otherwise the
+    caller would carry on past its time budget. (``asyncio.CancelledError`` and
+    ``KeyboardInterrupt`` are ``BaseException`` subclasses and are never caught here.)"""
     try:
         return await DecisionAssessmentRepository(engine).record_for_snapshot(
             snapshot_id, created_at=created_at
         )
+    except (SoftTimeLimitExceeded, TimeLimitExceeded):
+        raise
     except Exception:
         log.warning("decision_assessment_persist_failed", snapshot_id=snapshot_id, exc_info=True)
         return 0

@@ -2156,6 +2156,48 @@ status:            implemented (ADR-0086)
 
 ---
 
+## 5z. Investment-alert block (implemented in Phase 51 Stage 6; transient, nothing persisted)
+
+Phase 51 adds **no table, column, migration, endpoint or worker task**. Investment-alert persistence is disabled (the module constant
+`INVESTMENT_ALERT_PERSISTENCE_ENABLED` is a hard-coded `False`), so **no investment row is written to `usr.alert_event`** and no investment
+alert exists in storage. The fields below exist only in memory for one `AlertService.evaluate` call, and in one structured log event. They are
+not stored, not returned by any API route and not read by `cfi.realtime`, the dashboard, journal or paper. Experimental and not validated
+against historical outcomes (methodology `METHODOLOGY_INVESTMENT_ALERTS.md`, ADR-0087).
+
+**Transient result fields** (`cfi/alerts/service.py`, `cfi/alerts/investment_block.py`)
+
+| Field | Description |
+|---|---|
+| `EvaluationResult.investment` | `InvestmentCycleResult` or `None` (default `None`). Set by `AlertService.evaluate` once per cycle, after the 11 existing alert types are processed. Kept apart from `EvaluationResult.decisions` and from every existing counter, which describe the 11 existing types only. |
+| `InvestmentCycleResult.status` | `evaluated`, `refused` or `internal_error` (closed set). |
+| `InvestmentCycleResult.evaluation`, `.plan` | The evaluator result and the persistence-disabled lifecycle plan. Both present for `evaluated` and `refused`; both `None` for `internal_error`. `plan.persistence_enabled` is always `False`. |
+| `InvestmentCycleResult.refusal_reason` | One of the closed refusal reasons when `refused`, otherwise `None`: `snapshot_not_found`, `snapshot_row_invalid`, `decision_inputs_refused` (adapter) or `decision_contract_invalid`, `snapshot_time_invalid`, `snapshot_time_in_future`, `snapshot_identity_mismatch` (evaluator). |
+| `InvestmentCycleResult.error_class` | `module.QualName` of the contained exception when `internal_error`, otherwise `None`. Never the exception message. |
+| `InvestmentCycleResult.duration_ms` | Non-negative integer milliseconds (truncated), measured with `time.monotonic` around the block, so it includes the one stored-snapshot read. |
+
+**Log event `investment_alert_cycle`** (one per cycle; structlog; only these keys are allowed per status)
+
+| Status | Keys | Level |
+|---|---|---|
+| `evaluated` | `snapshot_id`, `status`, `class_a`, `class_b`, `class_c` (integers), `incomplete_decision_assets` (list of asset codes), `integrity_gates` (list drawn from `look_ahead`, `producer_hash`), `persistence_enabled` (always `false`), `duration_ms` | `error` if the `producer_hash` gate triggered; `warning` if another gate triggered or any asset is `incomplete_decision`; otherwise `info` |
+| `refused` | `snapshot_id`, `status`, `refusal_reason`, `refusal_detail` (name of the builder exception class for `decision_inputs_refused`, otherwise `null`), `persistence_enabled`, `duration_ms` | `warning` for `decision_inputs_refused`; `error` for every other reason |
+| `internal_error` | `snapshot_id` (`null` if not an integer), `status`, `error_class`, `duration_ms`, plus the traceback | `error` |
+
+`snapshot_id` is the `ai.snapshot` row id of the cycle's stored snapshot. Refusal and evaluated events carry no payload, identity UUID, payload
+hash, credential or exception message. **Known exposure:** the traceback of an `internal_error` event is not redacted by the key-name log
+redactor and may contain exception-message text (accepted and documented; see ADR-0087).
+
+**Reserved, not stored while persistence is disabled:** the dedup key shape `investment_state:{asset}` (alert type `investment_state`, one key per
+Phase 49 scope), the `source_tool_id` `investment_decision.v0` and the `@`-namespaced version markers in `evidence_field_ids` (methodology §10).
+
+```
+metric:            Investment-alert block result and log event (transient; no table, no API, no worker task)
+owner_phase:       51 (2026-10-12)
+status:            implemented with persistence disabled; Phase 51 not complete (see PROGRESS.md)
+```
+
+---
+
 ## 6. Metric definition template (L2)
 
 Every metric added to the system must have an entry in this form **before** it is used in a signal.

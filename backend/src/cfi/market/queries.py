@@ -14,6 +14,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from cfi.core.pit_memo import pit_revision_window
+
 BAR_COLUMNS = (
     "event_time, open, high, low, close, volume_base, volume_quote, trade_count, "
     "quality_status, quality_note, revision, available_at, ingested_at, pit_reliability, "
@@ -50,7 +52,50 @@ class MarketQueries:
         end: datetime,
         as_of: datetime,
     ) -> list[dict[str, Any]]:
-        """Latest revision per bar in [start, end), as known at ``as_of``, oldest first."""
+        """Latest revision per bar in [start, end), as known at ``as_of``, oldest first. Inside a
+        ``pit_read_scope`` this may be served from a revision window (see ``cfi.core.pit_memo``);
+        the result is identical to :meth:`_bars_sql`."""
+        return await pit_revision_window(
+            ("market.bars", series_id, provider_id),
+            self.engine,
+            start=start,
+            end=end,
+            as_of=as_of,
+            knowledge_time=as_of,
+            load=lambda s, e, cutoff: self._bar_revisions(series_id, provider_id, s, e, cutoff),
+            direct=lambda: self._bars_sql(series_id, provider_id, start, end, as_of),
+            copy_columns=("transformations",),
+        )
+
+    async def _bar_revisions(
+        self, series_id: int, provider_id: str, start: datetime, end: datetime, cutoff: datetime
+    ) -> list[dict[str, Any]]:
+        """Every revision :meth:`_bars_sql` could choose from for any ``as_of <= cutoff`` (same
+        series and range predicates; no ``DISTINCT ON``)."""
+        return await self._all(
+            f"""
+            SELECT {BAR_COLUMNS}
+              FROM obs.market_bar
+             WHERE series_id = :sid AND source_provider = :p
+               AND event_time >= :start AND event_time < :end
+               AND available_at <= :cutoff AND ingested_at <= :cutoff
+             ORDER BY event_time, revision DESC
+            """,  # noqa: S608 — column list is a constant
+            sid=series_id,
+            p=provider_id,
+            start=start,
+            end=end,
+            cutoff=cutoff,
+        )
+
+    async def _bars_sql(
+        self,
+        series_id: int,
+        provider_id: str,
+        start: datetime,
+        end: datetime,
+        as_of: datetime,
+    ) -> list[dict[str, Any]]:
         return await self._all(
             f"""
             SELECT DISTINCT ON (event_time) {BAR_COLUMNS}

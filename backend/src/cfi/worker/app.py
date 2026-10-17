@@ -448,7 +448,9 @@ def alerts_evaluate_task() -> dict[str, Any]:
             "ai_requested": result.ai_requested,
         }
 
-    return rt.run(go())
+    # run_guarded: a soft-limit interrupt must cancel and finish this cycle (releasing its lock),
+    # not leave it suspended on the worker's persistent event loop.
+    return rt.run_guarded(go())
 
 
 @app.task(name="market.backfill_round", time_limit=110, soft_time_limit=90)

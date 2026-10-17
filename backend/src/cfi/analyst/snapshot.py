@@ -27,6 +27,7 @@ from cfi.analyst.universe import KNOWN_PLATFORM_LIMITATIONS, SNAPSHOT_VERSION, T
 from cfi.core.config import Settings
 from cfi.core.errors import ComputationError
 from cfi.core.logging import get_logger
+from cfi.core.pit_memo import pit_read_scope
 
 log = get_logger(__name__)
 
@@ -165,66 +166,85 @@ async def build_snapshot(
     """Call all 14 tools once and assemble the immutable snapshot. Runs every tool even for a
     narrow user question (Phase 21 foundation scope, Section 18: establish the analyst foundation;
     a later phase can add tool *selection* without changing this snapshot's shape or field IDs)."""
-    results: list[tools.ToolResult] = [
-        await _timed(
-            "get_market_data",
-            tools.get_market_data(engine, as_of=as_of, knowledge_time=knowledge_time),
-        ),
-        await _timed(
-            "get_institutional_flows",
-            tools.get_institutional_flows(
-                engine, settings, as_of=as_of, knowledge_time=knowledge_time
+    # One memo scope per snapshot build: the regime and similarity tools make identical
+    # point-in-time domain reads for overlapping historical dates (cfi.core.pit_memo). The scope
+    # is discarded on exit, so nothing is reused across evaluations.
+    with pit_read_scope() as memo_stats:
+        results: list[tools.ToolResult] = [
+            await _timed(
+                "get_market_data",
+                tools.get_market_data(engine, as_of=as_of, knowledge_time=knowledge_time),
             ),
-        ),
-        await _timed(
-            "get_whale_activity",
-            tools.get_whale_activity(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
-        ),
-        await _timed(
-            "get_retail_activity",
-            tools.get_retail_activity(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
-        ),
-        await _timed(
-            "get_derivatives",
-            tools.get_derivatives(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
-        ),
-        await _timed(
-            "get_liquidity",
-            tools.get_liquidity(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
-        ),
-        await _timed(
-            "get_macro",
-            tools.get_macro(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
-        ),
-        await _timed(
-            "get_market_structure",
-            tools.get_market_structure(
-                engine, settings, as_of=as_of, knowledge_time=knowledge_time
+            await _timed(
+                "get_institutional_flows",
+                tools.get_institutional_flows(
+                    engine, settings, as_of=as_of, knowledge_time=knowledge_time
+                ),
             ),
-        ),
-        await _timed(
-            "calculate_divergence",
-            tools.calculate_divergence(engine, as_of=as_of, knowledge_time=knowledge_time),
-        ),
-        await _timed(
-            "get_market_regime",
-            tools.get_market_regime(engine, as_of=as_of, knowledge_time=knowledge_time),
-        ),
-        await _timed(
-            "find_historical_similar_periods",
-            tools.find_historical_similar_periods(
-                engine, as_of=as_of, knowledge_time=knowledge_time
+            await _timed(
+                "get_whale_activity",
+                tools.get_whale_activity(
+                    engine, settings, as_of=as_of, knowledge_time=knowledge_time
+                ),
             ),
-        ),
-        await _timed(
-            "get_anomalies",
-            tools.get_anomalies(engine, as_of=as_of, knowledge_time=knowledge_time),
-        ),
-        await _timed(
-            "get_capital_rotation",
-            tools.get_capital_rotation(engine, as_of=as_of, knowledge_time=knowledge_time),
-        ),
-    ]
+            await _timed(
+                "get_retail_activity",
+                tools.get_retail_activity(
+                    engine, settings, as_of=as_of, knowledge_time=knowledge_time
+                ),
+            ),
+            await _timed(
+                "get_derivatives",
+                tools.get_derivatives(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
+            ),
+            await _timed(
+                "get_liquidity",
+                tools.get_liquidity(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
+            ),
+            await _timed(
+                "get_macro",
+                tools.get_macro(engine, settings, as_of=as_of, knowledge_time=knowledge_time),
+            ),
+            await _timed(
+                "get_market_structure",
+                tools.get_market_structure(
+                    engine, settings, as_of=as_of, knowledge_time=knowledge_time
+                ),
+            ),
+            await _timed(
+                "calculate_divergence",
+                tools.calculate_divergence(engine, as_of=as_of, knowledge_time=knowledge_time),
+            ),
+            await _timed(
+                "get_market_regime",
+                tools.get_market_regime(engine, as_of=as_of, knowledge_time=knowledge_time),
+            ),
+            await _timed(
+                "find_historical_similar_periods",
+                tools.find_historical_similar_periods(
+                    engine, as_of=as_of, knowledge_time=knowledge_time
+                ),
+            ),
+            await _timed(
+                "get_anomalies",
+                tools.get_anomalies(engine, as_of=as_of, knowledge_time=knowledge_time),
+            ),
+            await _timed(
+                "get_capital_rotation",
+                tools.get_capital_rotation(engine, as_of=as_of, knowledge_time=knowledge_time),
+            ),
+        ]
+    log.info(
+        "analyst_snapshot_pit_memo",
+        hits=memo_stats.hits,
+        misses=memo_stats.misses,
+        uncached=memo_stats.uncached,
+        hits_by_name=memo_stats.hits_by_name,
+        misses_by_name=memo_stats.misses_by_name,
+        window_hits=memo_stats.window_hits,
+        window_loads=memo_stats.window_loads,
+        window_fallbacks=memo_stats.window_fallbacks,
+    )
     quality = tools.check_data_quality(results)
     results.append(quality)
     called_ids = {r["tool_id"] for r in results}

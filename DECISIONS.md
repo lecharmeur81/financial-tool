@@ -3855,3 +3855,115 @@ is 503 with the reason.
 **Consequences.** No existing contract or rule changed. On the live stack the states are currently
 `insufficient_evidence` or `no_opportunity` while macro and institutional sources are unconfigured. The state is
 research context for a human, not an instruction.
+
+## ADR-0087 — Phase 51: investment alerts are a thin, experimental layer over the Phase 49 state and the Phase 23 lifecycle
+
+**Status:** Proposed (Phase 51 Step 1, specification only, revision 6, 2026-10-11; awaiting the user's review; revision 5 applied the final-review corrections M-1, M-2, M-3; revision 6 records decisions K-1 to K-4). Design direction
+approved by the user on 2026-10-11 (decisions A-1 to A-12, clarified the same day); the rules below are provisional until the
+specification review is complete.
+
+**Current status (2026-10-12).** The Status line above is the historical Step 1 status and is kept as written. Since then the user approved the
+implementation and Stages 1 to 6 were carried out with investment-alert persistence disabled (the Stage 5 and Stage 6 paragraphs below record
+the decisions). This ADR has **not** been re-issued as Accepted: its status is a decision for the user and is pending. Phase 51 is **not**
+declared complete; the readiness record in `PROGRESS.md` ("Phase 51 readiness record (2026-10-12)") lists what is verified, what is outstanding
+and what is deferred to Phase 52.
+
+**Context.** Phase 49 (ADR-0086) classifies each asset into one of eight closed decision states. Phase 23 (ADR-0035,
+ADR-0071) provides a deterministic alert lifecycle: `alert_event.v1`, deduplication by `{alert_type}:{asset}`,
+`alert_cooldown.v1`, re-arm with supersede, and auto-resolve for flagged-state types. Phase 35 derives intelligence events and
+the AI trigger from `EvaluationResult.decisions`. Phase 50 (historical validation) is not implemented. Phase 51 Step 0
+verified data availability read-only and is closed in `PROGRESS.md`.
+
+**Decision.** `METHODOLOGY_INVESTMENT_ALERTS.md` holds the rules; this record holds the direction.
+
+*Approved direction.*
+- *Sequencing (D1).* Phase 51 proceeds without Phase 50. The methodology is experimental, unvalidated against historical
+  outcomes, makes no predictive-validity claim; Phase 50 remains a required future validation phase.
+- *Boundaries (D2).* Phase 51: backend evaluation, eligibility, persistence through the existing infrastructure, deduplication,
+  cooldown and re-arm. Phase 52: delivery, user-facing management, monitoring, visible markers, age-based expiry, any new status
+  and any automatic clearance. Under M-1 the persistence design stays in Phase 51 as specification and fakes-tested code, but is not active
+  until Phase 52 (below).
+- *Integration (A-1, A-12).* An additive block in `AlertService.evaluate` and one defaulted `EvaluationResult.investment` field; new
+  alert logic lives in new modules; `lifecycle.decide`, `AlertRepository`, `AlertCandidate`, `ALERT_TYPE_TOOL_IDS`, the 11 evaluators
+  and `_auto_resolve_cleared` are unchanged. A dedicated Phase 51 adapter (provisionally accepted) builds the Phase 49 decision from the
+  stored snapshot row with the existing by-id read and the public builders; Phase 49 behavior stays unchanged. A shared builder
+  extracted from the Phase 49 route is not proposed because its behavior preservation cannot be shown without running tests.
+- *Exposure policy (M-1, Option 3).* Investment-alert persistence is DISABLED in Phase 51. The investment block records outcomes only in
+  `EvaluationResult.investment` and one log record; it never writes or reads `usr.alert_event` for an investment key. The gate is the module
+  constant `INVESTMENT_ALERT_PERSISTENCE_ENABLED`, fixed at `False`, with no environment, configuration, database or request override; only the
+  boolean `True` enables, and enabling is a code change not permitted until Phase 52 is implemented, its prerequisites are reviewed and the user
+  approves in writing. Reason: `usr.alert_event` is also read by the dashboard, the `/alerts` page, journal and paper (`relevant_alert_ids`), none
+  designed for an experimental type. Phase 23, the dashboard, the alerts API, journal and paper are not modified. Prerequisites: methodology §18.1.
+- *Origin and isolation (A-2, A-3).* An explicit, validated `detection_method` on a distinct `InvestmentAlertCandidate`; existing
+  mappings untouched. Investment outcomes are kept out of `EvaluationResult.decisions`, so no Phase 35 event and no AI analysis can
+  arise, with no change to Phase 35 code. Tests proving this, and that the 11 existing types are unchanged, are required for Phase 51
+  acceptance. *Time limits (M-3).* The block adds bounded synchronous work before `evaluate` returns; the claim that it can never delay the cycle
+  is withdrawn. Time-limit and cancellation signals propagate and are never swallowed by the broad catch. Residual risk, not eliminated: a hard
+  termination after the 11 types persist and before Phase 35 records their events loses those events permanently; the block lengthens that window.
+- *No automatic resolution in v0 (A-5, A-6).* No investment alert is automatically resolved or expired by this layer. `no_opportunity`,
+  `insufficient_evidence`, a gate, a refusal and any unavailable evidence leave existing alerts untouched; expiry of an alert is only the
+  existing Phase 23 supersede at rearm. User-driven acknowledge and resolve through the existing API are unchanged. A clearance condition
+  (a closed whitelist of Phase 46 reasons with complete, fresh, non-adverse coverage) is recorded in the methodology as a future
+  consideration only; it is not approved and not implemented. *Known v0 limitation (M-2), accepted by the user for v0 (K-1), not a permanent design requirement, to be revisited in Phase 52:* an unchanged
+  state yields no new alert for a later episode; `created_at` and `snapshot_id` of a long-lived alert go stale; the cooldown is measured from that
+  stale `created_at`; the row carries no marker. Dormant while persistence is off.
+- *Freshness (A-7).* Freshness is the upstream per-source `fresh` status, measured on the source's own `freshness.latest`; the
+  evaluation timestamp (`now`, `created_at`, `as_of`, `knowledge_time`) is never evidence freshness. If it cannot be established the new
+  evaluation is refused and existing alerts are untouched. No age threshold is invented; any alert-layer threshold is unresolved.
+- *Cooldown (A-8).* One hour, the `alert_cooldown.v1` value, versioned and experimental, not data-derived. A post-resolution interval is deferred.
+- *Provenance (A-9).* Existing fields and `@`-namespaced markers in `evidence_field_ids`; no column and no migration is proposed because
+  none has been shown necessary; the live schema is unverified.
+- *Schema (A-10).* A read-only verification procedure is prepared as the separate artifact `PHASE51_SCHEMA_VERIFICATION_PROCEDURE.md`; it is
+  not approved and was not executed.
+
+*Provisional rules.* Five alertable states (`candidate_invalidation_triggered`, `contradicted_evidence`,
+`candidate_risk_findings_detected`, `candidate_unresolved`, `candidate_no_findings_detected`) at uniform `notable`, each verified against the
+Phase 49 classifier with its evidence and eligibility requirements; three non-alertable (`withheld_integrity_gate`, `insufficient_evidence`,
+`no_opportunity`). `critical` has no basis and `elevated` would reach the AI trigger.
+
+*Unresolved.* Any alert-layer evidence-age threshold, the clearance condition (future), the post-resolution interval, and structured
+provenance for future consumers.
+
+*Phase 49 discrepancy recorded (A-11), not changed.* The `contradicted_evidence` text includes confirmed adverse evidence but the code sends
+it to `no_opportunity`; the `no_opportunity` text ("no conflict or gap") fits only two of its four Phase 46 reasons. The specification follows
+the code.
+
+*User decisions K-1 to K-4 (2026-10-11).* K-1: the M-2 limitation is accepted for v0. K-2: the residual hard-termination risk is accepted; no
+wall-clock budget is invented, and at implementation the task and cancellation behavior is inspected, signals are propagated, work is bounded,
+duration is measured and any remaining risk is documented; hard-termination safety is not claimed. K-3: the adapter and evaluator may run while
+persistence is off, confined to `EvaluationResult.investment` and the cycle log, with no investment-alert database read or write; evaluator
+validation is distinguished from end-to-end persistence validation, which Phase 51 cannot provide. K-4: the gate stays a hard-coded `False`
+constant with no override; enabling needs the Phase 52 prerequisites, a separately approved and passed schema-verification procedure and the
+user's written approval.
+
+*Stage 5 decisions (2026-10-12).* Producer-hash policy: the adapter does **not** refuse on `producer_hash_check == "mismatch"`; the existing
+Phase 46 integrity gate already withholds every asset, which the evaluator records as class B `request_gated`, so a mismatch is fail-closed
+without a new rule and the Phase 49 parity (G38) is preserved. The Stage 2 evaluator's hash-check behavior is unchanged, and no claim is
+made that real database snapshots verify. The adapter reads through an injected reader protocol and imports no repository or
+`cfi.decision_store` module. Its three refusal reasons (`snapshot_not_found`, `snapshot_row_invalid`, `decision_inputs_refused`) are
+separate from the evaluator's four; unexpected errors, reader errors and time-limit or cancellation signals are never converted into refusals.
+
+*Stage 6 (2026-10-12).* The block `cfi.alerts.investment_block.run_investment_cycle` is wired into `AlertService.evaluate` after the 11 types and
+`_auto_resolve_cleared`, additively: a trailing optional `EvaluationResult.investment`, an injectable snapshot reader, and nothing in `decisions`.
+Ordinary errors are contained as `internal_error` (logged with traceback); `SoftTimeLimitExceeded`, `TimeLimitExceeded`,
+`asyncio.CancelledError` and `KeyboardInterrupt` propagate unrecorded. The persistence gate remains a hard-coded `False` and no writer exists.
+Documented residuals: traceback text is not redacted by the key-name redactor, and `persist_assessments_safely` could swallow a soft time limit
+(unmodified). The database-backed snapshot-path test was first written but unexecuted, with Stage 6 not to be declared complete until it ran
+against a verified disposable target under separate authorization. It has since passed on the Windows host against a disposable container
+(7 passed in 3.04 s, exit code 0, none skipped, 2026-10-12; run details in the `PROGRESS.md` entry "Stage 6 addendum — database-backed
+integration verification passed"). That closes the Stage 6 database verification item only; Phase 51 as a whole is not declared complete,
+since persistence remains disabled (Phase 52) and the A-10 schema verification has not been executed.
+
+**Alternatives.** Alerting on every state including `insufficient_evidence` (rejected); reusing the Phase 23 auto-resolve unchanged (rejected: a
+refused cycle would read as cleared); resolving on `no_opportunity` or on a whitelisted condition in v0 (rejected: Phase 46 `no_candidate`
+includes unverified support and confirmed adverse evidence, the 1/2 coverage floor lets a candidate end because evidence disappeared, and the
+safety of any clearance is unresolved); routing investment candidates through `decisions` with a filter in Phase 35 (rejected: edits Phase 35);
+a provenance column (not proposed); persisting alerts in Phase 51 with consumer filtering added in the same phase (rejected by M-1: edits Phase 23 consumers); persisting with an experimental label only (rejected by M-1: needs frontend, journal and paper changes).
+
+**Consequences.** *(Written at Step 1: "this step" is the specification step. Code was added later in Stages 1 to 6, still with no table, migration,
+route, worker or schedule change; see the Stage 5 and Stage 6 paragraphs above.)* No code, table, migration, route, worker or schedule changes in this step. While the gate is off, no investment row is written, so no existing consumer can see one; the lifecycle (dedup, cooldown, re-arm) is exercised on fakes only and is unverified against the live schema until Phase 52. Phase 51 acceptance cannot show alerts on the live stack. On live data the states are currently
+`insufficient_evidence` or `no_opportunity`, so no investment alert would be created today. Because nothing is resolved automatically, an alert
+whose state has ended stays active until a user resolves it or another alertable state replaces it; an investment alert records an observation at its
+creation time, not a current state. Index convention: the index table at the top of this file lists ADR-0001 to ADR-0050; ADR-0051 to ADR-0086
+are recorded only as sections with a `Status` line. ADR-0087 follows that practice and no index row is added. Phase 51 implementation requires a
+separate approval (R13). *(Step 1 statement; the implementation was subsequently approved and carried out in Stages 1 to 6. Enabling persistence still needs the Phase 52 prerequisites and the user's written approval.)*

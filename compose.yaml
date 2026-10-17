@@ -143,6 +143,23 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  worker-alerts:
+    build: *backend-build
+    image: cfi-backend:dev
+    command: ["celery", "-A", "cfi.worker.app", "worker", "-Q", "alerts",
+              "--concurrency=1", "--max-tasks-per-child=1",
+              "--hostname=alerts@%h", "--loglevel=INFO"]
+    environment: *backend-env
+    volumes:
+      - rawarchive:/data/raw
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 130s
+
   beat:
     build: *backend-build
     image: cfi-backend:dev

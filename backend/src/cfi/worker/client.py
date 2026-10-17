@@ -29,7 +29,21 @@ def _client(settings: Settings) -> Celery:
     return _producer
 
 
-def send_task(settings: Settings, name: str, *, args: tuple[object, ...], queue: str) -> None:
+def send_task(
+    settings: Settings,
+    name: str,
+    *,
+    args: tuple[object, ...],
+    queue: str,
+    expires: float | None = None,
+) -> None:
     """Enqueue ``name`` with ``args`` on ``queue``. Fire-and-forget (``task_ignore_result`` on the
-    real worker app, mirrored here by never waiting on a result)."""
-    _client(settings).send_task(name, args=args, queue=queue)
+    real worker app, mirrored here by never waiting on a result).
+
+    ``expires`` (seconds from now, optional): a worker that receives the message after that
+    deadline discards it unrun. When omitted, no ``expires`` is passed at all, so every existing
+    caller publishes exactly as before."""
+    if expires is None:
+        _client(settings).send_task(name, args=args, queue=queue)
+    else:
+        _client(settings).send_task(name, args=args, queue=queue, expires=expires)

@@ -3889,3 +3889,304 @@ overlap and are not independent confirmation. On the live stack the states are c
 
 **Next step:** awaiting the user's review and approval to commit (R13). The next phase is **Phase 50**; it has not
 been started.
+
+## Phase 51 — Step 0 closure record (2026-10-11)
+
+**Status:** Step 0 (read-only data and census verification) is closed with the limitations below. Phase 51 itself has
+not been started; Step 1 requires a separate approval. This entry records evidence only. No application code, schema,
+migration, data or configuration was changed, and nothing was committed by Step 0.
+
+**Documentation basis.** No complete written Phase 51 acceptance specification was found in the project documentation
+that was reachable. The acceptance basis was the criteria agreed during the Step 0 work (Pass 1 plan evidence, a
+fixed-statement read-only Pass 2, and a Q6 comparison with the Phase 50 census). A separate written specification, if
+one exists, takes precedence over this record.
+
+### 1. Evidence
+
+- **Pass 1 report (EXPLAIN only, 14 statements, run 2026-10-11T08:20Z):**
+  `E:\p51_step0\out\p51s0-20261011T082044Z-8cd1989b\report\p51_step0_pass1_plans.txt` (168 lines, 14,898 bytes),
+  SHA-256 `c0dd3713934ab67b76e0c412537575b1aca00819576d28977367ec69d6ba07d0` (verified; equals the hash in that
+  attempt's `VALIDATION.txt`).
+- **Pass 2 report (four SELECTs):**
+  `E:\p51_step0\out\p51s0p2-20261011T115906Z-764b11e0\report\p51_step0_pass2_report.txt`,
+  SHA-256 `6b3b09cde8ac766a3a1fb58a9ec7dbf0cf37069a0c699a2d63e1344f9a7cfbd1` (recorded by the user as
+  `6B3B09CDE8AC766A3A1FB58A9EC7DBF0CF37069A0C699A2D63E1344F9A7CFBD1`; not independently re-hashed or opened by the
+  assistant).
+- **Files used (verified in `E:\p51_step0\work` after the run):**
+  `p51_step0_pass2_runner.py` `9c8d2d2679f031091dda84d434ca264e366ee2ae7acc75e82681cf8a416e1e91`;
+  `p51_step0_runner.py` `71e4d5eb278da1ddc1e81ba0f58176fe1c525c8dc5aceee54bc496a2ff7ac98d`;
+  `p51_step0_statements.py` `c052a97331a4f8341dd890e9e904a18ecd2a95ad8561f839b4da61b51a5becee`;
+  `phase50_census.py` `67d3be9f1d85a21d5a3190c0d866d16f7df19641d94c6650cfa80eaa0c28345c`.
+- **Pass 2 wrapper:** not recorded. No execution evidence available to the assistant shows which wrapper version ran.
+  Reviewed candidates, for reference only: `Run-P51Step0Pass2.ps1` `f589df0ab6ddb2b93c5ea8eddac21e46517a18f909461a1cf0a52361d011d9ce`
+  and the corrected `Run-P51Step0Pass2.fixed.ps1` `5264b5d3d2817efe5cb12a5ef3e8ad9dff15e29c2e5a6541e883fdb9b388516b`.
+
+### 2. Execution and read-only confirmation
+
+- **Pass 1:** EXPLAIN only, no ANALYZE. Its attempt validation recorded exit code 0, empty stdout and stderr, the
+  identity line, and the 14 expected sections in order.
+- **Pass 2 (reported by the user):** completed successfully in read-only mode. Its design runs each statement in its
+  own READ ONLY transaction that is rolled back and never committed.
+- **The four fixed SELECTs:** Q0b (series mapping), Q1 (snapshot counts and range), Q5c (focus-bar precondition,
+  2026-10-01 to 2026-10-10 exclusive), Q6 (census entry-bar reproduction for the 20 oldest snapshots), taken unmodified
+  from the hash-pinned statements file.
+- **Not permitted and not done:** writes, DDL, EXPLAIN ANALYZE, any other statement, application-code changes.
+
+### 3. Q6 result
+
+- **Recorded:** 80 rows (20 snapshots x 4 series); 24 `no_pit_known_revision_for_expected_bar` and 56
+  `census_entry_bar_ok`.
+- **Aggregate consistency (verified against the census report):** the 24 non-OK rows equal the census's 24 of 80 drawdown
+  `missing_entry_bar`.
+- **Per-snapshot equivalence with the Phase 50 census has NOT been established.** The census report holds no per-snapshot
+  ids, timestamps or entry statuses, so only the aggregate can be compared.
+
+### 4. Q5c (event times 2026-10-01 to 2026-10-10, exclusive), as recorded
+
+| Series | stored_rows | off_midnight_utc | no_close | revision_gt_0 |
+|---|---|---|---|---|
+| BTC | 9 | 0 | 0 | 0 |
+| ETH | 9 | 0 | 0 | 0 |
+| SOL | 9 | 0 | 0 | 0 |
+| XRP | 9 | 0 | 0 | 0 |
+
+All four series have 9 rows in the October 1–9 window, with no off-midnight timestamps, missing closes, or revised
+rows. These results satisfy the stated Q6 precondition within that window.
+
+### 5. The 285-row XRP finding
+
+- **Census:** 285 XRP rows with `close IS NULL`. The census query had no event-time or cutoff filter and counted every
+  stored row at its run (2026-10-10T14:09Z).
+- **Q5c:** XRP `no_close = 0` for the October 1–9 window.
+- **Decision:** a scope difference (whole stored history against the October 1–9 window). No further investigation is
+  required for this discrepancy and no recount is planned.
+- **Supporting arithmetic (from the census report):** XRP has 2,164 rows, of which 1,879 are `ok` and 285 are `missing`;
+  the 904 days without a close in the 2,783-day span equal those 285 rows plus 619 days with no row.
+- **Not established:** the dates of the 285 rows, and whether they are provider gaps or ingestion placeholders.
+
+### 6. Limitations and decision
+
+**Known limitations.**
+- Aggregate consistency only; per-snapshot equivalence is not established.
+- No complete written Phase 51 acceptance specification was found (see above).
+- The census focus series come from the 20 oldest snapshots and are not an exhaustive asset list.
+- Q6's window and cutoff clauses were treated as non-binding from table-wide `created_at` minimum and maximum;
+  individual snapshot timestamps were not inspected.
+- The Pass 2 wrapper checks report shape only and does not judge the data. Which wrapper version ran is not recorded.
+- The Pass 2 report was not opened by the assistant; its figures rest on the user's record.
+- Thresholds, methodology and any Phase 51 alert logic are untouched by Step 0.
+
+**Decision:** Phase 51 Step 0 is closed as complete with the limitations above. No database, code or commit action
+follows from this record.
+
+**Next step:** awaiting the user. Step 1 has not been started and requires a separate approval.
+
+## Phase 51 — Step 1: investment alerts specification (2026-10-11, revision 6)
+
+**Scope (as approved).** Documentation only. D1 (proceed without Phase 50, experimental and unvalidated, no predictive claim), D2 (Phase 51 =
+backend evaluation, eligibility, persistence, dedup, cooldown, re-arm; Phase 52 = delivery, user-facing management, monitoring), D3 (draft for
+review), decisions A-1 to A-12 and the clarification of 2026-10-11 (not approval to implement). Revision 5 applies the final-review corrections
+M-1, M-2, M-3 and m-1 to m-6. Revision 6 records the user's decisions K-1 to K-4 and a final contradiction check (no design change).
+
+**Decisions recorded (2026-10-11).** K-1: M-2 limitation accepted for v0, Phase 52 must revisit. K-2: residual hard-termination risk accepted; no budget
+invented; inspect, propagate, bound and measure at implementation; no safety guarantee claimed. K-3: evaluator and adapter may run while persistence
+is off, confined to `EvaluationResult.investment` and the cycle log, no investment-alert DB read or write; evaluator validation is distinct from
+end-to-end persistence validation. K-4: gate hard-coded `False`, no override; enabling needs §18.1, a separately approved and passed §19 and written approval.
+
+**Delivered.**
+- `METHODOLOGY_INVESTMENT_ALERTS.md` (new, revision 6): rules tagged as existing contract, approved direction, provisional rule, unresolved or
+  extension; the §4 boundary (dedicated adapter provisionally accepted, Phase 49 unchanged); **§4.1 persistence gate: investment-alert persistence
+  disabled in Phase 51** with the Phase 52 prerequisites in §18.1; per-state evidence and eligibility requirements; no automatic resolution in v0
+  with its consequences stated (§8.1.1, accepted for v0 by K-1); non-overlapping outcome classes A/B/C; the upstream evidence-freshness
+  requirement with fail-closed behavior; Phase 35 and AI isolation; bounded work, signal propagation and the residual hard-termination risk (§11);
+  55 golden fixtures (G01 to G55); the decisions that remain.
+- `PHASE51_SCHEMA_VERIFICATION_PROCEDURE.md` (new): the proposed read-only catalog verification, now with the privilege-visibility caveat for
+  `information_schema.columns`. Not approved, not executed.
+- `DECISIONS.md`: ADR-0087 (Proposed, revision 6). No index row: the index covers ADR-0001 to ADR-0050 only.
+- This entry. The Step 0 closure record above is unchanged.
+
+**Not done.** No SQL, database connection, Docker, application-code change, test run, migration, staging or commit. Phase 50, Phase 52 and the
+implementation are not started.
+
+**Known limitations.** Experimental and unvalidated; Step 0 limitations carried forward (aggregate-only Q6 consistency, non-exhaustive census
+series, unrecorded Pass 2 wrapper version, Pass 2 report not opened by the assistant); live states today would create no alert; persistence is
+disabled in Phase 51, so the lifecycle is verified on fakes only; with no automatic resolution an alert whose state has ended would stay active,
+without a marker, until a user resolves it or another alertable state replaces it, and an unchanged state would not produce a new alert for a later
+episode (M-2, accepted for v0 by K-1); a hard termination between existing alert persistence and Phase 35 event recording remains a residual risk (M-3).
+
+**Next step:** awaiting the user's review of revision 6. Phase 51 implementation has not been approved or started (R13).
+
+## Phase 51 — Stage 6: investment-alert block integration (2026-10-12) — implemented, NOT fully complete
+
+**Status.** Stage 6 implementation is present. Non-database validation has passed. The database-backed integration tests I-01 to I-07 have **not**
+been executed, and database-backed validation is deferred until a disposable database target has been verified and explicitly authorized.
+Stage 6 is implemented but **not fully complete**; neither Stage 6 nor Phase 51 is validated end to end or closed. This entry is additive: the
+Step 0 and Step 1 records above (including the Step 1 line saying implementation had not started) are unchanged and describe their own dates.
+Stage 4 (the persistence writer) remains deferred to Phase 52.
+
+**Delivered (files).**
+- `backend/src/cfi/alerts/investment_block.py` (new): `run_investment_cycle`; ordinary errors are contained as `internal_error`, and
+  `SoftTimeLimitExceeded`, `TimeLimitExceeded`, `asyncio.CancelledError` and `KeyboardInterrupt` are re-raised unrecorded.
+- `backend/src/cfi/alerts/service.py` (modified, additive): one call after `_auto_resolve_cleared`, a trailing `EvaluationResult.investment`
+  field and an injectable `snapshot_reader`. Nothing is added to `decisions`; the 11 alert types are unchanged.
+- `backend/tests/unit/test_investment_block.py` and `backend/tests/unit/test_alert_service_investment.py` (new).
+- `backend/tests/integration/test_investment_alert_snapshot_path.py` (new, written, **not executed**): skipped unless
+  `CFI_P51_DB_TEST_CONFIRM` equals the derived `<database>_test` name.
+- `METHODOLOGY_INVESTMENT_ALERTS.md` and `DECISIONS.md` (ADR-0087): additive Stage 6 notes only; no decided rule changed.
+- Two test-only portability fixes in `test_investment_block.py` for test B-14 on Windows: `os.pathsep` for `PYTHONPATH`, and a child
+  environment copied from `os.environ` with only `PYTHONPATH` and `PYTHONDONTWRITEBYTECODE` overridden. No production change.
+
+**Validation performed (non-database).**
+- Linux VM (Python 3.12.14): `test_investment_block.py` 126 passed; `test_alert_service_investment.py` 34 passed; Stage 1–5 files 160, 212,
+  134 and 120 passed (626 in total); the 135-test baseline passed; Ruff check and format clean; strict mypy no issues in 483 source files;
+  `git diff --check` clean.
+- Windows (isolated `p51_venv`, run by the user): B-14 focused tests 2 passed and `test_investment_block.py` 126 passed after the two
+  portability fixes. The earlier Windows run of Stages 1–5 (120, 212, 134, 160, baseline 135, strict mypy over 479 files) predates Stage 6.
+  Windows runs of the new service tests and of the full Stage 6 static checks are not recorded here.
+
+**Not done.** No PostgreSQL, TimescaleDB or Redis connection; I-01 to I-07 not run; `CFI_P51_DB_TEST_CONFIRM` never set; no persistence writer;
+the persistence gate is still the hard-coded `False`; nothing staged or committed.
+
+**Known limitations and residual risks.** Everything above is validated on fakes and in memory only, so reading a real stored snapshot, its hash
+and identity checks, and the "no writes" property are unverified until I-01 to I-07 run. Traceback text in `internal_error` logs is not redacted
+(the redactor works by key name). `persist_assessments_safely` could swallow a soft time limit (documented, not modified). The M-3
+hard-termination risk is unchanged and accepted (K-2); the block's run time was not measured, and hard-termination safety is not claimed.
+
+**Next step:** awaiting the user. Full completion needs, first, verification that the target database is disposable and outside the live or
+development stack, with the required infrastructure and privileges, and then separate explicit authorization to set the confirmation variable
+and run I-01 to I-07. Staging or committing, if wanted, should be done path by path, preserving `Run-P51Step0Pass1.ps1` and `scratch/`.
+
+**Stage 6 addendum — database-test gate hardened (2026-10-12).** Still implemented but NOT fully complete: I-01 to I-07 have not been
+executed, no isolated database environment has been created, no container was started and no connection was made. The confirmation gate of
+`test_investment_alert_snapshot_path.py` is now `evaluate_gate`: the module is skipped unless `CFI_P51_DB_TEST_CONFIRM` is exactly
+`p51_scratch_test`, `CFI_DATABASE_URL` parses with host `127.0.0.1` or `localhost`, port `55432`, database `p51_scratch`, no query
+parameters, and `CFI_DATABASE_URL_RUNTIME` is unset or blank. It is evaluated through a `skipif` mark, which runs before the session fixture
+that drops and recreates `<db>_test`. New connection-free tests are in `backend/tests/unit/test_p51_integration_gate.py`. The requirements
+for the disposable target are in `PHASE51_SCHEMA_VERIFICATION_PROCEDURE.md` section 9. Remaining: create and verify the isolated container
+(decisions pending with the user), then separate authorization to set the confirmation variable and run I-01 to I-07.
+
+**Stage 6 addendum — database-backed integration verification passed (2026-10-12).** This entry supersedes the statements above that I-01 to
+I-07 were not executed, that no isolated environment existed and that no connection had been made; those statements were accurate when written
+and are left unchanged as history. The following was reported by the user from an actual Windows PowerShell run (it was not executed by the
+assistant):
+- Test file `backend/tests/integration/test_investment_alert_snapshot_path.py`; working directory `E:\FINANCIAL TOOL\backend`; command
+  `python -m pytest tests/integration/test_investment_alert_snapshot_path.py -m integration -p no:cacheprovider -q`.
+- Result: **7 passed in 3.04 s, exit code 0**. I-01 to I-07 all ran; none were skipped, so the hardened gate (`evaluate_gate`) passed.
+- Target: the separately created disposable PostgreSQL/TimescaleDB container `p51-test-db`, database `p51_scratch` (fixture-derived test
+  database `p51_scratch_test`), on `127.0.0.1:55432`, with its own dedicated volume `p51_test_pgdata`. The existing application containers and
+  the persistent database volume were not touched.
+- After the run the temporary environment variables (including the confirmation variable and the test password) were removed from the
+  PowerShell session. No credentials are recorded here. Nothing was staged or committed.
+
+*What this verifies.* On a real stored `ai.snapshot` row, read through the real `DecisionAssessmentRepository`: the snapshot is fetched by id
+and not by recency; the adapter accepts it; the payload hash and identity checks hold; the evaluator does not refuse; a missing snapshot, an
+integrity mismatch and an unsupported payload cannot yield a candidate; and the block writes nothing (`usr.alert_event` and `ai.snapshot`
+counts unchanged). This closes the Stage 6 database-backed verification item that was open. Stage 6 is therefore implemented and verified
+against a disposable database under the checks recorded above.
+
+*What remains open (not completed by this result).*
+- The persistence gate is still the hard-coded `False` and no writer exists (Stage 4, Phase 52). Alert persistence, deduplication, cooldown and
+  re-arm are verified on in-memory fakes only; they have not been tested against the live schema or existing consumers.
+- The read-only schema verification (A-10, `PHASE51_SCHEMA_VERIFICATION_PROCEDURE.md` sections 1 to 8) is a separate proposal that was not
+  approved and has not been executed. The disposable-database run above migrated a fresh database to head; it is not that verification on the
+  development or live schema.
+- Live states are `insufficient_evidence` or `no_opportunity`, so no investment alert would be created on live data today.
+- Accepted residual risks are unchanged: M-3 hard termination (block run time not measured, hard-termination safety not claimed), unredacted
+  traceback text in `internal_error` logs, and `persist_assessments_safely` possibly swallowing a soft time limit.
+- Windows runs of the new service tests and the full Stage 6 static checks, and the final Windows run of the gate unit tests, are not
+  recorded here.
+- This result does not close Phase 51 as a whole; no acceptance specification supporting that conclusion was found (see the Step 1 limitations).
+
+**Stage 6 addendum — K-2 offline evaluation-duration benchmark recorded (2026-10-12).** This supersedes the earlier statements that the block's
+run time was not measured. It records one offline measurement; it does not close K-2 or Phase 51.
+- *What was measured.* The real Phase 51 path (the seven decision builders, the evaluator, the lifecycle planner and the full
+  `run_investment_cycle`) on existing fixture payloads, with an in-memory reader and a no-op logger: 100 warm-up calls, then 5 repeats of 500
+  measured calls per stage (`time.perf_counter_ns`), one cold call first. Python 3.12.14 on a Linux VM (Intel i9-10980HK, 2 usable cores,
+  about 4 GB RAM), run inside `unshare --net --map-root-user`. All three workloads completed (exit code 0).
+- *Full-block results (single-thread CPU time).*
+
+  | Workload | Median | p99 |
+  |---|---:|---:|
+  | W-A candidate path (2 class A, 2 class C) | 8.909 ms | 17.594 ms |
+  | W-B live-shaped path (4 class C) | 8.610 ms | 15.939 ms |
+  | W-C integrity-gate path (4 class B) | 7.373 ms | 12.763 ms |
+
+- *Where the time goes.* The seven decision builders dominate (medians 7.4 to 9.2 ms). The alert evaluator (about 16 to 81 microseconds) and the
+  lifecycle planner (about 8 to 11 microseconds) together take under 0.1 ms, about 1% of the block.
+- *Instrumentation overhead (limitation).* The isolation guard is a CPython audit hook that fires on `builtins.id` events inside the builders
+  (2,644 events per warm builder call; about 0.5 microsecond per event). This adds an estimated 1.3 to 1.5 ms (roughly 13 to 17%) to the builder
+  and full-block stages, so those figures are upper-end estimates. The evaluator and planner are barely affected. A run without the hook was
+  not performed.
+- *Interpretation.* These are indicative, isolated-workload measurements on one small VM with fixture payloads (3.7 and 6.2 KB). They exclude
+  the database read, the rest of the alert cycle (the 11 alert types, snapshot insert, event recording, AI queueing), contention and
+  production latency. They are not production latency or worst-case guarantees, no performance budget is set or implied, and hard-termination
+  safety is not claimed (M-3 unchanged).
+- *Checks that passed in that run.* The guard self-test (a socket, a socketpair, a network connection, a name lookup, a subprocess and an
+  `.env` open were all blocked), the empty network namespace, the environment check (no database, Redis or Phase 51 variables set), unchanged
+  source payloads for all three workloads, and identical outputs on every iteration. No database, Redis, Docker or network service was
+  contacted, and no project file, environment variable or Git state was changed. Stability: the repeat-to-repeat spread of medians was
+  1.8 to 7.4% for the builders and full block, except W-B's builders (21.8%); W-B's planner (96.9%) is dominated by noise at about 10 microseconds.
+- *Artifacts (not in the repository).* The benchmark script, `p51_k2_results.json` and `run.log` are in the separate Linux workspace used by
+  the assistant, at `$HOME/p51_k2_bench/` (script `p51_k2_bench.py`, results `p51_k2_results.json`, console output `run.log`). They are not on
+  the Windows disk or in `E:\FINANCIAL TOOL`, and they may be lost when that workspace session ends; the figures above are the durable record.
+- *Status.* This satisfies the offline-measurement part of the K-2 implementation duty only. K-2 and Phase 51 are not declared closed: the
+  completion-readiness audit items (existing integration suites that call `AlertService.evaluate`, the suite-wide run, and the Windows
+  evidence for Stage 6) and the Phase 52 prerequisites (P7 re-measurement with the gate on) still apply.
+
+## Phase 51 readiness record (2026-10-12) — NOT complete
+
+This is the consolidated Phase 51 record. It supersedes, without altering, the earlier Step 0, Step 1 and Stage 6 entries above: statements in
+them such as "implementation has not been approved or started" or "I-01 to I-07 not executed" were accurate when written. **Phase 51 is not
+declared complete.** Nothing here was re-run in this entry; it summarizes evidence recorded above.
+
+**Completed work (all with investment-alert persistence disabled).**
+- Step 0 (data and census verification, closed with limitations) and Step 1 (specification `METHODOLOGY_INVESTMENT_ALERTS.md` revision 6, ADR-0087,
+  decisions K-1 to K-4).
+- Stages 1 to 5 and Stage 6 of the implementation: `cfi/alerts/investment_alerts.py` (types, gate, evaluator, lifecycle planner),
+  `investment_adapter.py` (stored snapshot row to `investment_decision.v0`), `investment_block.py` (the per-cycle block), and the additive wiring in
+  `cfi/alerts/service.py` (`EvaluationResult.investment`, injectable reader). The 11 existing alert types, Phase 35 and every consumer of stored
+  alerts are unchanged. Stage 4 (the persistence writer) was deliberately not built.
+- Test files: `test_investment_alerts_types_gate.py`, `_evaluator.py`, `_lifecycle.py`, `test_investment_adapter.py`, `test_investment_block.py`,
+  `test_alert_service_investment.py`, `test_p51_integration_gate.py` (unit) and `tests/integration/test_investment_alert_snapshot_path.py`.
+- Documentation: methodology, ADR-0087, `PHASE51_SCHEMA_VERIFICATION_PROCEDURE.md` (including section 9 for the disposable test environment),
+  `DATA_DICTIONARY.md` section 5z, and the K-2 benchmark record above.
+
+**Verified evidence (environment and date).**
+- Linux VM, Python 3.12.14, 2026-10-12: new block tests 126, service tests 34, gate tests 43; Stage 1 to 5 files 120, 212, 134 and 160 (626); the
+  135-test baseline; Ruff check and format clean; strict mypy over 484 source files; `git diff --check` clean (at the last code change; documentation
+  edits since touch only Markdown).
+- Windows, isolated `p51_venv`, reported by the user: Stages 1 to 5 files, the 135 baseline and strict mypy over 479 files (before Stage 6); after the
+  B-14 portability fixes, B-14 2 passed and `test_investment_block.py` 126 passed; **I-01 to I-07: 7 passed in 3.04 s, exit code 0, none skipped**,
+  against the disposable container `p51-test-db` (database `p51_scratch`, derived `p51_scratch_test`, `127.0.0.1:55432`, volume `p51_test_pgdata`),
+  with the temporary variables and test password cleared afterwards.
+- K-2 offline benchmark (above): full-block medians 7.4 to 8.9 ms and p99 12.8 to 17.6 ms on fixtures, including an estimated 1.3 to 1.5 ms of
+  audit-hook overhead; indicative CPU time only.
+- Persistence: `INVESTMENT_ALERT_PERSISTENCE_ENABLED` is `Final = False` (`investment_alerts.py:93`), referenced only in `investment_alerts.py` and
+  `investment_block.py`; no writer exists.
+
+**Outstanding requirements before Phase 51 can be considered complete (none satisfied yet).**
+1. The existing integration suites that call `AlertService.evaluate` (`test_alerts_service.py`, `test_json_datetime_serialization.py`, and
+   `test_realtime_service.py`, which also needs a disposable Redis) have not been run since Stage 6. Running them needs the user's explicit authorization
+   of the exact commands, a confirmed disposable target, and for the realtime file a disposable Redis; deferring the realtime file would need a recorded
+   reason.
+2. A backend-wide run equivalent to the CI step `uv run pytest` has not been executed since Stage 6. The CI recipe points at the same ports as the local
+   compose stack, so it must not be run locally as written; the safe form is the suite with no service variables set (integration modules skip), and an
+   optional run against disposable database and Redis only, which needs a fresh authorization.
+3. Windows verification of the Stage 6 service tests, the gate tests, the post-Stage-6 135 baseline, Ruff, format and strict mypy (484 files) is not
+   recorded.
+4. The status of ADR-0087 (currently its historical "Proposed" line plus a current-status note) is a decision for the user.
+5. How and when to stage and commit (path by path; `CLAUDE.md` C1 and C2 expect a commit hash in the phase report) is a decision for the user. Nothing
+   is staged or committed.
+
+**Residual risks (accepted or documented, not removed).** M-3 hard termination after the 11 types persist and before Phase 35 records their events
+(K-2; hard-termination safety not claimed); traceback text in `internal_error` logs is not redacted; `persist_assessments_safely` can swallow a soft
+time limit (unmodified); lifecycle behavior against the live schema and existing consumers is unverified; live states today would create no
+investment alert; the methodology is experimental and not validated against historical outcomes; the benchmark artifacts exist only in a temporary
+workspace and the figures recorded above are the durable record.
+
+**Deferred to Phase 52 or later (unchanged; not satisfied here).** Enabling persistence and the writer (Stage 4), subject to all of methodology
+section 18.1 (P1 to P8) and the user's written approval; the read-only schema verification A-10 (three separate approvals: the procedure, an
+offline-tested runner, the execution), which is prerequisite P5; the M-2 lifecycle review; delivery, presentation, monitoring and the Phase 35
+stance; the P7 time-budget remeasurement with the gate on; Phase 50 historical validation.
+
+**Next step:** awaiting the user (R13). Phase 52 has not been started.

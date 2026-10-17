@@ -101,7 +101,9 @@ class MarketStructureService:
         rows = await self.queries.bars(series_id, VENUE.provider_id, start, end, as_of)
         return m.bars_from_rows(rows)
 
-    async def _load(self, as_of: datetime, knowledge_time: datetime) -> _Bundle:
+    async def _load(
+        self, as_of: datetime, knowledge_time: datetime, *, include_total_cap: bool = True
+    ) -> _Bundle:
         b = _Bundle(as_of, knowledge_time)
         for asset in STRUCTURE_ASSETS:
             bars = await self._asset_bars(asset, as_of)
@@ -122,6 +124,8 @@ class MarketStructureService:
                 continue
             ab.relative_strength = m.relative_strength(ab.bars, benchmark_bars)
 
+        if not include_total_cap:
+            return b
         start, end = as_of - LOAD_SPAN, as_of + timedelta(seconds=1)
         b.total_cap_rows = await self.queries.observations(
             TOTAL_MARKET_CAP_USD.dataset_id,
@@ -212,19 +216,6 @@ class MarketStructureService:
 
     async def overview(self, *, as_of: datetime, knowledge_time: datetime) -> dict[str, Any]:
         b = await self._load(as_of, knowledge_time)
-        calculated_at = utc_now()
-
-        above_sma50 = {
-            asset: (
-                None
-                if ab.moving_averages is None
-                or ab.moving_averages.close is None
-                or ab.moving_averages.sma50 is None
-                else ab.moving_averages.close > ab.moving_averages.sma50
-            )
-            for asset, ab in b.assets.items()
-        }
-        breadth = m.market_breadth(above_sma50)
 
         total_rows = [r for r in b.total_cap_rows if r["value"] is not None]
         latest_total = max(total_rows, key=lambda r: r["event_time"], default=None)
@@ -241,6 +232,39 @@ class MarketStructureService:
         )
 
         eth_btc = m.eth_btc_ratio(b.assets["ETH"].bars, b.assets[BENCHMARK_ASSET].bars)
+
+        sections = self._overview_sections(b)
+        return {
+            **sections,
+            "total_cap_family": self._total_family(total_family),
+            "eth_btc": self._eth_btc(eth_btc),
+            "data_quality": await self._quality(b),
+            "not_tracked": list(NOT_TRACKED),
+        }
+
+    async def overview_score(self, *, as_of: datetime, knowledge_time: datetime) -> dict[str, Any]:
+        """``overview`` without ``total_cap_family``, ``eth_btc`` and ``data_quality`` (and the
+        total-market-cap, market-cap and per-source job queries behind them): every other key, in
+        the same order, with the same values. For callers that read only the score, per-asset
+        readings and breadth (the regime and similarity snapshot gatherers)."""
+        b = await self._load(as_of, knowledge_time, include_total_cap=False)
+        return {**self._overview_sections(b), "not_tracked": list(NOT_TRACKED)}
+
+    def _overview_sections(self, b: _Bundle) -> dict[str, Any]:
+        as_of, knowledge_time = b.as_of, b.knowledge_time
+        calculated_at = utc_now()
+
+        above_sma50 = {
+            asset: (
+                None
+                if ab.moving_averages is None
+                or ab.moving_averages.close is None
+                or ab.moving_averages.sma50 is None
+                else ab.moving_averages.close > ab.moving_averages.sma50
+            )
+            for asset, ab in b.assets.items()
+        }
+        breadth = m.market_breadth(above_sma50)
 
         btc = b.assets[BENCHMARK_ASSET]
         assert btc.moving_averages is not None  # noqa: S101
@@ -268,10 +292,6 @@ class MarketStructureService:
             "score": self._score(score),
             "assets": {asset: self._asset(ab) for asset, ab in b.assets.items()},
             "market_breadth": self._breadth(breadth),
-            "total_cap_family": self._total_family(total_family),
-            "eth_btc": self._eth_btc(eth_btc),
-            "data_quality": await self._quality(b),
-            "not_tracked": list(NOT_TRACKED),
         }
 
     # ------------------------------------------------------------------ sections

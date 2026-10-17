@@ -17,6 +17,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from cfi.core.pit_memo import pit_read
 from cfi.divergence.adapters import Adapters
 from cfi.macro.queries import MacroQueries
 from cfi.macro.service import MacroService
@@ -63,22 +64,75 @@ async def gather_snapshot(
     """Fetch the current reading of every metric a regime condition can reference. Each read goes
     through the owning domain's own already-tested public service method — nothing here queries
     the database directly (see module docstring)."""
-    institutional = await adapters.institutional().score(
-        asset=asset, as_of=as_of, knowledge_time=knowledge_time
+    engine = adapters.engine
+    institutional = await pit_read(
+        "institutional.score",
+        engine,
+        asset,
+        as_of,
+        knowledge_time,
+        call=lambda: adapters.institutional().score(
+            asset=asset, as_of=as_of, knowledge_time=knowledge_time
+        ),
     )
-    whale = await adapters.whales().score(asset=asset, as_of=as_of, knowledge_time=knowledge_time)
-    retail = await adapters.retail().overview(as_of=as_of, knowledge_time=knowledge_time)
-    liquidity = await adapters.liquidity().overview(as_of=as_of, knowledge_time=knowledge_time)
-    derivatives = await adapters.derivatives().asset(
-        asset=asset, as_of=as_of, knowledge_time=knowledge_time
+    whale = await pit_read(
+        "whales.score",
+        engine,
+        asset,
+        as_of,
+        knowledge_time,
+        call=lambda: adapters.whales().score(
+            asset=asset, as_of=as_of, knowledge_time=knowledge_time
+        ),
+    )
+    # Only the two Retail scores are consumed below, so skip the data-quality section (and its
+    # per-source job queries); ``overview_score`` is otherwise identical to ``overview``.
+    retail = await pit_read(
+        "retail.overview",
+        engine,
+        as_of,
+        knowledge_time,
+        call=lambda: adapters.retail().overview_score(as_of=as_of, knowledge_time=knowledge_time),
+    )
+    liquidity = await pit_read(
+        "liquidity.overview",
+        engine,
+        as_of,
+        knowledge_time,
+        call=lambda: adapters.liquidity().overview(as_of=as_of, knowledge_time=knowledge_time),
+    )
+    derivatives = await pit_read(
+        "derivatives.asset",
+        engine,
+        asset,
+        as_of,
+        knowledge_time,
+        call=lambda: adapters.derivatives().asset(
+            asset=asset, as_of=as_of, knowledge_time=knowledge_time
+        ),
     )
     # Only ``macro['score']`` is consumed below, so skip the data-quality section (and its
     # per-source job queries); ``overview_score`` is otherwise identical to ``overview``.
-    macro = await MacroService(MacroQueries(adapters.engine)).overview_score(
-        as_of=as_of, knowledge_time=knowledge_time
+    macro = await pit_read(
+        "macro.overview_score",
+        engine,
+        as_of,
+        knowledge_time,
+        call=lambda: MacroService(MacroQueries(adapters.engine)).overview_score(
+            as_of=as_of, knowledge_time=knowledge_time
+        ),
     )
-    market_structure = await adapters.market_structure().overview(
-        as_of=as_of, knowledge_time=knowledge_time
+    # Only the score, per-asset readings and breadth are consumed below, so skip the TOTAL-family,
+    # ETH/BTC and data-quality sections (and their queries); ``overview_score`` is otherwise
+    # identical to ``overview``.
+    market_structure = await pit_read(
+        "market_structure.overview",
+        engine,
+        as_of,
+        knowledge_time,
+        call=lambda: adapters.market_structure().overview_score(
+            as_of=as_of, knowledge_time=knowledge_time
+        ),
     )
 
     metrics: dict[str, MetricReading] = {

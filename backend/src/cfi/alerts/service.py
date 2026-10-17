@@ -18,15 +18,19 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from cfi.alerts.investment_adapter import SnapshotReader
+from cfi.alerts.investment_block import InvestmentCycleResult, run_investment_cycle
 from cfi.alerts.lifecycle import Action, Candidate, decide
 from cfi.alerts.repository import AlertRepository
 from cfi.alerts.rules import AlertCandidate, evaluate_all
+from cfi.alerts.stage_timing import timed_stage
 from cfi.alerts.universe import ALERT_TYPE_TOOL_IDS, cooldown_period
 from cfi.analyst.repository import AnalystRepository
 from cfi.analyst.snapshot import Snapshot, build_snapshot
 from cfi.brief.changes import ChangeSet, compute_changes
 from cfi.core.config import Settings
 from cfi.core.logging import get_logger
+from cfi.decision_store.repository import DecisionAssessmentRepository
 
 log = get_logger(__name__)
 
@@ -66,16 +70,32 @@ class EvaluationResult:
     decisions: tuple[CandidateDecision, ...] = field(default_factory=tuple)
     snapshot_id: int | None = None
     snapshot: Snapshot | None = None
+    # Additive (Phase 51 Stage 6): the investment-alert block's result for this cycle's stored
+    # snapshot (evaluation and a persistence-disabled plan; nothing is persisted). Kept apart from
+    # ``decisions`` and from every counter above, which describe the 11 existing alert types only.
+    investment: InvestmentCycleResult | None = None
 
 
 class AlertService:
-    def __init__(self, engine: AsyncEngine, settings: Settings) -> None:
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        settings: Settings,
+        *,
+        snapshot_reader: SnapshotReader | None = None,
+    ) -> None:
         self.engine = engine
         self.settings = settings
         self.repo = AlertRepository(engine)
         # Reused unchanged for the (shared, not alert-specific) snapshot insert/lookup — never a
         # second, parallel implementation (Phase 23 spec "Phase 21/22 Integration").
         self.analyst_repo = AnalystRepository(engine)
+        # Phase 51 Stage 6: the read-only reader for the investment-alert block (one get_snapshot
+        # per cycle). Injectable so unit tests need no database; constructing the real repository
+        # opens no connection.
+        self._snapshot_reader: SnapshotReader = (
+            snapshot_reader if snapshot_reader is not None else DecisionAssessmentRepository(engine)
+        )
 
     async def evaluate(
         self, *, as_of: datetime, knowledge_time: datetime, now: datetime
@@ -83,17 +103,23 @@ class AlertService:
         previous = await self.analyst_repo.latest_snapshot()
         previous_payload = previous[1] if previous else None
 
-        snapshot = await build_snapshot(
-            self.engine, self.settings, as_of=as_of, knowledge_time=knowledge_time, question=None
-        )
-        snapshot_id, _snapshot_uuid = await self.analyst_repo.insert_snapshot(
-            created_at=snapshot.created_at,
-            as_of=snapshot.as_of,
-            knowledge_time=snapshot.knowledge_time,
-            snapshot_version=snapshot.snapshot_version,
-            payload=snapshot.payload(),
-            payload_hash=snapshot.snapshot_id,
-        )
+        with timed_stage(log, "alert_evaluate_stage_timing", stage="build_snapshot"):
+            snapshot = await build_snapshot(
+                self.engine,
+                self.settings,
+                as_of=as_of,
+                knowledge_time=knowledge_time,
+                question=None,
+            )
+        with timed_stage(log, "alert_evaluate_stage_timing", stage="persist_snapshot"):
+            snapshot_id, _snapshot_uuid = await self.analyst_repo.insert_snapshot(
+                created_at=snapshot.created_at,
+                as_of=snapshot.as_of,
+                knowledge_time=snapshot.knowledge_time,
+                snapshot_version=snapshot.snapshot_version,
+                payload=snapshot.payload(),
+                payload_hash=snapshot.snapshot_id,
+            )
 
         # Reused for the cycle's own audit trail (Phase 23 spec "Phase 21/22 Integration": "reuse
         # Phase 22 snapshot/change infrastructure where appropriate") — logged, not what decides
@@ -105,69 +131,82 @@ class AlertService:
             field_changes=len(changes.changes),
         )
 
-        candidates = evaluate_all(snapshot)
+        with timed_stage(log, "alert_evaluate_stage_timing", stage="evaluate_rules"):
+            candidates = evaluate_all(snapshot)
         cooldown_seconds = cooldown_period().total_seconds()
 
         created = rearmed = resolved = skipped_unchanged = skipped_cooldown = 0
         seen_keys: dict[str, set[str]] = {t: set() for t in _FLAGGED_STATE_TYPES}
         decisions: list[CandidateDecision] = []
 
-        for candidate in candidates:
-            if candidate.alert_type in seen_keys:
-                seen_keys[candidate.alert_type].add(candidate.dedup_key)
+        with timed_stage(log, "alert_evaluate_stage_timing", stage="process_candidates") as stage:
+            for candidate in candidates:
+                if candidate.alert_type in seen_keys:
+                    seen_keys[candidate.alert_type].add(candidate.dedup_key)
 
-            existing = await self.repo.latest_active_for_key(candidate.dedup_key)
-            action = decide(
-                existing,
-                Candidate(observed_value=candidate.observed_value),
-                now=now,
-                cooldown_seconds=cooldown_seconds,
-            )
-
-            if action == "skip_unchanged":
-                skipped_unchanged += 1
-                continue
-            if action == "skip_cooldown":
-                skipped_cooldown += 1
-                continue
-
-            new_id, _new_uuid = await self.repo.insert_alert(
-                now=now,
-                alert_type=candidate.alert_type,
-                severity=candidate.severity,
-                domain=candidate.domain,
-                dedup_key=candidate.dedup_key,
-                trigger_condition=candidate.trigger_condition,
-                observed_value=candidate.observed_value,
-                reference_value=candidate.reference_value,
-                evidence_field_ids=list(candidate.evidence_field_ids),
-                snapshot_id=snapshot_id,
-                source_tool_id=candidate.source_tool_id,
-                component_status=candidate.component_status,
-                data_quality_state=snapshot.data_quality_state,
-            )
-
-            if action == "create":
-                created += 1
-            else:  # "rearm"
-                rearmed += 1
-                old_id = await self.repo.latest_active_id_for_key(candidate.dedup_key)
-                # old_id is this candidate's own just-inserted row only if two evaluators ever
-                # shared a dedup_key (they never do, by construction); guard anyway (R3: never
-                # silently supersede the wrong row).
-                if old_id is not None and old_id != new_id:
-                    await self.repo.supersede(old_id, now=now, superseded_by=new_id)
-
-            decisions.append(
-                CandidateDecision(
-                    candidate=candidate,
-                    action=action,
-                    alert_id=new_id,
-                    previous_observed_value=existing.observed_value if existing else None,
+                existing = await self.repo.latest_active_for_key(candidate.dedup_key)
+                action = decide(
+                    existing,
+                    Candidate(observed_value=candidate.observed_value),
+                    now=now,
+                    cooldown_seconds=cooldown_seconds,
                 )
-            )
 
-        resolved += await self._auto_resolve_cleared(seen_keys, now=now)
+                if action == "skip_unchanged":
+                    skipped_unchanged += 1
+                    continue
+                if action == "skip_cooldown":
+                    skipped_cooldown += 1
+                    continue
+
+                new_id, _new_uuid = await self.repo.insert_alert(
+                    now=now,
+                    alert_type=candidate.alert_type,
+                    severity=candidate.severity,
+                    domain=candidate.domain,
+                    dedup_key=candidate.dedup_key,
+                    trigger_condition=candidate.trigger_condition,
+                    observed_value=candidate.observed_value,
+                    reference_value=candidate.reference_value,
+                    evidence_field_ids=list(candidate.evidence_field_ids),
+                    snapshot_id=snapshot_id,
+                    source_tool_id=candidate.source_tool_id,
+                    component_status=candidate.component_status,
+                    data_quality_state=snapshot.data_quality_state,
+                )
+
+                if action == "create":
+                    created += 1
+                else:  # "rearm"
+                    rearmed += 1
+                    old_id = await self.repo.latest_active_id_for_key(candidate.dedup_key)
+                    # old_id is this candidate's own just-inserted row only if two evaluators ever
+                    # shared a dedup_key (they never do, by construction); guard anyway (R3: never
+                    # silently supersede the wrong row).
+                    if old_id is not None and old_id != new_id:
+                        await self.repo.supersede(old_id, now=now, superseded_by=new_id)
+
+                decisions.append(
+                    CandidateDecision(
+                        candidate=candidate,
+                        action=action,
+                        alert_id=new_id,
+                        previous_observed_value=existing.observed_value if existing else None,
+                    )
+                )
+            stage["candidates"] = len(candidates)
+
+        with timed_stage(log, "alert_evaluate_stage_timing", stage="auto_resolve"):
+            resolved += await self._auto_resolve_cleared(seen_keys, now=now)
+
+        # Phase 51 Stage 6: strictly after the 11 existing types are fully processed (their rows
+        # are persisted and cleared alerts resolved), so nothing here can change their outcome. An
+        # ordinary failure is contained inside the block; a time-limit or cancellation signal
+        # propagates out of this method unchanged. Persistence of investment alerts stays disabled.
+        with timed_stage(log, "alert_evaluate_stage_timing", stage="investment_block"):
+            investment = await run_investment_cycle(
+                self._snapshot_reader, snapshot_id, now=now, logger=log
+            )
 
         return EvaluationResult(
             created=created,
@@ -180,6 +219,7 @@ class AlertService:
             decisions=tuple(decisions),
             snapshot_id=snapshot_id,
             snapshot=snapshot,
+            investment=investment,
         )
 
     async def _auto_resolve_cleared(self, seen_keys: dict[str, set[str]], *, now: datetime) -> int:
