@@ -139,7 +139,7 @@ test, so the target must be a disposable server and never the existing developme
 Required target (the only one the test accepts):
 - A separate TimescaleDB container of the same image as the stack (`timescale/timescaledb:2.30.1-pg17`), with its own named volume (not
   `pgdata`), test-only credentials, no shared volumes and no application, worker, beat or frontend service attached.
-- Host `127.0.0.1` or `localhost`, port `55432`, configured database `p51_scratch`, derived test database `p51_scratch_test`.
+- Host `127.0.0.1` or `localhost`, port `55432` or `55433`, configured database `p51_scratch`, derived test database `p51_scratch_test`. Use `55433` for the separately created `p51-test-db-isolated-20261018` container; do not stop or repurpose the existing `55432` container.
 - `CFI_DATABASE_URL_RUNTIME` unset or blank, and a `CFI_DATABASE_URL` without query parameters (libpq lets `?host=` or `?port=` override the
   authority that is checked).
 - `CFI_P51_DB_TEST_CONFIRM` exactly `p51_scratch_test`, set only after separate explicit authorization.

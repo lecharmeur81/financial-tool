@@ -43,6 +43,11 @@ def test_valid_configuration_passes() -> None:
     assert result.failures == ()
 
 
+def test_new_isolated_port_is_allowed() -> None:
+    url = f"postgresql+psycopg://p51_test:{_CRED}@127.0.0.1:55433/p51_scratch"
+    assert gate_module.evaluate_gate(_env(CFI_DATABASE_URL=url)).ok is True
+
+
 def test_localhost_is_also_allowed() -> None:
     url = f"postgresql+psycopg://p51_test:{_CRED}@localhost:55432/p51_scratch"
     assert gate_module.evaluate_gate(_env(CFI_DATABASE_URL=url)).ok is True
@@ -60,7 +65,7 @@ def test_wrong_host_is_refused(host: str) -> None:
     assert gate_module.FAIL_HOST in _failures(_env(CFI_DATABASE_URL=url))
 
 
-@pytest.mark.parametrize("port", ["5432", "55433", "5543"])
+@pytest.mark.parametrize("port", ["5432", "5543"])
 def test_wrong_port_is_refused(port: str) -> None:
     url = f"postgresql+psycopg://p51_test:{_CRED}@127.0.0.1:{port}/p51_scratch"
     assert _failures(_env(CFI_DATABASE_URL=url)) == (gate_module.FAIL_PORT,)
@@ -150,7 +155,7 @@ def test_the_gate_reads_only_the_mapping_it_is_given(monkeypatch: pytest.MonkeyP
 
 def test_the_module_constants_are_the_approved_target() -> None:
     assert gate_module.ALLOWED_HOSTS == ("127.0.0.1", "localhost")
-    assert gate_module.EXPECTED_PORT == 55432
+    assert gate_module.EXPECTED_PORTS == (55432, 55433)
     assert gate_module.EXPECTED_DATABASE == "p51_scratch"
     assert gate_module.EXPECTED_TEST_DATABASE == "p51_scratch_test"
 

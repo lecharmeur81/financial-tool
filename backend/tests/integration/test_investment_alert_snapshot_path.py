@@ -19,7 +19,8 @@ not prove that is safe. Before any run:
 5. Obtain explicit authorization to execute.
 
 The module is skipped unless ``evaluate_gate`` passes: confirmation exactly ``p51_scratch_test``,
-host ``127.0.0.1`` or ``localhost``, port ``55432``, database ``p51_scratch``, no URL query
+host ``127.0.0.1`` or ``localhost``, port ``55432`` or ``55433``, database ``p51_scratch``,
+no URL query
 parameters and no runtime URL. Then run only this file with ``-m integration``. Never run an
 unfiltered ``pytest`` while the service variables are set.
 """
@@ -58,7 +59,7 @@ RUNTIME_URL_ENV = "CFI_DATABASE_URL_RUNTIME"
 # The only target this module may ever run against: the disposable container described in
 # PHASE51_SCHEMA_VERIFICATION_PROCEDURE.md (section 9). Nothing here is configurable.
 ALLOWED_HOSTS: Final = ("127.0.0.1", "localhost")
-EXPECTED_PORT: Final = 55432
+EXPECTED_PORTS: Final = (55432, 55433)
 EXPECTED_DATABASE: Final = "p51_scratch"
 EXPECTED_TEST_DATABASE: Final = "p51_scratch_test"
 
@@ -104,7 +105,7 @@ def evaluate_gate(environ: Mapping[str, str]) -> GateResult:
                 failures.append(FAIL_URL_QUERY)
             if host not in ALLOWED_HOSTS:
                 failures.append(FAIL_HOST)
-            if port != EXPECTED_PORT:
+            if port not in EXPECTED_PORTS:
                 failures.append(FAIL_PORT)
             if database != EXPECTED_DATABASE:
                 failures.append(FAIL_DATABASE)
