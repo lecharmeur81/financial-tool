@@ -3864,9 +3864,35 @@ specification review is complete.
 
 **Current status (2026-10-12).** The Status line above is the historical Step 1 status and is kept as written. Since then the user approved the
 implementation and Stages 1 to 6 were carried out with investment-alert persistence disabled (the Stage 5 and Stage 6 paragraphs below record
-the decisions). This ADR has **not** been re-issued as Accepted: its status is a decision for the user and is pending. Phase 51 is **not**
+the decisions). This ADR has **not** been re-issued as Accepted: its status is a decision for the user and is pending. *(Superseded by the user decision of 2026-10-18 below.)* Phase 51 is **not**
 declared complete; the readiness record in `PROGRESS.md` ("Phase 51 readiness record (2026-10-12)") lists what is verified, what is outstanding
 and what is deferred to Phase 52.
+
+**Status update (2026-10-18), user decision: Accepted for Phase 51 scope only.** The user decided that ADR-0087 is **Accepted for Phase 51 scope
+only**. The limits of that decision are part of it: (1) investment-alert persistence **remains disabled**; `INVESTMENT_ALERT_PERSISTENCE_ENABLED`
+stays the hard-coded `False` (K-4), and this decision is not approval to enable it; (2) it is **not** an approval of the Phase 52 prerequisites
+P1 to P8 (methodology §18.1) or of the A-10 schema verification (§19), and it does **not** authorize starting Phase 52; (3) it does **not** declare
+Phase 51 complete or accepted: fixture **G49 remains OPEN**, the user authorized **no exception**, and no waiver or change of any acceptance criterion
+is recorded here; (4) it says nothing about investment-signal quality or profitability (Phase 50 historical validation is not done). The Status line
+above is the historical Step 1 status and is kept as written. The closure state and the remaining blockers are listed in the draft closure report
+`claude/phase51-closure-report.md` (project document), which is not itself a decision record.
+
+**Scope note (2026-10-18), user decision, provisional: D8 accepted as a separate performance change.** The user provisionally accepted the point-in-time
+memo and revision-window work in commit `c42b075` ("D8": `cfi.core.pit_memo` and its use in `analyst/snapshot.py`, the regime and similarity gatherers and the
+market, macro, market-structure and retail query and service modules) as a **separate performance change**, not as part of the investment-alert behavior
+(the investment modules do not import it). Basis: the seeded two-year synthetic benchmark, run `20261017T151645Z-486c08d5` against baseline run
+`20261015T023859Z-b8168243` (report files outside the repository in `C:\Users\raoul\AppData\Local\cfi-p51-benchmark\`; the current report's SHA-256 is
+`7e69a90912861d4891b896025c11cc1842dafdc9d7cd389c9d648bd34a830ce0`): `build_snapshot` about 159 to 161 s at baseline against about 60 s, wall time about
+161 s against about 61 s, identical seed fingerprint and identical summary outputs (regime, candidates, analogues, memo counters); the baseline already
+contained the memo, so the gain is attributed to the revision windows. SQL equivalence is supported by the unit tests `test_pit_revision_window.py`,
+`test_pit_window_queries.py` and `test_pit_memo_gatherers.py` and by `test_pit_revision_window_sql.py` on a disposable PostgreSQL (user-reported pass). **Limits
+of the evidence:** one synthetic workload on one Windows machine with the gate off; no live-data equivalence is demonstrated; no full-payload hash comparison
+was made (parity rests on summary fields); a read near the present (later than `now` minus 5 minutes) falls back to SQL, so `window_fallbacks == 0` is
+specific to the historical benchmark anchor; an in-place `UPDATE` of an already stored row during an open scope is not seen by a window; and a 400,000-row
+window budget sends larger reads to SQL. **This is not** a finding that D8 complies with methodology §18, not a G49 waiver, exception or closure, and not an
+authorization of any other scope deviation. The other deviation groups identified for G49, **E1** (queue isolation), **E2** (cycle-lock ownership), **E3**
+(cancellation and drain handling) and **E4** (timing instrumentation), remain **unresolved**. Persistence remains disabled, P1 to P8 and A-10 remain
+outstanding, Phase 51 is not complete and Phase 52 is not authorized.
 
 **Context.** Phase 49 (ADR-0086) classifies each asset into one of eight closed decision states. Phase 23 (ADR-0035,
 ADR-0071) provides a deterministic alert lifecycle: `alert_event.v1`, deduplication by `{alert_type}:{asset}`,
@@ -3967,3 +3993,35 @@ whose state has ended stays active until a user resolves it or another alertable
 creation time, not a current state. Index convention: the index table at the top of this file lists ADR-0001 to ADR-0050; ADR-0051 to ADR-0086
 are recorded only as sections with a `Status` line. ADR-0087 follows that practice and no index row is added. Phase 51 implementation requires a
 separate approval (R13). *(Step 1 statement; the implementation was subsequently approved and carried out in Stages 1 to 6. Enabling persistence still needs the Phase 52 prerequisites and the user's written approval.)*
+
+## 2026-10-19 - G49 status decision: retained reliability deviations under the literal-diff interpretation (documentation only)
+
+**Status.** G49 (`METHODOLOGY_INVESTMENT_ALERTS.md:642`) is **OPEN / NOT PASSED**. This entry records a decision about how the open items are carried; it
+does not close G49, grant a waiver or exception, or amend the criterion or the agreed literal-diff interpretation (baseline `5193c38..HEAD`; logging-only
+and formatting-only edits count). Phase 51 is **not** declared complete, Phase 52 is **not** authorized, and
+`INVESTMENT_ALERT_PERSISTENCE_ENABLED` remains `False`.
+
+**Decision.** The following reliability and diagnostic changes are retained. Findings 1 and 3 to 5 are deliberate retained deviations from the literal diff
+check; they are not waivers and do not make G49 compliant.
+1. **Finding 1 - retained.** The five `timed_stage` wrappers in `alerts/service.py` (build_snapshot, persist_snapshot, evaluate_rules, process_candidates,
+   auto_resolve) are kept to preserve stage-timing and benchmark diagnostics.
+2. **Finding 2 - repaired and retained.** The Stage 6 `timed_stage` wrapper was removed from `alerts/service.py`, with two matching updates
+   (`test_alert_evaluate_stage_timing.py` and `test_alert_evaluate_seeded_benchmark.py`, which now read the block's own `investment_alert_cycle`
+   `duration_ms`). User-run local Windows validation: focused unit test 6 passed in 1.13 s; Ruff lint passed on the three authorized files; Ruff
+   formatting passed; `git diff --check` passed; benchmark collection found 3 tests. The integration benchmark has **not** been executed.
+3. **Finding 3 - retained.** The API queue-routing change (`api/routes/alerts.py`, `queue="alerts"`).
+4. **Finding 4 - retained.** The realtime expiry, lock-ownership and timing changes (`realtime/service.py`).
+5. **Finding 5 - retained.** `run_guarded` cancellation protection (`worker/app.py`, `alerts_evaluate_task`).
+Findings 3, 4 and 5 are one queue-and-lock reliability package; they are carried together.
+
+**Still unresolved (not decided here).**
+- The gate-off runtime clause of G49 ("the dashboard and `/alerts` data contain no investment item") remains **UNVERIFIED**; only fake-based tests exist.
+- The `decision_store/repository.py` change (`persist_assessments_safely` re-raises `SoftTimeLimitExceeded`/`TimeLimitExceeded`) remains **unassigned**
+  pending a human ruling.
+- Deferred documentation discrepancy: statements that `persist_assessments_safely` is "not modified" / "unmodified" are stale, because the file is
+  modified. Current references (verified 2026-10-19): `METHODOLOGY_INVESTMENT_ALERTS.md:551` (Stage 6 record), `DECISIONS.md:3976-3977`,
+  `PROGRESS.md:4052`, `PROGRESS.md:4095`, `PROGRESS.md:4182-4183`. They are left unedited; the methodology is not touched by this entry.
+
+**Consequences.** Documentation only: no code, test, configuration, methodology, schema, route, worker or schedule change in this step. G49 can be closed
+later only by meeting its criterion unchanged (diff clause and runtime clause) or by a separately recorded human amendment, which would be an amendment
+and not a pass.

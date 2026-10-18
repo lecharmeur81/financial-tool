@@ -4166,7 +4166,7 @@ declared complete.** Nothing here was re-run in this entry; it summarizes eviden
 
 **Outstanding requirements before Phase 51 can be considered complete (none satisfied yet).**
 1. The existing integration suites that call `AlertService.evaluate` (`test_alerts_service.py`, `test_json_datetime_serialization.py`, and
-   `test_realtime_service.py`, which also needs a disposable Redis) have not been run since Stage 6. Running them needs the user's explicit authorization
+   `test_realtime_service.py`, which also needs a disposable Redis) have not been run since Stage 6. *[Superseded in part: see the 2026-10-18 reconciliation addendum at the end of this file.]* Running them needs the user's explicit authorization
    of the exact commands, a confirmed disposable target, and for the realtime file a disposable Redis; deferring the realtime file would need a recorded
    reason.
 2. A backend-wide run equivalent to the CI step `uv run pytest` has not been executed since Stage 6. The CI recipe points at the same ports as the local
@@ -4174,7 +4174,7 @@ declared complete.** Nothing here was re-run in this entry; it summarizes eviden
    optional run against disposable database and Redis only, which needs a fresh authorization.
 3. Windows verification of the Stage 6 service tests, the gate tests, the post-Stage-6 135 baseline, Ruff, format and strict mypy (484 files) is not
    recorded.
-4. The status of ADR-0087 (currently its historical "Proposed" line plus a current-status note) is a decision for the user.
+4. The status of ADR-0087 (currently its historical "Proposed" line plus a current-status note) is a decision for the user. *[Superseded : see the 2026-10-18 reconciliation addendum at the end of this file.]* Decided 2026-10-18: Accepted for Phase 51 scope only (`DECISIONS.md:3871`).
 5. How and when to stage and commit (path by path; `CLAUDE.md` C1 and C2 expect a commit hash in the phase report) is a decision for the user. Nothing
    is staged or committed.
 
@@ -4190,3 +4190,178 @@ offline-tested runner, the execution), which is prerequisite P5; the M-2 lifecyc
 stance; the P7 time-budget remeasurement with the gate on; Phase 50 historical validation.
 
 **Next step:** awaiting the user (R13). Phase 52 has not been started.
+
+## 2026-10-18 — Phase 51 implementation commit recorded
+
+- **Commit:** `c42b075` — `feat(alerts): integrate investment alerts and optimize PIT windows`.
+- **Scope:** Phase 51 investment-alert implementation and alert-worker integration committed.
+- **Status:** Committed, but Phase 51 is **NOT formally complete**. The existing readiness record and outstanding requirements remain in force.
+- **Persistence:** The hard-coded persistence gate remains `False`. No approval to enable persistence is implied by this commit.
+- **Phase 52:** **NOT started.** The P1–P8 prerequisites in `METHODOLOGY_INVESTMENT_ALERTS.md` remain applicable, including the separate A-10 schema-verification approvals under P5 and the P7 time-budget remeasurement.
+- **Working tree:** At the last reported check, `compose.yaml` had a separate unstaged FRED configuration change, and `compose.yaml.pre-fred-backup` and `scratch/` were untracked. These were intentionally excluded from the commit and must remain untouched.
+- **Next step:** Awaiting the user's instruction (R13). No further phase or persistence change is authorized.
+
+## 2026-10-18 — Phase 51 evidence record and G49 finding (documentation only)
+
+**Provenance.** This entry was written in a documentation-only task. Nothing was run, no database, container or Redis was accessed, and no source
+file, test or setting was changed. "Reported" means the user reported the result from a user-run session; this task did not re-run it. "Inspected"
+means Claude read the file or Git object read-only during the readiness audit. Phase 51 remains **NOT formally complete**, and Phase 52 has **NOT**
+started.
+
+**Encoding repair.** The entry above ("Phase 51 implementation commit recorded") contained three Windows-1252 bytes that are invalid in UTF-8: two
+`0x97` (em dash) and one `0x96` (en dash). Each was converted to the equivalent UTF-8 character (`—`, `—`, `–`); its trailing CRLF line ending was
+normalised to LF to match the rest of the file. No other byte of the earlier text was changed.
+
+**Test and check evidence (distinct runs, distinct provenance).**
+- **I-01 to I-07 (2026-10-12, unchanged, recorded above):** 7 passed in 3.04 s, exit code 0, none skipped, against the disposable database. This run
+  pre-dates the PIT-window and alert-reliability changes committed in `c42b075`.
+- **Eight PostgreSQL-only integration tests (reported, 2026-10-18; not re-run by this task):** `tests/integration/test_alerts_service.py` 3 passed;
+  `tests/integration/test_json_datetime_serialization.py` 5 passed; **8 passed in 13.69 s, pytest exit code 0**; the disposable-database marker
+  restoration succeeded (exit code 0). The target was the isolated disposable PostgreSQL environment, not the application database. This is a
+  **separate run** from I-01 to I-07 and exercises `AlertService.evaluate` with the persistence gate off. It covers two of the three suites named in
+  outstanding requirement 1 of the readiness record. `tests/integration/test_realtime_service.py` (12 tests; needs a disposable Redis) has **not**
+  been run, and no decision to defer it is recorded. **These eight tests do not satisfy any of P1 to P8 and do not authorize a persistence-gate
+  change.**
+- **Focused PIT tests (reported, 2026-10-17):** `test_pit_revision_window_sql.py` and `test_market_price_point_in_time.py`, 18 passed in 26.38 s,
+  exit code 0 (disposable database; marker restored afterwards).
+- **Seeded two-year benchmark (user-run on the disposable database, 2026-10-17; report file inspected read-only):** run `20261017T151645Z-486c08d5`;
+  pytest `1 passed, 2 deselected`, exit code 0; seed fingerprint `fc212b94d1a2baafa297b14e89914d218eef7ea461cc93492f3911ade3392907` identical to the
+  baseline run `20261015T023859Z-b8168243`; `build_snapshot` 60.438 s and 60.344 s against 158.968 s and 161.031 s at baseline; wall time 61.43 s and
+  61.00 s against 160.74 s and 161.68 s; both within the 100 s soft limit. PIT counters identical in both runs: `window_hits` 3342, `window_loads` 221,
+  `window_fallbacks` 0, `uncached` 0, memo hits 476 and misses 742. Workload outputs matched the baseline (regime `mixed_unclear`, 103 candidates,
+  5 analogues, duration 1 day, 2 examples). **Synthetic data, one Windows machine, persistence gate off: not production performance and not the P7
+  gate-on measurement.** `window_fallbacks == 0` is expected for this benchmark because its anchor lies well in the past; live reads near the present
+  correctly fall back to SQL.
+- **Static and unit checks (reported, 2026-10-18; not re-run by this task):** `ruff check .` passed; `ruff format --check .` passed (519 files);
+  `mypy --platform linux` succeeded across 514 source files (the readiness record above cites 484); non-integration pytest 2,922 passed, 9 skipped,
+  381 deselected. Native Windows `mypy` reports 12 `signal.SIGALRM`, `signal.setitimer` and `signal.ITIMER_REAL` errors in
+  `tests/unit/test_worker_runtime_cancellation.py` and `tests/integration/test_alert_reliability_isolated.py`; Claude's analysis (reproduced with a
+  throwaway configuration, `--platform linux` 0 errors and `--platform win32` 12) attributes them to the host platform, and CI runs on `ubuntu-24.04`.
+- **Commit (inspected):** `c42b075`, 64 files, +16,889/−199.
+- **Persistence gate (inspected):** `INVESTMENT_ALERT_PERSISTENCE_ENABLED: Final = False` at `backend/src/cfi/alerts/investment_alerts.py:93`.
+
+**Prerequisites P1 to P8 (readiness audit, 2026-10-18; none satisfied).** P1 presentation NOT VERIFIED (no frontend change); P2 consumer exposure
+NOT VERIFIED (no recorded decision); P3 lifecycle review REQUIRES EXPLICIT APPROVAL; P4 provenance NOT VERIFIED; P5 schema verification BLOCKED (the
+procedure is "PROPOSED. NOT APPROVED. NOT EXECUTED.", no runner exists, three approvals open); P6 Phase 35 stance verified technically by construction,
+written re-confirmation REQUIRES EXPLICIT APPROVAL; P7 time budget NOT VERIFIED (offline fixture benchmark only; no gate-on measurement); P8 NOT
+VERIFIED (no tests labelled G46 to G49 were located in the Phase 51 unit and integration files searched). *[Superseded in part: see the 2026-10-18 reconciliation addendum at the end of this file.]* **Decision: NOT READY.** No gate change is
+authorized or implied.
+
+**G49 finding (open; not passed, not waived).** `METHODOLOGY_INVESTMENT_ALERTS.md` fixture G49 requires, with the gate off, an acceptance diff
+check showing that none of the Phase 23, route, frontend, journal, paper or realtime files is modified beyond the §4 block and field. Commit `c42b075`
+also changed `backend/src/cfi/api/routes/alerts.py` (queue `ingest` to `alerts`, 2 lines), `backend/src/cfi/realtime/service.py` (+77/−11 lines, cycle
+lock and timing work) and `backend/src/cfi/worker/app.py`, `client.py` and `runtime.py`. In the audit these were assessed as reliability changes: the
+inspected diffs contain no investment-specific behaviour and no investment reference was found in `cfi.realtime`. **G49 is nevertheless not literally
+satisfied as currently worded.** It needs an explicit, documented explanation or waiver from the user before any future gate-on approval. It is not
+marked passed or waived here.
+
+**Still outstanding (unchanged):** the realtime integration suite (or a recorded reason for deferring it), the optional disposable-service backend
+run, the ADR-0087 status decision, and every prerequisite P1 to P8 above. *[Superseded in part: see the 2026-10-18 reconciliation addendum at the end of this file.]* Of these, the realtime suite and the ADR-0087 decision are no longer outstanding; the rest remain.
+
+**Next step:** awaiting the user (R13). No further phase or persistence change is authorized.
+
+
+## 2026-10-18 - I-01 to I-07 current-run verification
+
+**Provenance:** User-run in the current session; the command and result were pasted into the conversation. This is a new run, distinct from the historical 2026-10-12 result and from other Phase 51 test suites.
+
+- **Command:** `python -m pytest tests/integration/test_investment_alert_snapshot_path.py -m integration -p no:cacheprovider -q`
+- **Result:** 7 passed in 2.60 seconds; pytest exit code 0.
+- **Target:** Dedicated disposable TimescaleDB container `p51-test-db-isolated-20261018`, host binding `127.0.0.1:55433`, named volume `p51_test_pgdata_20261018`. The fixture created and migrated `p51_scratch_test` on this isolated server. The application database and existing container on port 55432 were not the target.
+- **Stored-snapshot evidence:** `test_i01_a_real_stored_snapshot_is_retrieved_verified_matched_and_assessed` explicitly asserts `decision["assessment"]["performed"] is True` at line 265 of `backend/tests/integration/test_investment_alert_snapshot_path.py`. The test passed in this run. The file also tests missing-snapshot and integrity-mismatch refusal paths.
+- **Guard regression tests:** 43 passed in 2.49 seconds after the authorized guard change allowing only ports 55432 and 55433. Ruff lint passed, and Ruff format check reported both modified Python files already formatted.
+- **Safety cleanup:** Temporary database and Redis environment variables and password variables were cleared after the run. The isolated container and volume were retained; no container cleanup was performed.
+- **Scope of conclusion:** The current-run I-01 to I-07 stored-snapshot evidence gap is closed by this passing run. This does not establish signal quality or profitability and does not complete Phase 51.
+- **Remaining status:** Phase 51 remains NOT formally complete. G49 remains OPEN; P1 to P8 and A-10 remain outstanding as recorded above. `INVESTMENT_ALERT_PERSISTENCE_ENABLED` remains `False`. Phase 52 has NOT started and is not authorized. No waiver, exception, or acceptance-criteria change is implied.
+- **Working tree:** No staging or commit was performed. Unrelated existing changes were left untouched.
+
+**Next step:** retain the existing Phase 51 readiness blockers. Do not enable alert persistence or begin Phase 52 based on this test result alone.
+
+
+## 2026-10-18 - Realtime integration suite current-run verification
+
+**Provenance:** User-run in the current session; results verified from the runner output and saved pytest log.
+
+- **Suite:** `backend/tests/integration/test_realtime_service.py`
+- **Result:** 12 passed in 116.70 seconds; pytest exit code 0.
+- **Runner:** `Run-P51RealtimeSuite.ps1`; overall exit code 0.
+- **Run log:** `C:\Users\raoul\AppData\Local\cfi-p51-benchmark\p51-pytest-20261017T223722Z-82322ed8.out.log`
+- **Disposable infrastructure:** The runner used the designated disposable PostgreSQL environment and its dedicated temporary Redis container. No application database was authorized as a target.
+- **Cleanup evidence:** `marker restored on p51_scratch_test: True`; `disposable Redis removed or absent: True`.
+- **Scope of conclusion:** The outstanding realtime integration suite run item is now evidenced by a successful current run. This result does not establish investment signal quality or profitability and does not complete Phase 51.
+- **Remaining status:** G49 remains OPEN. P1 to P8 and A-10 remain outstanding as recorded above. The separate optional disposable-service backend run and ADR-0087 status decision remain outstanding. *[Superseded in part: see the 2026-10-18 reconciliation addendum at the end of this file.]* The ADR-0087 decision is no longer outstanding. `INVESTMENT_ALERT_PERSISTENCE_ENABLED` remains `False`. Phase 52 has NOT started and is not authorized.
+- **Working tree:** No staging or commit was performed. Unrelated existing changes were left untouched.
+
+**Next step:** continue to retain the Phase 51 readiness blockers. Do not enable alert persistence or begin Phase 52 based on this test result alone.
+
+
+## 2026-10-18 - Phase 51 readiness reconciliation addendum (documentation only)
+
+**Provenance.** Documentation-only task. Nothing was run: no tests, database, SQL, Docker, Redis or scheduler. "Reported" means the user ran it and
+reported it; "Inspected" means Claude read the file or `git diff` read-only. Earlier entries are preserved; where a statement in them is now stale, it
+carries a pointer to this addendum. This addendum approves nothing and waives nothing.
+
+**1. ADR-0087 decided.** On 2026-10-18 the user decided that ADR-0087 is **Accepted for Phase 51 scope only**. It is recorded in `DECISIONS.md:3871`
+(paragraph "Status update (2026-10-18)"); the historical "Proposed" Status line is kept as written. The decision does **not** enable persistence, does
+**not** waive G49, does **not** satisfy P1 to P8 or A-10, does **not** authorize Phase 52 and does **not** declare Phase 51 complete. ADR-0087 is no
+longer an outstanding decision.
+
+**2. Realtime integration suite (current verified run).** `backend/tests/integration/test_realtime_service.py`: **12 passed in 116.70 seconds**, pytest
+exit code 0, runner `Run-P51RealtimeSuite.ps1` exit code 0 (user-run; recorded in the entry "Realtime integration suite current-run verification" above).
+Log: `C:\Users\raoul\AppData\Local\cfi-p51-benchmark\p51-pytest-20261017T223722Z-82322ed8.out.log`. Cleanup lines as reported by the runner:
+marker restored on `p51_scratch_test: True`; disposable Redis removed or absent: `True`. A separate earlier run that was reported at 108.52 seconds is
+not relied on or counted as verified in this record. Neither suite was re-run by this task. This is **distinct** from the stored-snapshot evidence in
+item 5.
+
+**3. G46 to G49 test mapping (correction of the stale statement).** The statement in the 2026-10-18 readiness-audit entry that no tests labelled G46 to
+G49 were located is out of date. Current working-tree evidence: the **untracked** file `backend/tests/unit/test_alert_consumers_gate_off.py` (4 tests)
+covers **G47** (alerts-route listing and response body identical with the gate off) and **G48** (journal and paper `relevant_alert_ids` identical with
+the gate off), using in-memory fakes only. The user reported 4 passed in 1.20 s on Windows. Limits: it does not exercise the real SQL, HTTP, dashboard
+or frontend, and nothing with the gate on. G46 was located earlier at `backend/tests/unit/test_investment_block.py:835` (inspected). **G49 is not
+covered by any test and is not satisfied by one:** it is an acceptance diff check (`METHODOLOGY_INVESTMENT_ALERTS.md`, section 14) and it is **OPEN**.
+Commit `c42b075` modified `backend/src/cfi/api/routes/alerts.py`, `backend/src/cfi/realtime/service.py` and the worker files outside the section 4
+block; no waiver or exception is approved. The mapping of the remaining fixtures was not re-done here.
+
+**4. Uncommitted port-55433 guard edits (supported by current `git diff`).** Three tracked files are modified and uncommitted:
+`PHASE51_SCHEMA_VERIFICATION_PROCEDURE.md` (line 142: allowed port text now `55432` or `55433`, naming container `p51-test-db-isolated-20261018`),
+`backend/tests/integration/test_investment_alert_snapshot_path.py` (`EXPECTED_PORT = 55432` replaced by `EXPECTED_PORTS = (55432, 55433)`; the check is
+`port not in EXPECTED_PORTS`; docstring updated) and `backend/tests/unit/test_p51_integration_gate.py` (new test for 55433; `55433` removed from the
+refused-port parameters; the constants test updated). The user reported the guard regression tests as 43 passed (entry above). **Allowing a second
+disposable-database port does not approve or execute A-10.** `PHASE51_SCHEMA_VERIFICATION_PROCEDURE.md` still reads "PROPOSED. NOT APPROVED. NOT
+EXECUTED.", no runner was found, and its three approvals (procedure, reviewed runner, execution) remain open.
+
+**5. Stored-snapshot evidence kept distinct.** I-01 to I-07 (`tests/integration/test_investment_alert_snapshot_path.py`): **7 passed in 2.60 seconds**,
+exit code 0, user-run, against the disposable container `p51-test-db-isolated-20261018` at `127.0.0.1:55433` (entry above). Different suite, run,
+target and result from item 2.
+
+**6. Statuses retained.**
+- `INVESTMENT_ALERT_PERSISTENCE_ENABLED = False` (`backend/src/cfi/alerts/investment_alerts.py:93`); no writer exists.
+- G49 **OPEN**; no waiver or exception approved.
+- P1 to P8 and A-10 **not satisfied** (P5/A-10 blocked pending the three approvals; P1 to P4, P6, P7 and P8 as recorded in the readiness-audit entry above).
+- Phase 51 is **NOT formally complete**. Phase 52 is **NOT authorized** and has not started.
+- Nothing here claims investment signal quality or profitability; Phase 50 historical validation has not been done.
+
+**Still outstanding for Phase 51 closure:** G49 (a decision from the user), a formal completion record, and committing or otherwise handling the
+untracked and modified files above. Staging and committing are a separate decision for the user; nothing is staged or committed.
+
+## 2026-10-19 - G49 decision recorded; retained deviations carried (documentation only)
+
+**Status.** G49 is **OPEN / NOT PASSED**. Phase 51 is **NOT** complete; Phase 52 is **NOT** authorized; `INVESTMENT_ALERT_PERSISTENCE_ENABLED = False`
+(`backend/src/cfi/alerts/investment_alerts.py:93`). Full decision in `DECISIONS.md` ("2026-10-19 - G49 status decision").
+
+**What is recorded.**
+1. Finding 1 (five `timed_stage` wrappers in `alerts/service.py`) - retained for stage-timing and benchmark diagnostics.
+2. Finding 2 (Stage 6 wrapper removal plus the two test/benchmark updates) - retained. User-run Windows evidence: focused unit test 6 passed in 1.13 s;
+   Ruff lint passed on the three authorized files; Ruff formatting passed; `git diff --check` passed; benchmark collection found 3 tests. The
+   integration benchmark has not been executed.
+3. Finding 3 (API `queue="alerts"`), Finding 4 (realtime expiry, lock ownership, timing) and Finding 5 (`run_guarded` in `alerts_evaluate_task`) -
+   retained.
+4. Findings 1, 3, 4 and 5 are deliberate retained deviations under the existing literal-diff interpretation. They are not waivers and do not make G49
+   compliant.
+
+**Unresolved.** Gate-off runtime clause: UNVERIFIED. `decision_store/repository.py`: unassigned pending a human ruling.
+
+**Deferred discrepancy (not edited).** "Not modified"/"unmodified" statements about `persist_assessments_safely` are stale. Current references:
+`METHODOLOGY_INVESTMENT_ALERTS.md:551`, `DECISIONS.md:3976-3977`, `PROGRESS.md:4052`, `PROGRESS.md:4095`, `PROGRESS.md:4182-4183`.
+
+**Not done / not claimed.** No tests, application code, Docker or canary were run for this entry. Nothing is staged or committed.
