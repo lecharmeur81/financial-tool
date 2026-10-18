@@ -111,7 +111,6 @@ EXPECTED_STAGES: Final = (
     "evaluate_rules",
     "process_candidates",
     "auto_resolve",
-    "investment_block",
 )
 #: Fields of the ``analyst_snapshot_pit_memo`` event copied into each run's report block. The
 #: ``window_*`` counters say how many revision-window requests were served from a window, how many
@@ -434,6 +433,12 @@ def _stage_ms(run: Run) -> dict[str, float]:
     return {e["stage"]: float(e["elapsed_ms"]) for e in run.by_event("alert_evaluate_stage_timing")}
 
 
+def _investment_block_ms(run: Run) -> float:
+    """The investment block's own duration: its one ``investment_alert_cycle`` event per cycle."""
+    [event] = run.by_event("investment_alert_cycle")
+    return float(event["duration_ms"])
+
+
 def _tool_ms(run: Run) -> dict[str, float]:
     return {
         e["tool_id"]: float(e["elapsed_ms"]) for e in run.by_event("analyst_snapshot_tool_timing")
@@ -445,6 +450,10 @@ def _require_historical_processing(run: Run) -> dict[str, Any]:
     stages = {e["stage"]: e["status"] for e in run.by_event("alert_evaluate_stage_timing")}
     assert set(stages) == set(EXPECTED_STAGES), stages
     assert all(status == "ok" for status in stages.values()), stages
+    cycle = run.by_event("investment_alert_cycle")
+    assert len(cycle) == 1, cycle
+    assert isinstance(cycle[0]["duration_ms"], int), cycle
+    assert cycle[0]["duration_ms"] >= 0, cycle
     tools = {e["tool_id"]: e["status"] for e in run.by_event("analyst_snapshot_tool_timing")}
     assert len(tools) == 13, tools
     assert set(tools.values()) == {"ok"}, tools
@@ -552,6 +561,7 @@ async def test_seeded_two_year_evaluate_benchmark(
                 "wall_clock_seconds": round(run.wall_seconds, 2),
                 "within_celery_soft_limit_100s": run.wall_seconds < CELERY_SOFT_LIMIT_SECONDS,
                 "stage_ms": _stage_ms(run),
+                "investment_block_duration_ms": _investment_block_ms(run),
                 "tool_ms": _tool_ms(run),
                 "pit_memo": pit_memo_block(run),
             }

@@ -203,10 +203,9 @@ class AlertService:
         # are persisted and cleared alerts resolved), so nothing here can change their outcome. An
         # ordinary failure is contained inside the block; a time-limit or cancellation signal
         # propagates out of this method unchanged. Persistence of investment alerts stays disabled.
-        with timed_stage(log, "alert_evaluate_stage_timing", stage="investment_block"):
-            investment = await run_investment_cycle(
-                self._snapshot_reader, snapshot_id, now=now, logger=log
-            )
+        investment = await run_investment_cycle(
+            self._snapshot_reader, snapshot_id, now=now, logger=log
+        )
 
         return EvaluationResult(
             created=created,

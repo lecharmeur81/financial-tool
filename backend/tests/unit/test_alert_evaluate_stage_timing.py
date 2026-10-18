@@ -26,7 +26,6 @@ ALL_STAGES = [
     "evaluate_rules",
     "process_candidates",
     "auto_resolve",
-    "investment_block",
 ]
 
 
@@ -48,6 +47,14 @@ async def test_every_stage_is_timed_in_order_on_success(
         assert s["elapsed_ms"] >= 0
         assert set(s) <= {"stage", "status", "elapsed_ms", "candidates"}
     assert stages[3]["candidates"] == len(harness.candidates)
+
+    # Stage 6 is not wrapped here: the investment block reports its own duration in its one
+    # ``investment_alert_cycle`` event per cycle.
+    cycle = harness.log.investment()
+    assert len(cycle) == 1, cycle
+    duration_ms = cycle[0][2]["duration_ms"]
+    assert isinstance(duration_ms, int)
+    assert duration_ms >= 0
 
 
 async def test_timing_does_not_change_the_evaluation_result_or_repository_calls(
