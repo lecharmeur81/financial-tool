@@ -4365,3 +4365,19 @@ untracked and modified files above. Staging and committing are a separate decisi
 `METHODOLOGY_INVESTMENT_ALERTS.md:551`, `DECISIONS.md:3976-3977`, `PROGRESS.md:4052`, `PROGRESS.md:4095`, `PROGRESS.md:4182-4183`.
 
 **Not done / not claimed.** No tests, application code, Docker or canary were run for this entry. Nothing is staged or committed.
+
+## 2026-10-19 - Disposition of `Run-P51RealtimeSuite.ps1` (documentation only)
+
+**Disposition.** `Run-P51RealtimeSuite.ps1` stays **untracked and is not committed**. Its stale header status (comment lines 3-5, which said full mode had
+never been run and revision 2 had not been re-run) was corrected to cite the recorded run: 12 passed in 116.70 s, runner exit code 0 (entry "Realtime
+integration suite current-run verification" above). The edit changed header comments only; no executable line was edited on purpose.
+
+**Evidence limits.** The claim that only the header changed rests on reported edit-time evidence: a same-command `diff -u` against a pre-edit copy that
+showed only the replaced lines, exact file-size arithmetic (18,023 - 243 + 362 = 18,142 bytes, matching the actual size), and format checks (303 lines, ASCII,
+no CR bytes). The pre-edit copy was deleted afterwards and the file is untracked, so no original exists to compare against. A **complete, repeatable
+byte-for-byte comparison cannot be established**, and this entry does not claim independent proof that the rest of the file is unchanged. No script hash was
+recorded with the 12-passed run, so which exact file content ran also rests on inference (file modification time before the log timestamp).
+
+**Unchanged.** G49 **OPEN / NOT PASSED**; `INVESTMENT_ALERT_PERSISTENCE_ENABLED = False`; A-10 not approved and not executed; Phase 51 **NOT** formally
+complete; Phase 52 **NOT** authorized. No script, test, Docker or service was run for this entry. `compose.yaml` (FRED), `compose.yaml.pre-fred-backup` and
+`scratch/` were not touched. Nothing is staged or committed.
