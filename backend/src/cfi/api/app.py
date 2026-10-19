@@ -13,6 +13,7 @@ from cfi.api.errors import register_exception_handlers
 from cfi.api.limiter import limiter
 from cfi.api.middleware import REQUEST_ID_HEADER, request_context_middleware
 from cfi.api.routes import (
+    advisor,
     alerts,
     analyst,
     anomaly,
@@ -38,6 +39,7 @@ from cfi.api.routes import (
     market_structure,
     meta,
     paper,
+    portfolio,
     regime,
     retail,
     rotation,
@@ -152,4 +154,6 @@ def create_app(
     app.include_router(intelligence_investment.router)
     app.include_router(decision.router)
     app.include_router(decision_history.router)
+    app.include_router(advisor.router)
+    app.include_router(portfolio.router)
     return app

@@ -17,6 +17,7 @@ describe("navigation", () => {
       "Derivatives",
       "Liquidity",
       "Analytics",
+      "Advisor Brief",
       "Alerts",
       "Daily Brief",
       "Paper Trading",

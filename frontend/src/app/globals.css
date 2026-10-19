@@ -669,3 +669,26 @@ a {
     font-size: 18px;
   }
 }
+
+/* Advisor Brief (Phase 53 step 2) */
+.advisor-gaps {
+  border-left: 4px solid var(--warn);
+  background: var(--warn-soft);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  margin: 0 0 12px;
+}
+
+.layer-tag {
+  white-space: nowrap;
+}
+
+.layer-hypothesis,
+.layer-historical_analogue {
+  border-style: dotted;
+}
+
+.layer-calculated_signal,
+.layer-risk_reading {
+  border-style: dashed;
+}

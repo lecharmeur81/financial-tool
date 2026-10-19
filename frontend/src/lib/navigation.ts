@@ -60,6 +60,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
     plannedPhase: "12–15, 19, 20, 35 (backtests not yet scheduled)",
   },
   {
+    href: "/advisor",
+    label: "Advisor Brief",
+    description:
+      "Read-only, rule-based brief per asset: stance, evidence layers, data gaps, risks and invalidation conditions from the latest stored snapshot. Not a prediction, not personalized advice, no trading.",
+    plannedPhase: "53",
+  },
+  {
     href: "/alerts",
     label: "Alerts",
     description: "Rule-based alerts on metrics, signals, regimes, and data-quality events.",
