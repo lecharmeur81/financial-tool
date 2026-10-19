@@ -4381,3 +4381,311 @@ recorded with the 12-passed run, so which exact file content ran also rests on i
 **Unchanged.** G49 **OPEN / NOT PASSED**; `INVESTMENT_ALERT_PERSISTENCE_ENABLED = False`; A-10 not approved and not executed; Phase 51 **NOT** formally
 complete; Phase 52 **NOT** authorized. No script, test, Docker or service was run for this entry. `compose.yaml` (FRED), `compose.yaml.pre-fred-backup` and
 `scratch/` were not touched. Nothing is staged or committed.
+
+## 2026-10-19 - Phase 51 alert-listing gate-off HTTP integration verification
+
+**Provenance.** User-run on Windows with explicit authorization, against the isolated disposable database only; the command and result were reported to
+Claude. This entry is documentation only: Claude ran no test, Docker command, database command or scheduler for it and did not re-run Ruff.
+
+- **Test:** `backend/tests/integration/test_alert_listing_gate_off_http.py` (one test).
+- **Command (user-run):** `.\.venv\Scripts\python.exe -m pytest tests/integration/test_alert_listing_gate_off_http.py -m integration -p no:cacheprovider -q`
+- **Result:** 1 passed in 7.39 seconds; pytest exit code 0.
+- **Target:** isolated disposable PostgreSQL container `p51-test-db-isolated-20261018`, host port `55433`; the test fixture used `p51_scratch_test`.
+- **Scope of what it verifies:** the gate-off investment-alert listing behavior through real SQL persistence and the HTTP endpoint (`GET /api/v1/alerts/`),
+  including status filters, ordering, limits, and preservation of ordinary alerts after an evaluation cycle. No `investment_state` alert was persisted.
+- **Lint and format:** Ruff lint and format checks had previously passed for this test file; they were not re-run to write this record.
+- **Only this test was run.** This entry does not claim that any other test or suite was run.
+
+**Limitations.** This does not verify frontend or dashboard rendering, journal or paper consumers, gate-on behavior, investment signal quality, or
+profitability. It does not satisfy G49, any of P1 to P8, or A-10.
+
+**Statuses retained.**
+- G49 **OPEN / NOT PASSED**.
+- `INVESTMENT_ALERT_PERSISTENCE_ENABLED = False`.
+- A-10 **PROPOSED / NOT APPROVED / NOT EXECUTED**.
+- Phase 51 is **NOT** formally complete. Phase 52 is **NOT** authorized and has not started.
+
+**Working tree.** The test file was untracked when this entry was written. No staging or commit was performed. `compose.yaml` (FRED),
+`compose.yaml.pre-fred-backup`, `scratch/` and `Run-P51RealtimeSuite.ps1` were not touched.
+
+## 2026-10-19 - G49 amendment and scope rulings; frontend validation; diff audit (documentation only)
+
+**Supersession.** The "unassigned" wording for `decision_store/repository.py` in the entry "G49 decision recorded; retained deviations carried" above is
+superseded by the ADR-0087 repository ruling. Where earlier entries describe the G49 criterion as unchanged, or closure as needing a future amendment, the
+current position is: G49 text unchanged; a dated amendment (`METHODOLOGY_INVESTMENT_ALERTS.md` §14), the repository ruling and a test-only frontend ruling exist (ADR-0087 in
+`DECISIONS.md`). None of them passes G49. This entry is the only place these results are recorded; `DECISIONS.md` points here.
+
+**Frontend validation - USER-REPORTED, 2026-10-19; not independently run by Claude.** Scope: the three `AlertsSection` tests and fixtures in
+`frontend/src/components/dashboard/dashboard-components.test.tsx` (hand-fed fixtures).
+- `vitest run src/components/dashboard/dashboard-components.test.tsx`: 30 tests passed.
+- Prettier check: passed.
+- ESLint: completed successfully, no errors reported.
+The exact command lines and outputs were not supplied to Claude. These tests do not show that investment-alert persistence is disabled, and they are not live-dashboard
+evidence (one test records that `AlertsSection` passes an `investment_state` record through unfiltered).
+
+**Amended G49 diff audit - read-only, by Claude, 2026-10-19.**
+- Reference commit `9962980` equals HEAD. The four approved reliability changes are present in `9962980`; the working-tree blobs of `alerts/service.py`,
+  `alerts/stage_timing.py`, `api/routes/alerts.py`, `realtime/service.py`, `worker/app.py` (and `worker/client.py`, `worker/runtime.py`, `decision_store/repository.py`)
+  are identical to the reference. Their hunks were compared with the amendment's allowlist; the Stage 6 block is not wrapped. No other Phase 23, route, frontend,
+  journal, paper or realtime file is modified in `5193c38..9962980`.
+- The test-only ruling covers only the three reviewed tests and fixtures in the file named above, not any other change to it.
+- **This is not a blanket clean diff.** The working tree also differs from `9962980` in `DECISIONS.md`, `METHODOLOGY_INVESTMENT_ALERTS.md`, `PROGRESS.md`, `compose.yaml`
+  (protected FRED work; not inspected and not part of this audit) and the frontend test file, and it holds untracked files (`Run-P51RealtimeSuite.ps1`, the listing
+  test, `compose.yaml.pre-fred-backup`, `scratch/`). The audit covers the named source files and categories, not every working-tree change.
+
+**Not proven.**
+- *Runtime clause* (dashboard and `/alerts` data contain no investment item): the API listing is covered by the real-SQL/HTTP test, but no live dashboard or browser
+  check exists.
+- *Reliability, unit tests:* the new unit tests for the repository safeguard (`test_persist_assessments_time_limits.py`) have not been run in this session. Nine POSIX
+  timer tests skip on Windows. The integration benchmark has not been executed, and no post-change G38 parity result is recorded.
+- *Reliability, real behavior:* real interrupt behavior has not been verified on Linux or a live stack. This covers cancel-and-drain, lock ownership under a real
+  soft-time-limit interrupt, and the repository safeguard.
+- Whether this entry discharges the "recorded diff check" in methodology §14 item 6 is left to the owner.
+
+**Unchanged.** G49 OPEN / NOT PASSED; persistence disabled; A-10 proposed, not approved and not executed; P1 to P8 open; Phase 51 not complete; Phase 52 not authorized;
+Phase 50 outstanding. Nothing staged or committed.
+
+## 2026-10-19 - G49 closed under the amended criterion: diff-audit acceptance and live runtime evidence (documentation only)
+
+**Status.** G49 is **CLOSED UNDER THE AMENDED CRITERION** (`METHODOLOGY_INVESTMENT_ALERTS.md` §14, amendment of 2026-10-19). It was **not** satisfied under the original
+literal wording of the diff clause, which is unchanged; the amendment and the two scope rulings changed what that clause permits. This closes G49 only: **Phase 51 is
+not complete** (no completion record; see below). Earlier entries that say "OPEN / NOT PASSED" are accurate as of their writing and are not rewritten.
+
+**Closing conditions (methodology §14, amendment item 6), checked against the records.**
+1. *Recorded diff check against reference `9962980`:* **met by the user's decision of 2026-10-19.** The user explicitly accepted the diff audit recorded in the entry
+   "G49 amendment and scope rulings; frontend validation; diff audit" above as satisfying this requirement. **Scope of that audit, unchanged:** the named source files
+   and the named categories only. It is **not** an audit of the whole working tree and the working tree is **not** described as clean: it also holds `compose.yaml`
+   (protected FRED work; not inspected), uncommitted documentation changes, the frontend test file (covered by the test-only ruling for its three reviewed tests and
+   fixtures only) and untracked files.
+2. *Runtime-clause evidence (item 5):* **met**, with the limits below. **USER-REPORTED, 2026-10-19; not independently run by Claude:**
+   - The live dashboard at `http://127.0.0.1:3000/` loaded; its visible Alerts section contained no `investment_state` alert.
+   - The read-only request `GET http://127.0.0.1:8000/api/v1/alerts/?limit=200` returned 200 records, **zero** with `alert_type` `investment_state`. Types returned:
+     `anomaly`, `capital_rotation`, `derivatives`, `divergence`, `liquidity`, `macro`, `regime_change`, `retail_activity`, `whale_activity`.
+   - The `/alerts` page itself was not reported as visited. Its code requests the same data with `limit` 200 (`frontend/src/app/alerts/page.tsx`), so the API request
+     covers the data it would show (an inference from the code, not an observation of the page).
+   - Together with the earlier evidence: the real-SQL/HTTP listing test (1 passed, user-run), the in-memory G47/G48 tests and the hand-fed `AlertsSection` tests.
+3. *Other amendment requirements:* the tests for each retained change exist (checked earlier today); the repository safeguard (ADR-0087 ruling) and the test-only frontend
+   ruling are in place; the evidence, testing and truthful-reporting requirements are unchanged.
+
+**Limits of the runtime evidence.** A single point-in-time observation. The build and version running on that stack, and whether a cycle containing the Stage 6 block
+had run on it, were not recorded. The check looked at the visible Alerts section and at `alert_type` values only. It says nothing about gate-on behavior. The gate is the
+hard-coded `False` with no override path (K-4), so no build can persist an investment alert; code-path evidence for the block remains the G46/G47/G50 tests and the
+listing test.
+
+**Not proven, and not closure criteria of G49 under the amendment (disclosed limitations).** Real interrupt behavior (cancel-and-drain, lock ownership under a real
+soft-time-limit interrupt, the repository safeguard) on Linux or a live stack; the new repository-safeguard unit tests have not been run in this session; a post-change
+G38 parity result is not separately recorded; the seeded benchmark has not been re-executed after Finding 2. **Signal quality is unvalidated:** nothing here says anything
+about the accuracy, usefulness or profitability of investment alerts (Phase 50 is not done).
+
+**Unchanged.** `INVESTMENT_ALERT_PERSISTENCE_ENABLED = False`; A-10 PROPOSED / NOT APPROVED / NOT EXECUTED; P1 to P8 open; Phase 51 NOT formally complete (needs a
+completion record and an explicit user decision); Phase 52 NOT authorized and not started; Phase 50 outstanding. The deferred stale "not modified" references are
+still unedited. Nothing staged or committed; no test, Docker or database command was run for this entry.
+
+## 2026-10-19 - Owner exception: enabled-mode clauses of G34, G44 and G54 deferred to Phase 52 (documentation only)
+
+**Recorded.** The owner approved a narrow exception deferring the enabled-mode clause of G34 and G44 and the gate-enabled clause of G54 to Phase 52 alongside P8. These clauses are
+**NOT PASSED - DEFERRED BY OWNER EXCEPTION**; the original criteria are unchanged and nothing here claims they passed. Reasons, the recorded deviation from methodology §4.1 item 2
+(the block-level `persistence_enabled` parameter was not implemented; the Stage 4 writer was deliberately not built; the planner-level seam cannot verify the full-path assertions)
+and the Phase 52 obligation are in `DECISIONS.md` (ADR-0087, "Exception (2026-10-19)") and `METHODOLOGY_INVESTMENT_ALERTS.md` §14 ("Exception to G34, G44 and G54") with a pointer at §4.1 item 2.
+Basis: the read-only fixture-to-test mapping (R1) of 2026-10-19; gate-off coverage for these fixtures is unchanged and was not re-run.
+
+**Unchanged.** Persistence disabled; the `InvestmentCycleResult` guard intact; no writer; A-10 not approved and not executed; P1 to P8 open; G49 closed under the amended criterion;
+Phase 51 not complete (no completion record); Phase 52 not authorized. No code or test was changed; no test, Docker or database command was run; nothing staged or committed.
+
+## 2026-10-19 - Phase 51 closure record (ACCEPTED WITH DOCUMENTED LIMITATIONS)
+
+**Standing of this record.** This is the end-of-phase report in the format of `CLAUDE.md` C2. **Status: ACCEPTED WITH DOCUMENTED LIMITATIONS.** *Owner decision, 2026-10-19:* the owner explicitly accepted
+Phase 51 with the limitations documented in this record and required that all changes remain uncommitted. The status line was prepared as "PREPARED for the owner; NOT accepted" earlier the same day and is
+changed only by that decision. **Acceptance does not establish investment signal quality, profitability, or production readiness.** It does not change any acceptance status below: the enabled-mode
+exception in section B stands as NOT PASSED, G49 stays closed under its amended criterion, and persistence stays disabled. Documentation only; Claude ran no test, Docker, database or runtime command
+for it. "Reported" = run by the user and reported to Claude. Entries above are not rewritten.
+
+**Git state (verified read-only, 2026-10-19).** HEAD `9962980` "[P51] document realtime runner disposition". Phase 51 commits since baseline `5193c38`: `c42b075`, `3dbe90b`, `6f0e9c8`, `460f88e`,
+`4a5ad4b`, `9962980`. Nothing is staged. **The working tree is not clean, by the user's constraint that nothing be staged or committed:** modified `DECISIONS.md`, `METHODOLOGY_INVESTMENT_ALERTS.md`,
+`PROGRESS.md`, `compose.yaml` (protected FRED work), `frontend/src/components/dashboard/dashboard-components.test.tsx`; untracked `Run-P51RealtimeSuite.ps1`,
+`backend/tests/integration/test_alert_listing_gate_off_http.py`, `compose.yaml.pre-fred-backup`, `scratch/`. **Git commit for this record: none.**
+
+**Completed work.** Investment alerts as an evaluate-and-plan layer over Phase 49 inside `AlertService.evaluate`, with persistence disabled (`INVESTMENT_ALERT_PERSISTENCE_ENABLED = False`,
+`investment_alerts.py:93`): adapter, evaluator, lifecycle planner and per-cycle block; the injected reader and defaulted `investment` field; the four retained reliability changes and the
+repository time-limit safeguard (rulings recorded in ADR-0087 and methodology §14); the D8 point-in-time performance change (separately and provisionally accepted); stage-timing diagnostics.
+
+**Files changed.** Committed since `5193c38`: 65 files (42 added, 23 modified; 34 under `tests/`). Source: new `alerts/investment_adapter.py`, `investment_alerts.py`, `investment_block.py`,
+`stage_timing.py`, `core/pit_memo.py`; modified `alerts/service.py`, `api/routes/alerts.py`, `realtime/service.py`, `worker/app.py`, `client.py`, `runtime.py`, `decision_store/repository.py`, the
+D8 query/snapshot modules and `compose.yaml`; helper scripts `Invoke-P51Pytest.ps1`, `Run-P51Step0Pass1.ps1`. Uncommitted: as listed under Git state.
+
+**Tests executed and results (all Reported; none run by Claude).**
+- `uv run pytest -m "not integration"` (2026-10-19; time not recorded; HEAD `9962980` plus the uncommitted tree above): **2,926 passed, 9 skipped, 382 deselected, 188.96 s.** The deselected count is one higher than the
+  381 of 2026-10-18, consistent with the new listing test (an integration test); that is an inference. The skip reason was not supplied (on 2026-10-18 the nine skips were POSIX-timer tests on Windows).
+  This run is the fresh evidence for the required unit fixtures below; G38 and the repository-safeguard tests are in it but were not itemized.
+- Earlier: realtime suite 12 passed (116.70 s); I-01 to I-07 7 passed; 8 PostgreSQL tests passed; alert-listing HTTP test 1 passed (7.39 s); Ruff, format and `mypy --platform linux` clean (2026-10-18, at `c42b075`;
+  not reported again since); frontend `vitest` 30 passed, Prettier and ESLint clean (2026-10-19).
+
+**A. Criteria passed, with evidence.**
+- G45, G46, G47, G48, G50, G53 and the gate-off clauses of G34, G44 and G54; the A-3 set G35, G36, G37, G39 (mapping reviewed 2026-10-19; unit tests in the run above; the real-SQL/HTTP listing test backs G47).
+- G49: **closed under the amended criterion** (diff audit accepted by the user; live dashboard and `GET /api/v1/alerts/?limit=200` showed no `investment_state`, user-reported). Not satisfied under the original literal wording; unchanged.
+- ADR-0087 accepted for Phase 51 scope only (2026-10-18).
+
+**B. Clauses NOT PASSED - DEFERRED BY OWNER EXCEPTION (not a pass).** The enabled-mode clause of G34 and G44 and the gate-enabled clause of G54, deferred to Phase 52 with P8 (ADR-0087 "Exception
+(2026-10-19)"; methodology §14). The Stage 4 writer was deliberately not built and the block-level seam of §4.1 item 2 was not implemented (recorded deviation).
+
+**C. Open items, unresolved.**
+- Staging and committing of the work above: **not done, by the owner's requirement that all changes remain uncommitted.** (The Phase 51 closure decision itself is recorded above: accepted with documented limitations.)
+- P1 to P8 (including P5 / A-10: **proposed, not approved, not executed**); Phase 52 **not authorized**; Phase 50 historical validation **outstanding** (a separate milestone, not a prerequisite).
+- **Signal quality is unvalidated:** nothing here speaks to the accuracy, usefulness or profitability of investment alerts.
+
+**Known issues and limitations.** Real interrupt behavior (cancel-and-drain, lock ownership under a real soft-time-limit interrupt, the repository safeguard) has not been verified on Linux or a live stack; no CI
+or Linux run exists (no git remote is configured here). The seeded benchmark has not been re-executed after Finding 2. There has been no single full integration run; 382 integration tests are deselected in the
+run above. The live dashboard observation is point-in-time and did not record the running build. G39 asserts `detection_method_for` for 3 of 11 types (code unmodified; non-blocking). The implementation records
+`status="internal_error"`, not the literal `investment_internal_error` (non-blocking). The deferred stale "not modified" references (`PROGRESS.md` 4052, 4095, 4182-4183 and similar) remain unedited.
+
+**Next recommended phase.** None is opened by this acceptance. Phase 52 requires its own authorization and P1 to P8; Phase 50 is a separate roadmap milestone. Stop and wait for the user (R13).
+
+## 2026-10-19 - Phase 50: owner decisions D-1 to D-5 recorded; census provenance preparation (documentation only)
+
+**Recorded.** `DECISIONS.md` ADR-0088 now holds the owner decisions D-1 to D-5 (descriptive framework only; Path D, derived on read, no migration, API or package by default; missing entry bars reported as unavailable; duplicates and overlap reported, effective n from non-overlapping windows; one exhaustive read-only census labelled "reconstructed using current code"). Phase 50 is not complete; the census has not been run under these decisions.
+
+**Read-only provenance findings (no command, test, Docker or database action was run by Claude).** HEAD `996298065330e1d76043f20974d6f3c79869085c`. `scratch/phase50_census.py` SHA-256 `67d3be9f1d85a21d5a3190c0d866d16f7df19641d94c6650cfa80eaa0c28345c` (117,895 bytes), equal to the hash pinned in `Run-P51Step0Pass1.ps1`. The eight replay modules named by the script's `code_provenance()` have, in the working tree and at HEAD, the same 16-character SHA-256 prefixes as the 2026-10-10 census report (8 of 8 match; no uncommitted change under `backend/src`). The census image tag is `cfi-backend:p50-census`; the project wrapper pins image ID `sha256:b23b13492d47a7adb2bc643ad487d0fe7128557925d1aac233e3e82e96640a6e`. Not established: that the image contents match HEAD outside those eight modules. Since P49 (`bb8698b`), `market/queries.py` and `market_structure/metrics.py`, which the census imports, were changed by `c42b075` (result-identical memoization and PIT-window changes, per their docstrings); the image predates that commit, so those two files are expected to differ. This has to be disclosed in the census report and is not hidden. The image has not been inspected by Claude.
+
+**Not done.** No census run, no image rebuild, no commit, no staging. Phase 51 record, G49, `compose.yaml`, FRED work and all uncommitted changes are untouched.
+
+## 2026-10-19 - Phase 50 census result and acceptance record (documentation only)
+
+**Owner decision D-6 (2026-10-19).** Phase 50 is ACCEPTED as a descriptive historical-validation framework only. Outcome values are not reported; predictive performance, signal quality and profitability remain unvalidated. The decision is recorded in `DECISIONS.md` under ADR-0088 ("Status update (2026-10-19), census result and acceptance").
+
+**Evidence.** Exhaustive read-only census `scratch/p50_full_20261019.json` (SHA-256 `2297404493C12FC2D16EF947DAD97EC8656CA11E7DC30629B89CFB4311729F97`), cutoff 2026-10-19T00:00:00Z, no `--limit`, exit code 0, 1,625.5 s; companions `p50_full_20261019.err` and `.provenance.txt`. Script `phase50_census.py` SHA-256 `67d3be9f1d85a21d5a3190c0d866d16f7df19641d94c6650cfa80eaa0c28345c`; image `sha256:b23b13492d47a7adb2bc643ad487d0fe7128557925d1aac233e3e82e96640a6e`; Git HEAD `996298065330e1d76043f20974d6f3c79869085c`. Claude read the files and re-checked the file hash and the eight replay-module hash prefixes only; it did not rerun the census or run tests, Docker or database commands.
+
+**Result.** Replay exhaustive and complete: 8,265 snapshots replayed, 0 failures, 0 measurement errors (the inventory counted 8,257; 8 were stored during the run). 14 of 15 UTC days covered; longest gap 34.36 h; 0 repeated payload hashes; event-driven cadence. Of 33,060 asset-observations: 7-day 17,232 usable, 15,184 not yet known, 528 created after the cutoff, 116 entry price known only after the decision; 30-day and 90-day 0 usable. Drawdown windows: 30,096 partial (cutoff-limited), 308 `missing_entry_bar`, 2,128 unavailable (helper), 528 created after the cutoff. Effective sample size at most 1 non-overlapping 7-day window per asset and per state among usable observations. Only 3 distinct state vectors; 5 of 8 states never observed. Entry-price check: 25 pairs, 0 mismatches.
+
+**Limitations (all carried in the ADR text).** Reconstructed with current code, not point-in-time evidence; bar availability rule-derived. Database read-only was script-enforced, not role-enforced. The image predates `c42b075`; the owner reports `market/queries.py` and `market_structure/metrics.py` differ from the working tree (not inspected by Claude; documented as result-identical, untested here). Unresolved: 2,128 drawdown-helper disagreements; the 308 versus 116 entry-bar count difference; the earlier 24-of-80 sample cannot be matched to the 308. Single venue. Evidence files are in untracked `scratch/`.
+
+**Not done / unchanged.** No code, test, methodology, configuration, Docker, database or census action. `METHODOLOGY_INVESTMENT_ALERTS.md` is unedited (its "Phase 50 not started" statements are stale and deferred). Phase 51 record, G49, `compose.yaml`, FRED work and all other uncommitted changes preserved. `INVESTMENT_ALERT_PERSISTENCE_ENABLED = False`; A-10 PROPOSED / NOT APPROVED / NOT EXECUTED; P1 to P8 open; Phase 52 not authorized. Nothing staged or committed.
+
+**Next recommended phase.** None is opened by this acceptance; no new phase is recommended. Optional follow-up outside acceptance: re-run the same census no earlier than about 2026-11-05 (30-day) and about 2027-01-04 (90-day). Stop and wait for the user (R13).
+
+## 2026-10-19 - Phase 52 step 1: guarded, idempotent user alert transitions (PARTIAL; uncommitted)
+
+**Authorization.** Owner instruction of 2026-10-19 to start Phase 52 immediately, with `INVESTMENT_ALERT_PERSISTENCE_ENABLED` kept `False`, A-10 not executed and the G34/G44/G54 enabled-mode exception unchanged. Decision record: `DECISIONS.md` ADR-0089.
+
+**Baseline (read-only).** HEAD `9962980`; gate `False` (`investment_alerts.py:93`); working tree as before (` M DECISIONS.md`, ` M METHODOLOGY_INVESTMENT_ALERTS.md`, ` M PROGRESS.md`, ` M compose.yaml`, the frontend test, plus the untracked wrapper, HTTP test, `compose.yaml.pre-fred-backup` and `scratch/`). The roadmap documents give Phase 52 no acceptance criteria; methodology §18 assigns it delivery, notification channels, user-facing alert management, monitoring, visible markers, age-based expiry, any new status and any clearance, and §18.1 P3 requires each lifecycle change to have its own approval. Only what is safe with persistence off and needs no new policy was implemented.
+
+**Implemented.** `lifecycle.py`: `OPEN_STATUSES`, `user_transition`, `user_transition_sources`. `repository.py`: guarded `set_status`, `resolve`, `supersede`. `api/routes/alerts.py`: `apply_user_transition` and 409/idempotent behavior on the acknowledge and resolve endpoints. `core/errors.py`: `AlertTransitionError` (409). Tests: `tests/unit/test_alerts_lifecycle.py` (+ transition table), new `tests/unit/test_alert_user_transitions.py` (route logic on an in-memory repository, races, compiled UPDATE guards), `tests/integration/test_alerts_service.py` (+ one real-PostgreSQL guard test, NOT run).
+
+**Phase 52 files** (all uncommitted): `backend/src/cfi/alerts/lifecycle.py`, `backend/src/cfi/alerts/repository.py`, `backend/src/cfi/api/routes/alerts.py`, `backend/src/cfi/core/errors.py`, `backend/tests/unit/test_alerts_lifecycle.py`, `backend/tests/unit/test_alert_user_transitions.py`, `backend/tests/integration/test_alerts_service.py`, `DECISIONS.md`, `PROGRESS.md`. Of these, `DECISIONS.md` and `PROGRESS.md` already carried uncommitted edits from earlier work; this entry only appends.
+
+**Validation (Claude, Linux, Python 3.12.14, isolated environment outside the repository from `uv sync --frozen --no-install-project`, `PYTHONPATH=src`, no cache or bytecode written into the repository).** Focused: `tests/unit/test_alerts_lifecycle.py` + `tests/unit/test_alert_user_transitions.py` 39 passed. Related alert/investment/realtime unit files 471 passed. `tests/api` (non-integration) passed. `tests/unit` with `-m "not integration"`: 2,916 passed in 157 s. `ruff check` on `src/cfi` and the touched tests: passed; `ruff format --check`: passed; `mypy` on the touched sources and tests: no issues in 14 files. Not run: the integration suite and the new real-PostgreSQL test (no database or Docker was used), the frontend tests, a Windows run. The counts are not reconciled with the earlier Windows figure (2,926 passed, 9 skipped, 382 deselected) because the platform, the skip set and the number of tests differ.
+
+**Remaining limitations.** The behavior change on already-terminal alerts is real (409 instead of a silent rewrite) and has not been exercised against a live API. The SQL guard is verified by compiling the statements, not by executing them. The lifecycle items listed as deferred in ADR-0089 are not implemented. Investment-alert persistence is off, so nothing here has any effect on investment alerts.
+
+**Safety.** Gate `False`; A-10 not executed; G34/G44/G54 enabled-mode clauses still NOT PASSED (deferred by owner exception); Phase 51 and Phase 50 records untouched; `compose.yaml`, FRED work and the other pre-existing changes preserved; nothing staged or committed.
+
+
+## 2026-10-19 - Phase 52 P3: derived lifecycle marker for "state ended / cannot be evaluated" (PARTIAL; uncommitted)
+
+**Scope.** Owner-approved marker only (see ADR-0090). No age-based expiry, new status, clearance, post-resolution interval, notification or UI work.
+
+**Implemented.** New `backend/src/cfi/alerts/lifecycle_marker.py` (pure, read-time, nothing stored); `backend/src/cfi/api/routes/alerts.py` adds the additive `lifecycle_marker` response field on the two read endpoints. New `backend/tests/unit/test_alert_lifecycle_marker.py` (19 tests: each kind, ended vs cannot-be-evaluated vs still-holds, unusable components, absent tool, terminal statuses, unreadable snapshots, investment alerts, no row mutation, API response, pin to the service's flagged-state types). `METHODOLOGY_INVESTMENT_ALERTS.md` gets one appended status note under §8.1.1; DECISIONS.md gets ADR-0090.
+
+**Validation (Claude, Linux, isolated environment outside the repository).** Focused: `tests/unit/test_alert_lifecycle_marker.py` 19 passed. Regression: `tests/unit -k "alert or lifecycle or investment or realtime or journal or paper"` 1,082 passed, 1,854 deselected. `ruff check` and `ruff format --check` clean and `mypy` clean on the three touched source/test files. No integration test was added or run (the marker needs no database); the earlier PostgreSQL guard test from step 1 is still unrun. `git diff --check` clean.
+
+**Remaining limitations.** See ADR-0090. The marker was exercised on constructed snapshot payloads, not against a live API or live snapshot. The marker is as of the latest stored snapshot, no freshness rule is applied, and `_auto_resolve_cleared` still resolves flagged-state alerts when the source tool produced no result.
+
+**Safety.** Gate `False`; A-10 not executed; G34/G44/G54 enabled-mode clauses still NOT PASSED (deferred by owner exception); Phase 50 and Phase 51 records untouched; nothing staged or committed; every pre-existing modification and untracked file preserved.
+
+
+## 2026-10-19 - Phase 52: `_auto_resolve_cleared` requires explicit clearance evidence (PARTIAL; uncommitted)
+
+**Scope.** Narrow correctness fix (ADR-0091): unknown is not cleared. No new status, expiry or other P3 feature.
+
+**Implemented.** `rules.py`: `cleared_dedup_keys`. `service.py`: `_auto_resolve_cleared` resolves only explicitly cleared keys and logs the held count. `lifecycle_marker.py`: `state_ended` for flagged alerts only on explicit clearance. `repository.py`: docstring only. New `tests/unit/test_alert_auto_resolve_clearance.py` (confirmed clearance for all three types; missing / failed / empty source; unavailable readings; unusable component; degraded, missing, absent and tool-level untrusted quality; conflicting snapshot; service resolves only cleared keys, holds the rest, ignores still-flagged keys). `test_alert_lifecycle_marker.py` updated to the new rule. `test_alert_service_investment.py`: the stub harness now states its clearance explicitly (`cleared_dedup_keys` patched to `divergence:BTC`), because its snapshot stub has no tool results; the tests' assertions are unchanged.
+
+**Validation (Claude, Linux, isolated environment outside the repository).** The first run after the change failed 36 and then 26 tests in `test_alert_service_investment.py` and one other file: the stub snapshot lacked the attributes the new function reads, and the harness relied on resolve-by-absence. Fixed in the test harness only. Final: `tests/unit -k "alert or lifecycle or investment or realtime or journal or paper or persist or rules or snapshot or brief or analyst"` 1,330 passed, 1,632 deselected; the three focused files 80 passed. `ruff check`, `ruff format --check` and `mypy` clean on 15 touched files. A run of the whole `tests/unit` directory exceeded the 180 s tool limit and did not complete, so it is NOT claimed. No integration test run (none needed a database for this change; the seeded-benchmark test only lists `auto_resolve` as a stage name). `git diff --check` clean.
+
+**Remaining limitations.** See ADR-0091. Not exercised against a live database or a live snapshot. Step 1 PostgreSQL guard test still unrun.
+
+**Safety.** Gate `False`; A-10 not executed; G34/G44/G54 enabled-mode clauses still NOT PASSED (deferred); nothing staged or committed; all pre-existing modifications and untracked files preserved.
+
+
+## 2026-10-19 - Phase 52 final acceptance check: implemented scope ACCEPTED WITH DOCUMENTED LIMITATIONS (uncommitted)
+
+**Decision.** No material blocker in the implemented scope; recorded in ADR-0092. This accepts three pieces only: guarded transitions (ADR-0089), the read-time lifecycle marker (ADR-0090) and explicit-evidence auto-resolution (ADR-0091). It is not approval to enable persistence.
+
+**Checks made (read-only; no tests, Docker, database commands or census run in this check).** Git: HEAD `9962980`, nothing staged; Phase 52 files as listed in the earlier entries plus `rules.py`, `service.py`, `lifecycle_marker.py` and the two new unit test files. `git diff --check` clean. Gate `INVESTMENT_ALERT_PERSISTENCE_ENABLED: Final = False` at `investment_alerts.py:93`. The repository, error-class and service diffs were inspected and match the ADRs.
+
+**Evidence strength.** Unit and in-memory tests (Claude, Linux) cover all three pieces. The PostgreSQL integration run of `tests/integration/test_alerts_service.py` (4 passed in 8.68 s) is owner-reported; I did not see the log and the revision it ran on is not recorded. It covers that file only. No integration test exercises a flagged-alert auto-resolve, the alerts HTTP endpoints or the marker on real data. The whole `tests/unit` directory was never run to completion in one call.
+
+**Remaining limitations.** Marker is as of the latest stored snapshot with no freshness rule; "stale" and "contradictory" are recognised only through existing statuses; alerts whose item disappears for good need a user resolve; the 409 behavior has not been exercised on a live API; the owner-reported integration log should be attached to the repository record if it is to count as evidence.
+
+**Safety.** Gate `False`; A-10 not executed; G34/G44/G54 enabled-mode clauses NOT PASSED, deferred; P1, P2, P4 to P8 and the rest of P3 open; Phase 50 and Phase 51 records untouched; nothing staged or committed; all pre-existing modifications and untracked files preserved.
+
+**Evidence note (added 2026-10-19, owner-reported).** The owner preserved the PostgreSQL integration-test output `scratch/phase52_alerts_service_integration_20261019.log` (SHA-256 `1471E40AA93BCE26345477E49658E888E9C03450B88BA4F741D1367D7BF432F9`; the file's hash matches this value when read back, and it holds two lines ending `4 passed in 8.68s`). This is owner-reported PostgreSQL integration evidence for `tests/integration/test_alerts_service.py` (4 tests) only. It was not independently verified: Claude did not run or observe the test. The log does not record the Git revision, branch, working-tree state or environment it ran against, so the result cannot be tied conclusively to the current HEAD (`9962980`) plus the uncommitted Phase 52 changes. File timestamps are not accepted as evidence of the tested revision. The limitation listed above (no integration test of flagged-alert auto-resolve, the HTTP endpoints or the marker on real data) is unchanged.
+
+
+## 2026-10-19 - Phase 53 step 1: deterministic Advisor Brief (PARTIAL; uncommitted)
+
+**Scope (owner instruction of 2026-10-19).** Smallest reliable advisor increment from existing components; see ADR-0093. Phase 53 is NOT complete and no acceptance is claimed.
+
+**Inspected first.** CLAUDE.md (A2 layer rule, A3 Decision Intelligence boundaries, R6 AI rules); the AI Analyst (service, tools, universe, validator, route); the decision, confirmation, opportunity, ranking, risk and investment modules and routes; the alert modules; the test builders. Finding: the Analyst reads 14 domain tools but none of the L4.5 decision or investment contracts, and nothing presents one asset's evidence, uncertainty, gaps, risks and invalidation together.
+
+**Implemented.** `backend/src/cfi/advisor/` (`brief.py`, `__init__.py`): pure `build_advisor_brief`. `backend/src/cfi/api/routes/advisor.py`: `GET /api/v1/advisor/brief?asset=` (read-only). `backend/src/cfi/api/app.py`: router registered. Tests: `tests/unit/test_advisor_brief.py` (verbatim copying, determinism, layers, gaps never neutral, missing cap source, conflicts, gated assessment, invalidation, field trace, banned-language guard on the brief's own text, input validation) and `tests/unit/test_advisor_route.py` (200, live-state gaps, case-insensitive asset, 422, 404, 503 x2, single read).
+
+**Validation (Claude, Linux, isolated environment outside the repository, no database).** New tests: 27 passed. Regression: `tests/unit -k "advisor or decision or investment or intelligence or opportunit or ranking or risk or confirmation or app or route or openapi or alert or analyst or brief"` 1,851 passed, 1,138 deselected (107 s). `ruff check`, `ruff format --check` and `mypy` clean on the 6 new/changed source and test files. Initial run found one test fixture error (invalid band code `S0`), fixed in the test. The whole `tests/unit` directory was not run in one call, no integration test was run, no frontend check was run, and the endpoint was not called against a live snapshot.
+
+**Remaining limitations.** No LLM narration or free-text Q&A over the brief; no frontend; layer labels are an editorial mapping; the brief is only as complete as the latest stored snapshot (live data is largely insufficient); not exercised against a live database.
+
+**Safety.** Gate `False`; A-10 not executed; G34/G44/G54 enabled-mode clauses NOT PASSED, deferred; Phase 50 not re-run and not treated as predictive evidence; no database write, Docker or scheduler action; nothing staged or committed; all pre-existing modifications and untracked files preserved.
+
+## 2026-10-19 - Phase 53 step 2: read-only Advisor Brief frontend (PARTIAL; uncommitted)
+
+**Scope.** A read-only `/advisor?asset=BTC|ETH|SOL|XRP` page over the existing `GET /api/v1/advisor/brief` (ADR-0093). Server-side fetch through `getJson` (browser never calls the API); response validated by `parseAdvisorBrief` and refused if its shape is unexpected. Shows stance, confidence, posture and decision state unchanged, API layer labels, data gaps and unusable readings (never neutral), decision risks, invalidation and reassessment, an `insufficient_evidence` explanation, and a collapsed `not_claimed` disclosure. Handles loading, 404, 422, 503, network and unexpected-shape errors. No LLM, scoring, trading, persistence, backend, schema, compose or .env change. New nav entry "Advisor Brief".
+
+**Files.** New: `frontend/src/lib/advisor.ts`, `advisor.test.ts`, `frontend/src/components/advisor/{AdvisorBriefView.tsx, advisor-fixtures.ts, advisor-brief.test.tsx}`, `frontend/src/app/advisor/page.tsx`. Edited: `frontend/src/lib/navigation.ts` and `.test.ts`, `frontend/src/app/globals.css` (appended).
+
+**Evidence (run by Claude on Linux in a scratch copy of `frontend/` with a fresh `pnpm install --frozen-lockfile`, because the repo's Windows `node_modules` cannot run on Linux).** `vitest run`: 25 files, 219 tests passed. `typecheck` (next typegen + tsc), `lint` (eslint .) and `format:check` (prettier): clean. The repo's own `node_modules` was not used, `next build` was not run and the page was not viewed against the live API or in a browser.
+
+**Not done / limits.** Phase 53 is NOT complete. No end-to-end or visual check; no accessibility audit beyond semantic markup and tests; field_trace is not displayed; wording maps fall back to the API's raw id for unknown values. Gate stays False; A-10 not executed; nothing staged or committed.
+
+## 2026-10-20 - Phase 53: ACCEPTED WITH DOCUMENTED LIMITATIONS (implemented read-only Advisor Brief scope only; uncommitted)
+
+**Decision.** ADR-0094 accepts the read-only, deterministic Advisor Brief backend (ADR-0093) and its frontend (`/advisor`, nav entry, BTC/ETH/SOL/XRP, error handling) for the implemented scope. Phase 53 as a whole is not complete.
+
+**Facts.** The backend reads the latest stored snapshot and composes the brief deterministically with no write; 404/422/503 handling is covered by unit tests. The frontend validates responses and handles loading, 404, 422, 503, network and unexpected-shape states; missing or stale evidence is never shown as neutral.
+
+**Evidence (owner-reported unless stated).** Frontend: 25 files / 219 tests passed; typecheck, lint, format check and production build passed. Backend targeted and wider selected regression passed per existing evidence. Real-database manual checks: HTTP 200 for BTC, ETH, SOL, XRP; HTTP 422 for an unsupported asset; page confirmed correct in the browser. Claude's final review was read-only and found no material defect.
+
+**Limitations.** No automated integration test of the real-database 200 path; the brief reflects stored-snapshot quality (Insufficient Evidence and gaps are legitimate outcomes); `field_trace` not displayed; no dedicated accessibility audit; LLM narration and question answering not implemented.
+
+**Not claimed.** Not predictive validation, not profitability, not personalized advice, not a trade instruction.
+
+**Safety.** `INVESTMENT_ALERT_PERSISTENCE_ENABLED` stays `False`; A-10 not executed; G34/G44/G54 enabled-mode clauses NOT PASSED and deferred; Phase 50 census not re-run; nothing staged or committed; all existing work preserved.
+
+## 2026-10-20 - Phase 54 step 1: read-only exposure view of simulated paper trades (PARTIAL; uncommitted)
+
+**Scope.** ADR-0095. `GET /api/v1/portfolio/exposure`: gross and net notional (long positive, short negative), per-asset share of gross, largest share and sum of squared shares, total margin, notional-weighted leverage, per-position and per-asset comparison with the existing Advisor Brief (stance and decision state), explicit `not_assessed` for missing or unusable briefs, price and invalid-position flags, an `unavailable` list (real holdings, sector, correlation, portfolio liquidity, suitability or overexposure verdict) and `not_claimed` statements. Sources are labelled simulated paper trades; nothing is presented as a real holding. No migration, dependency, setting, frontend or write.
+
+**Files.** New: `backend/src/cfi/portfolio/{__init__.py, exposure.py}`, `backend/src/cfi/api/routes/portfolio.py`, `backend/src/cfi/advisor/compose.py`, `backend/tests/unit/test_portfolio_exposure.py` (40), `backend/tests/unit/test_portfolio_route.py` (9), `backend/tests/integration/test_portfolio_api.py` (5). Edited: `backend/src/cfi/api/app.py` (router registered), `backend/src/cfi/api/routes/advisor.py` (the snapshot pipeline now calls `build_investment_decision_for`; behavior unchanged), `DECISIONS.md`, `PROGRESS.md`.
+
+**Validation (Claude, Linux, isolated environment outside the repository).** `pytest tests/unit/test_portfolio_exposure.py tests/unit/test_portfolio_route.py tests/unit/test_advisor_brief.py tests/unit/test_advisor_route.py`: 40 + 9 + the existing Advisor Brief tests passed (the 4-file run reported 75 passed before the route-method test was corrected; the portfolio route file then passed 9). `-k "advisor or portfolio or paper or decision_api or alerts_route or app or openapi"`: 187 passed. `-k "intelligence or investment or opportunity or ranking or risk or confirmation or p51_integration_gate"`: 1,334 passed. Ruff check and format check, and mypy (11 source files, cache outside the repo), clean on the changed and new files. `git diff --check` clean.
+
+**Not run.** `tests/integration/test_portfolio_api.py` was collected (5 skipped without services) but NOT executed: this environment has no PostgreSQL, Redis or Docker, and the isolated database credential is not available to Claude. It must be run by the owner against the verified isolated container (`p51_scratch_test` on `p51-test-db-isolated-20261018`, `127.0.0.1:55433`) with `-m integration`. No result is claimed.
+
+**Outstanding acceptance gaps.** The integration run above; no frontend; no review of how the simulated figures read against a real paper-trade history; real holdings (Option B) are undecided and would need their own table, migration and ADR.
+
+**Safety.** `INVESTMENT_ALERT_PERSISTENCE_ENABLED` stays `False`; A-10 not executed; G34/G44/G54 enabled-mode clauses NOT PASSED and deferred; `.env` and `compose.yaml` untouched by this step (`compose.yaml` carries the earlier FRED edit); no database write, container or scheduler action; nothing staged or committed.
+
+**Evidence note (added 2026-10-20, owner-reported): Phase 54 step 1 integration validation.** This supersedes the "Not run" statement in the 2026-10-20 Phase 54 step 1 entry above for `backend/tests/integration/test_portfolio_api.py`. The owner reported from a PowerShell run: command `pytest tests/integration/test_portfolio_api.py -m integration -p no:cacheprovider -q` against the isolated PostgreSQL container, with the dedicated databases `p54_pf_20261020_k7q3x9` and `p54_pf_20261020_k7q3x9_test` (the fixture's drop and create could only target the latter). Result: 5 passed in 5.93 s; pytest exit code 0. Covered: empty portfolio, stored paper trades summarised from PostgreSQL, Advisor Brief consistency for the same stored snapshot, missing-snapshot handling (not assessed) and read-path non-mutation.
+
+**Qualifications.** Claude did not run or observe this test and has not seen the log; the revision it ran against is not recorded. The Docker volume verification command in that run failed with a template-parsing error before the tests started, so volume identity was not verified by it; isolation rests on the unique database names and the owner's earlier reported container checks. The databases were left in place. This is not evidence of production readiness, investment performance or profitability, or real-holdings support (positions are simulated paper trades), and it covers the backend endpoint only.
+
+**Remaining Phase 54 gaps.** No frontend page; real holdings (Option B) undecided and would need their own table, migration and ADR; no review of the figures against a real paper-trade history; no correlation, sector or liquidity analysis. Phase 54 is NOT complete. `INVESTMENT_ALERT_PERSISTENCE_ENABLED` stays `False`; A-10 not executed; G34/G44/G54 enabled-mode clauses NOT PASSED and deferred; nothing staged or committed.
+
+## 2026-10-20 - Phase 54 step 1: formal acceptance (limited scope; uncommitted)
+
+**Decision.** Phase 54 step 1 (read-only Paper Portfolio Exposure, ADR-0095) is ACCEPTED within the implemented scope only, with documented limitations. This supersedes the "PARTIAL" and "Outstanding acceptance gaps" wording in the earlier Phase 54 entries for that scope; those entries are left unchanged.
+
+**Evidence.** Owner-reported from PowerShell: `tests/integration/test_portfolio_api.py` 5 passed in 5.93 s (exit code 0); `tests/integration/test_advisor_api.py` 8 passed in 5.87 s (exit code 0), which re-confirms the Advisor endpoint after the `advisor.py` refactor. Earlier validation, not re-run for this entry: 40 unit tests, 9 route tests, wider regression of 1,334 tests, Ruff and mypy clean on the changed files. Claude did not run or observe the integration tests.
+
+**Limitations.** Integration results are owner-reported; the test log and exact tested Git revision were not preserved. Docker volume identity was reported verified during the Advisor run, but the volume check in the earlier Portfolio run failed with a template-parsing error, so the two runs do not have identical verification evidence. Exposure is of simulated open paper trades, not real holdings. No frontend exposure page, real-holdings support, sector exposure, return correlation, portfolio liquidity, recommendations or trade execution. Display rounding can make asset shares sum slightly below or above 1. Open-position read scalability is not established.
+
+**Scope.** Acceptance covers Phase 54 step 1 only; it does not mean the Phase 54 roadmap is complete or that the feature is production-ready.
+
+**Safety.** `INVESTMENT_ALERT_PERSISTENCE_ENABLED` stays `False`; A-10 not executed; G34/G44/G54 enabled-mode clauses NOT PASSED and deferred; no application code, tests, `.env`, `compose.yaml` or scheduler change; no database created or deleted; nothing staged or committed.
