@@ -619,6 +619,95 @@ describe("AlertsSection", () => {
   });
 });
 
+// ---- G49 runtime clause, frontend half (Phase 51). HAND-FED fixtures: these tests exercise only how
+// `AlertsSection` renders the records it is given. They do not call the API and cannot show
+// whether `INVESTMENT_ALERT_PERSISTENCE_ENABLED` is off; that is a backend property, evidenced
+// separately (backend/tests/integration/test_alert_listing_gate_off_http.py).
+// Ordinary seeds mirror SEEDS in that backend test (type, severity, domain "BTC"; statuses as it sets them).
+const ordinarySeeds: ReadonlyArray<readonly [string, string, string]> = [
+  ["whale_activity", "notable", "active"],
+  ["macro", "info", "acknowledged"],
+  ["regime_change", "elevated", "resolved"],
+  ["whale_activity", "critical", "active"],
+  ["macro", "notable", "active"],
+];
+
+const ordinaryAlerts: AlertStatus[] = ordinarySeeds.map(([alertType, severity, status], index) => ({
+  ...alertOk,
+  alert_id: `seed-${index}`,
+  alert_type: alertType,
+  severity,
+  domain: "BTC",
+  trigger_condition: `seeded ordinary alert ${index}`,
+  observed_value: `v${index}`,
+  reference_value: null,
+  evidence_field_ids: ["get_anomalies.data.BTC"],
+  snapshot_id: null,
+  source_tool_id: "get_anomalies",
+  status,
+}));
+
+// Shape per backend/src/cfi/alerts/investment_alerts.py: alert_type ALERT_TYPE, severity
+// SEVERITY_BY_STATE (uniformly "notable"), domain = the asset (BTC), trigger_condition from
+// _TRIGGER_TEMPLATE, observed_value = the alertable state, reference_value None,
+// source_tool_id = CONTRACT_ID. evidence_field_ids is left empty: the provenance markers are
+// not needed to test rendering and are not invented here.
+const investmentAlert: AlertStatus = {
+  ...alertOk,
+  alert_id: "inv-0",
+  alert_type: "investment_state",
+  severity: "notable",
+  domain: "BTC",
+  trigger_condition: "investment decision state for BTC",
+  observed_value: "candidate_unresolved",
+  reference_value: null,
+  evidence_field_ids: [],
+  snapshot_id: null,
+  source_tool_id: "investment_decision.v0",
+  status: "active",
+};
+
+const summaryTexts = (container: HTMLElement): string[] =>
+  Array.from(container.querySelectorAll("summary")).map((node) => node.textContent ?? "");
+
+describe("AlertsSection with gate-off-shaped alert listings (hand-fed fixtures)", () => {
+  it("renders every ordinary record, one row each, with no investment_state row (fixture only, not proof of gate enforcement)", () => {
+    const { container } = render(<AlertsSection alerts={{ ok: true, data: ordinaryAlerts }} />);
+    const summaries = summaryTexts(container);
+    expect(container.querySelectorAll("details")).toHaveLength(ordinaryAlerts.length);
+    expect(summaries).toHaveLength(ordinaryAlerts.length);
+    ordinaryAlerts.forEach((alert, index) => {
+      expect(summaries[index]).toContain(alert.alert_type);
+    });
+    expect(screen.queryByText(/investment_state/)).toBeNull();
+    expect(container.textContent).not.toContain("investment_state");
+  });
+
+  it("passes an investment_state record through unfiltered: AlertsSection does NOT filter investment alerts, and this test does NOT prove gate-off behavior", () => {
+    const { container } = render(<AlertsSection alerts={{ ok: true, data: [investmentAlert] }} />);
+    const summaries = summaryTexts(container);
+    expect(container.querySelectorAll("details")).toHaveLength(1);
+    expect(summaries[0]).toContain("investment_state");
+    expect(screen.getByText(/investment decision state for BTC/)).toBeTruthy();
+  });
+
+  it("renders a mixed list of ordinary and investment records, every row, in input order", () => {
+    const mixed: AlertStatus[] = [
+      ordinaryAlerts[0],
+      ordinaryAlerts[1],
+      investmentAlert,
+      ordinaryAlerts[2],
+    ];
+    const { container } = render(<AlertsSection alerts={{ ok: true, data: mixed }} />);
+    const summaries = summaryTexts(container);
+    expect(container.querySelectorAll("details")).toHaveLength(mixed.length);
+    mixed.forEach((alert, index) => {
+      expect(summaries[index]).toContain(alert.alert_type);
+    });
+    expect(summaries[2]).toContain("investment_state");
+  });
+});
+
 const briefOk: BriefStatus = {
   brief_id: "b1",
   status: "completed",
