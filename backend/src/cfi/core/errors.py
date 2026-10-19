@@ -95,6 +95,15 @@ class NotFoundError(CFIError):
     title = "Not found"
 
 
+class AlertTransitionError(CFIError):
+    """A user-driven alert status change that the lifecycle does not permit (Phase 52): the alert
+    is already terminal (``resolved``/``expired``) or the target status is not user-settable."""
+
+    error_code = "alert_transition_rejected"
+    http_status = HTTPStatus.CONFLICT
+    title = "Alert status change not permitted"
+
+
 class UnauthorizedError(CFIError):
     """Missing or invalid ``X-API-Key`` (Phase 28, Priority 1, ``cfi.api.auth.require_api_key``)."""
 

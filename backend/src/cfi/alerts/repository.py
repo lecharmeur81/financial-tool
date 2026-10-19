@@ -19,7 +19,7 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from cfi.alerts.lifecycle import ExistingAlert
+from cfi.alerts.lifecycle import OPEN_STATUSES, ExistingAlert, user_transition_sources
 from cfi.db import tables as t
 
 
@@ -64,9 +64,9 @@ class AlertRepository:
     async def active_entries_with_prefix(self, prefix: str) -> list[tuple[str, int]]:
         """Every dedup key (and its alert id) currently ``active``/``acknowledged`` whose key
         starts with ``prefix`` (e.g. ``"divergence:"``) — used to auto-resolve a flagged-state
-        alert type (divergence/anomaly/capital_rotation) whose underlying flag cleared this cycle
-        (its evaluator simply stops emitting a candidate for that key, rather than emitting an
-        explicit "cleared" state; see ``cfi.alerts.service.AlertService._auto_resolve_cleared``)."""
+        alert type (divergence/anomaly/capital_rotation) whose underlying flag the cycle's evidence
+        EXPLICITLY shows cleared (an absent candidate alone is unknown, not cleared; see
+        ``cfi.alerts.service.AlertService._auto_resolve_cleared``)."""
         stmt = select(t.alert_event.c.dedup_key, t.alert_event.c.id).where(
             t.alert_event.c.dedup_key.like(prefix + "%"),
             t.alert_event.c.status.in_(("active", "acknowledged")),
@@ -129,7 +129,7 @@ class AlertRepository:
         been created to replace it (never deleted, R10 — the lifecycle is audit history)."""
         stmt = (
             update(t.alert_event)
-            .where(t.alert_event.c.id == alert_id)
+            .where(t.alert_event.c.id == alert_id, t.alert_event.c.status.in_(OPEN_STATUSES))
             .values(status="expired", updated_at=now, superseded_by=superseded_by)
         )
         async with self.engine.begin() as conn:
@@ -141,20 +141,31 @@ class AlertRepository:
         normal."""
         stmt = (
             update(t.alert_event)
-            .where(t.alert_event.c.id == alert_id)
+            .where(t.alert_event.c.id == alert_id, t.alert_event.c.status.in_(OPEN_STATUSES))
             .values(status="resolved", updated_at=now, resolved_at=now)
         )
         async with self.engine.begin() as conn:
             await conn.execute(stmt)
 
     async def set_status(self, alert_id: uuid.UUID, *, status: str, now: datetime) -> bool:
-        """User-driven lifecycle transition (``acknowledged``/``resolved``) via the API."""
+        """User-driven lifecycle transition (``acknowledged``/``resolved``) via the API.
+
+        Guarded in the UPDATE itself (Phase 52): it applies only from a status
+        ``cfi.alerts.lifecycle.user_transition`` permits, so a terminal alert is never reopened or
+        re-stamped even if two requests race. Returns False when nothing changed."""
+        sources = user_transition_sources(status)
+        if not sources:
+            return False
         values: dict[str, Any] = {"status": status, "updated_at": now}
         if status == "acknowledged":
             values["acknowledged_at"] = now
         elif status == "resolved":
             values["resolved_at"] = now
-        stmt = update(t.alert_event).where(t.alert_event.c.uuid == alert_id).values(**values)
+        stmt = (
+            update(t.alert_event)
+            .where(t.alert_event.c.uuid == alert_id, t.alert_event.c.status.in_(sources))
+            .values(**values)
+        )
         async with self.engine.begin() as conn:
             result = await conn.execute(stmt)
         return bool(result.rowcount)

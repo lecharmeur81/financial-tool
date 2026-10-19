@@ -56,3 +56,38 @@ def decide(
     if elapsed < cooldown_seconds:
         return "skip_cooldown"
     return "rearm"
+
+
+# ---------------------------------------------------------------------------------------------
+# User-driven status transitions (Phase 52). Pure, like ``decide``.
+#
+#   active ──acknowledge──▶ acknowledged ──resolve──▶ resolved      (terminal)
+#      └────────────────────resolve──────────────────▶ resolved
+#   expired (set only by a re-arm supersede) is terminal.
+#
+# A request for the status an alert already has is a no-op (idempotent: no timestamp is rewritten,
+# R10 audit history). A terminal alert is never reopened or re-stamped. ``insufficient_evidence``
+# and every other evaluation outcome stay outside this table: it only judges what a *user* may do.
+OPEN_STATUSES: tuple[str, ...] = ("active", "acknowledged")
+
+TransitionVerdict = Literal["apply", "noop", "reject"]
+
+_USER_TARGET_SOURCES: dict[str, tuple[str, ...]] = {
+    "acknowledged": ("active",),
+    "resolved": ("active", "acknowledged"),
+}
+
+
+def user_transition_sources(target: str) -> tuple[str, ...]:
+    """Statuses from which a user may move an alert to ``target`` (empty if not user-settable)."""
+    return _USER_TARGET_SOURCES.get(target, ())
+
+
+def user_transition(current: str, target: str) -> TransitionVerdict:
+    """``apply`` a permitted change, ``noop`` if the alert already has ``target`` (idempotent),
+    ``reject`` anything else (terminal source, unknown status, or a target a user cannot set)."""
+    if target not in _USER_TARGET_SOURCES:
+        return "reject"
+    if current == target:
+        return "noop"
+    return "apply" if current in _USER_TARGET_SOURCES[target] else "reject"

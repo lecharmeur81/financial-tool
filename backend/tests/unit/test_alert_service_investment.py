@@ -246,6 +246,11 @@ class Harness:
             lambda *_a, **_k: SimpleNamespace(comparison_basis="none", changes=[]),
         )
         monkeypatch.setattr(service_module, "evaluate_all", lambda _s: list(self.candidates))
+        # Phase 52: auto-resolve needs explicit clearance evidence. The stub snapshot has no raw
+        # tool results, so the evidence is stated here: the divergence alert in ``active`` cleared.
+        monkeypatch.setattr(
+            service_module, "cleared_dedup_keys", lambda _s: frozenset({"divergence:BTC"})
+        )
         monkeypatch.setattr(service_module, "log", self.log)
 
     @staticmethod

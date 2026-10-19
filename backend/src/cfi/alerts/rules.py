@@ -333,6 +333,76 @@ def evaluate_capital_rotation(snapshot: Snapshot) -> list[AlertCandidate]:
     return out
 
 
+# Tool-level data_quality statuses that mean the evidence is not trustworthy enough to establish
+# that anything cleared (a superset of the statuses ``cfi.analyst.tools`` uses to call a tool
+# degraded or conflicting, plus ``missing``, the quality vocabulary of the domain services).
+_UNTRUSTED_QUALITY = frozenset({"degraded", "partial", "stale", "conflicting", "missing"})
+
+
+def _tool_quality_ok(data: dict[str, Any]) -> bool:
+    quality = data.get("data_quality") or data.get("quality")
+    status = quality.get("status") if isinstance(quality, dict) else None
+    return not (isinstance(status, str) and status in _UNTRUSTED_QUALITY)
+
+
+def _item_quality_ok(item: dict[str, Any]) -> bool:
+    """Item-level ``data_quality`` must be present and ``ok`` (absent is not evidence)."""
+    quality = item.get("data_quality")
+    return isinstance(quality, dict) and quality.get("status") == "ok"
+
+
+def cleared_dedup_keys(snapshot: Snapshot) -> frozenset[str]:
+    """Dedup keys of flagged-state alerts (divergence / anomaly / capital_rotation) that this
+    snapshot EXPLICITLY shows have cleared (Phase 52). A missing item, a failed or unavailable
+    tool, an ``unavailable``/``None`` reading, degraded or conflicting quality: none of these is
+    evidence of clearance, so none appears here and the alert keeps its status.
+
+    Explicit clearance is, per type, the domain's own affirmative negative: divergence
+    ``is_divergent is False`` (``None`` means unavailable) with both legs' data quality ``ok``;
+    anomaly ``band == "normal"`` (``unavailable`` is not normal) with a usable component and
+    ``ok`` data quality; capital rotation edge ``status == "no_rotation_signal"`` (``unavailable``
+    is not a signal either way). A snapshot with ``has_conflicts`` clears nothing."""
+    if snapshot.has_conflicts:
+        return frozenset()
+    cleared: set[str] = set()
+
+    data = _tool_data(snapshot, ALERT_TYPE_TOOL_IDS["divergence"])
+    if data is not None and _tool_quality_ok(data):
+        for c in data.get("comparisons") or []:
+            legs = (c.get("metric_a"), c.get("metric_b"))
+            if (
+                c.get("is_divergent") is False
+                and c.get("comparison_id") is not None
+                and all(isinstance(leg, dict) and _item_quality_ok(leg) for leg in legs)
+            ):
+                cleared.add(f"divergence:{c['comparison_id']}")
+
+    data = _tool_data(snapshot, ALERT_TYPE_TOOL_IDS["anomaly"])
+    if data is not None and _tool_quality_ok(data):
+        for a in data.get("anomalies") or []:
+            if (
+                a.get("band") == "normal"
+                and a.get("metric_id") is not None
+                and a.get("status") not in _UNUSABLE_STATUSES
+                and _item_quality_ok(a)
+            ):
+                cleared.add(f"anomaly:{a['metric_id']}")
+
+    data = _tool_data(snapshot, ALERT_TYPE_TOOL_IDS["capital_rotation"])
+    if data is not None and _tool_quality_ok(data):
+        for p in data.get("pairs") or []:
+            rotation = p.get("inferred_capital_rotation") or {}
+            from_node = (p.get("from_node") or {}).get("node_id")
+            to_node = (p.get("to_node") or {}).get("node_id")
+            if (
+                rotation.get("status") == "no_rotation_signal"
+                and from_node is not None
+                and to_node is not None
+            ):
+                cleared.add(f"capital_rotation:{from_node}->{to_node}")
+    return frozenset(cleared)
+
+
 def evaluate_regime_change(snapshot: Snapshot) -> list[AlertCandidate]:
     """regime_change: the current regime classification is always reported (one candidate, since
     there is one benchmark-asset regime); whether it is a *change* is decided by

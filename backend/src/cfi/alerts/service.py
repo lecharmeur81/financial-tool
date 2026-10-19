@@ -22,7 +22,7 @@ from cfi.alerts.investment_adapter import SnapshotReader
 from cfi.alerts.investment_block import InvestmentCycleResult, run_investment_cycle
 from cfi.alerts.lifecycle import Action, Candidate, decide
 from cfi.alerts.repository import AlertRepository
-from cfi.alerts.rules import AlertCandidate, evaluate_all
+from cfi.alerts.rules import AlertCandidate, cleared_dedup_keys, evaluate_all
 from cfi.alerts.stage_timing import timed_stage
 from cfi.alerts.universe import ALERT_TYPE_TOOL_IDS, cooldown_period
 from cfi.analyst.repository import AnalystRepository
@@ -197,7 +197,9 @@ class AlertService:
             stage["candidates"] = len(candidates)
 
         with timed_stage(log, "alert_evaluate_stage_timing", stage="auto_resolve"):
-            resolved += await self._auto_resolve_cleared(seen_keys, now=now)
+            resolved += await self._auto_resolve_cleared(
+                seen_keys, cleared_dedup_keys(snapshot), now=now
+            )
 
         # Phase 51 Stage 6: strictly after the 11 existing types are fully processed (their rows
         # are persisted and cleared alerts resolved), so nothing here can change their outcome. An
@@ -221,18 +223,28 @@ class AlertService:
             investment=investment,
         )
 
-    async def _auto_resolve_cleared(self, seen_keys: dict[str, set[str]], *, now: datetime) -> int:
-        """A flagged-state alert type (divergence/anomaly/capital_rotation) whose evaluator no
-        longer emits a candidate for a dedup key that still has an active alert means the
-        underlying condition cleared — resolve it rather than leaving it active forever."""
-        resolved = 0
+    async def _auto_resolve_cleared(
+        self, seen_keys: dict[str, set[str]], cleared_keys: frozenset[str], *, now: datetime
+    ) -> int:
+        """Resolve a flagged-state alert (divergence/anomaly/capital_rotation) ONLY when this
+        cycle's evidence explicitly shows its condition cleared (``cleared_keys``, from
+        ``cfi.alerts.rules.cleared_dedup_keys``). A key whose candidate is simply absent (missing
+        item, failed or unavailable tool, unavailable reading, degraded or conflicting data) is
+        unknown, not cleared: the alert keeps its status (Phase 52)."""
+        resolved = held = 0
         for alert_type in _FLAGGED_STATE_TYPES:
             entries = await self.repo.active_entries_with_prefix(f"{alert_type}:")
             still_flagged = seen_keys[alert_type]
             for dedup_key, alert_id in entries:
-                if dedup_key not in still_flagged:
+                if dedup_key in still_flagged:
+                    continue
+                if dedup_key in cleared_keys:
                     await self.repo.resolve(alert_id, now=now)
                     resolved += 1
+                else:
+                    held += 1
+        if held:
+            log.info("alert_auto_resolve_held", unknown_not_cleared=held)
         return resolved
 
     # ------------------------------------------------------------------ reads (API)

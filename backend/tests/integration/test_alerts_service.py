@@ -7,7 +7,7 @@ like every other Phase 21/22 DB-backed suite."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -89,3 +89,37 @@ async def test_set_status_transitions_are_persisted(
     assert row is not None
     assert row["status"] == "acknowledged"
     assert row["acknowledged_at"] is not None
+
+
+async def test_set_status_never_reopens_or_restamps_a_terminal_alert(
+    db: AsyncEngine, test_settings: Settings
+) -> None:
+    """Phase 52: the guarded UPDATE leaves a ``resolved`` alert exactly as stored."""
+    repo = AlertRepository(db)
+    _id, row_uuid = await repo.insert_alert(
+        now=AS_OF,
+        alert_type="liquidity",
+        severity="notable",
+        domain="GLOBAL",
+        dedup_key="liquidity:GLOBAL",
+        trigger_condition="liquidity score band",
+        observed_value="neutral",
+        reference_value=None,
+        evidence_field_ids=["get_liquidity.score.band"],
+        snapshot_id=None,
+        source_tool_id="get_liquidity",
+        component_status="ok",
+        data_quality_state="ok",
+    )
+    assert await repo.set_status(row_uuid, status="resolved", now=AS_OF)
+    stored = await repo.get_by_uuid(row_uuid)
+    assert stored is not None
+    later = AS_OF + timedelta(hours=1)
+    assert not await repo.set_status(row_uuid, status="acknowledged", now=later)
+    assert not await repo.set_status(row_uuid, status="resolved", now=later)
+    assert not await repo.set_status(row_uuid, status="expired", now=later)
+    after = await repo.get_by_uuid(row_uuid)
+    assert after == stored
+    assert after is not None
+    assert after["status"] == "resolved"
+    assert after["acknowledged_at"] is None
