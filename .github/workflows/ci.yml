@@ -88,6 +88,10 @@ jobs:
         run: pnpm test
       - name: Build
         run: pnpm build
+      # Needs the production build from the step above. Starts only the built Next.js server and a
+      # read-only fixture API on localhost; no backend, database or browser (ADR-0096).
+      - name: End-to-end (mock API)
+        run: pnpm test:e2e
 
   compose:
     runs-on: ubuntu-24.04

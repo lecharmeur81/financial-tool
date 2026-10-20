@@ -16,6 +16,18 @@ describe("Sidebar", () => {
     expect(screen.getAllByRole("link")).toHaveLength(NAV_ITEMS.length);
   });
 
+  it("groups the links under labelled headings without changing the link count", () => {
+    render(<Sidebar />);
+    const groups = screen.getAllByRole("list");
+    expect(groups.map((g) => g.getAttribute("aria-labelledby")).filter(Boolean)).toHaveLength(
+      groups.length,
+    );
+    expect(screen.getByText("Decision support").tagName).toBe("P");
+    expect(screen.getByRole("link", { name: "Portfolio Exposure" }).getAttribute("href")).toBe(
+      "/portfolio",
+    );
+  });
+
   it("marks only the current page", () => {
     pathname.current = "/liquidity";
     render(<Sidebar />);

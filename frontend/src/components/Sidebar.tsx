@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { NAV_ITEMS, isActive } from "@/lib/navigation";
+import { isActive, navGroups } from "@/lib/navigation";
 
 export function Sidebar() {
   const pathname = usePathname() ?? "/";
@@ -15,22 +15,29 @@ export function Sidebar() {
         </span>
         <span className="brand-name">Capital Flow Intelligence</span>
       </div>
-      <ul>
-        {NAV_ITEMS.map((item) => {
-          const active = isActive(item.href, pathname);
-          return (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                className={active ? "nav-link active" : "nav-link"}
-                aria-current={active ? "page" : undefined}
-              >
-                {item.label}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
+      {navGroups().map(({ group, items }) => (
+        <div className="nav-group" key={group}>
+          <p className="nav-group-label" id={`nav-group-${group.toLowerCase().replace(/ /g, "-")}`}>
+            {group}
+          </p>
+          <ul aria-labelledby={`nav-group-${group.toLowerCase().replace(/ /g, "-")}`}>
+            {items.map((item) => {
+              const active = isActive(item.href, pathname);
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    className={active ? "nav-link active" : "nav-link"}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    {item.label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
       <p className="sidebar-footnote">Decision support — not financial advice.</p>
     </nav>
   );

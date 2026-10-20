@@ -6,6 +6,7 @@ import { AlertsSection } from "@/components/dashboard/AlertsSection";
 import { AnomalySection } from "@/components/dashboard/AnomalySection";
 import { BriefSection } from "@/components/dashboard/BriefSection";
 import { DecisionCenterLoading, DecisionCenterSection } from "@/components/decision/DecisionCenter";
+import { DecisionSupportLinks } from "@/components/dashboard/DecisionSupportLinks";
 import { DerivativesLiquiditySection } from "@/components/dashboard/DerivativesLiquiditySection";
 import { DivergenceSection } from "@/components/dashboard/DivergenceSection";
 import { IntelligenceEventsSection } from "@/components/dashboard/IntelligenceEventsSection";
@@ -168,6 +169,8 @@ export default async function DashboardPage(props: PageProps<"/">) {
       <Suspense fallback={<DecisionCenterLoading />}>
         <DecisionCenterSection asset={asset} />
       </Suspense>
+
+      <DecisionSupportLinks asset={asset} />
 
       <Suspense
         fallback={

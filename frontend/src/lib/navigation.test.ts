@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { NAV_ITEMS, isActive, navItem } from "./navigation";
+import { NAV_GROUPS, NAV_ITEMS, isActive, navGroups, navItem } from "./navigation";
 
 const APP_DIR = join(__dirname, "..", "app");
 
@@ -18,6 +18,7 @@ describe("navigation", () => {
       "Liquidity",
       "Analytics",
       "Advisor Brief",
+      "Portfolio Exposure",
       "Alerts",
       "Daily Brief",
       "Paper Trading",
@@ -41,6 +42,21 @@ describe("navigation", () => {
     expect(isActive("/market", "/market")).toBe(true);
     expect(isActive("/market", "/market/btc")).toBe(true);
     expect(isActive("/market", "/marketplace")).toBe(false);
+  });
+
+  it("puts every item in a known group and keeps each group contiguous", () => {
+    for (const item of NAV_ITEMS) expect(NAV_GROUPS).toContain(item.group);
+    const grouped = navGroups();
+    expect(grouped.map((g) => g.group)).toEqual([...NAV_GROUPS]);
+    expect(grouped.flatMap((g) => g.items.map((i) => i.href))).toEqual(
+      NAV_ITEMS.map((i) => i.href),
+    );
+    expect(grouped.find((g) => g.group === "Decision support")?.items.map((i) => i.label)).toEqual([
+      "Advisor Brief",
+      "Portfolio Exposure",
+      "Alerts",
+      "Daily Brief",
+    ]);
   });
 
   it("rejects unknown items", () => {

@@ -50,6 +50,11 @@ function Frame({ asset, children }: { asset: AdvisorAsset; children: React.React
         </div>
         <AssetSwitch asset={asset} />
       </header>
+      <nav aria-label="Related views" className="related-links" data-testid="advisor-related">
+        <Link href="/portfolio">Paper Portfolio Exposure</Link>
+        <Link href={`/?asset=${asset}`}>Dashboard Decision Center ({asset})</Link>
+        <Link href="/alerts">Alerts</Link>
+      </nav>
       {children}
     </section>
   );

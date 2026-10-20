@@ -692,3 +692,34 @@ a {
 .layer-risk_reading {
   border-style: dashed;
 }
+
+/* Dashboard UX (Phase 55): grouped navigation, decision-support links, related-view links */
+.nav-group + .nav-group {
+  margin-top: 10px;
+}
+
+.nav-group-label {
+  margin: 0 0 4px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.related-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.decision-support-links h2 {
+  margin-bottom: 4px;
+}
+
+.decision-support-links .summary-grid {
+  margin-bottom: 0;
+}

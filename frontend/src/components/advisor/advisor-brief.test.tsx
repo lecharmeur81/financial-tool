@@ -223,6 +223,18 @@ describe("error and loading states", () => {
     expect(screen.queryByTestId("advisor-stance")).toBeNull();
   });
 
+  it("links to the exposure view, the dashboard for the same asset, and alerts", () => {
+    view(ok(parsed(insufficientRaw("ETH"))), "ETH");
+    const nav = screen.getByTestId("advisor-related");
+    const hrefs = within(nav)
+      .getAllByRole("link")
+      .map((a) => a.getAttribute("href"));
+    expect(hrefs).toEqual(["/portfolio", "/?asset=ETH", "/alerts"]);
+    cleanup();
+    view(fail(503, "x"));
+    expect(screen.getByTestId("advisor-related")).toBeTruthy();
+  });
+
   it("shows a loading state", () => {
     render(<AdvisorBriefLoading />);
     expect(screen.getByRole("status").textContent).toMatch(/Loading/);
