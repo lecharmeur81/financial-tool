@@ -106,5 +106,15 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate compose file
         run: cp .env.example .env && docker compose config --quiet
+      # Configuration-only check of the production overlay: merges the files and validates the result.
+      # Starts nothing and builds nothing. The values are throwaway placeholders, not secrets.
+      - name: Validate production overlay
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-placeholder
+          POSTGRES_DB: ci
+          REDIS_PASSWORD: ci-placeholder
+          CFI_API_KEY: ci-placeholder
+        run: docker compose -f compose.yaml -f compose.prod.yaml config --quiet
       - name: Build images
         run: docker compose build

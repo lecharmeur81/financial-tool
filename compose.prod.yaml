@@ -4,7 +4,7 @@
 #
 # compose.yaml alone is still the full local development stack, unchanged — nothing here is
 # required (or applied) unless this file is explicitly layered on top of it. This file only
-# changes the five custom-built services (migrate/api/worker/worker-backfill/beat/frontend):
+# changes the custom-built services (migrate/api/worker/worker-backfill/worker-alerts/beat/frontend):
 #   - builds the backend's "runtime" Dockerfile target (prod dependencies only, no test/lint/
 #     type-check tooling baked in) instead of "dev", and tags it separately (cfi-backend:prod)
 #     so it never collides with the cfi-backend:dev image a developer already has built;
@@ -62,6 +62,19 @@ services:
       - /tmp
 
   worker-backfill:
+    <<: *hardening
+    build: *backend-build-prod
+    image: cfi-backend:prod
+    environment:
+      CFI_ENVIRONMENT: production
+    tmpfs:
+      - /tmp
+
+  # Added after the Phase 57 step 1 audit: the base compose.yaml defines worker-alerts, and without
+  # this block it would run the dev image as CFI_ENVIRONMENT=development with no hardening. Only the
+  # hardening/production keys are set here; its command, queue ("alerts"), dependencies and
+  # stop_grace_period are inherited unchanged from compose.yaml.
+  worker-alerts:
     <<: *hardening
     build: *backend-build-prod
     image: cfi-backend:prod
