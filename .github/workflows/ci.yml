@@ -93,6 +93,13 @@ jobs:
       - name: End-to-end (mock API)
         run: pnpm test:e2e
 
+      # Real Chromium against the same built server + fixture API (no backend, DB, Redis or scheduler).
+      - name: Install Chromium for browser tests
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Browser tests (Playwright, mock API)
+        run: pnpm test:browser
+
   compose:
     runs-on: ubuntu-24.04
     steps:

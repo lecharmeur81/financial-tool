@@ -38,8 +38,8 @@ export function EvidencePanels({ decision }: { decision: DecisionCurrent }) {
   return (
     <>
       <div className="decision-columns">
-        <section aria-labelledby="decision-support-title">
-          <h3 id="decision-support-title">Supporting evidence</h3>
+        <section aria-labelledby="decision-evidence-title">
+          <h3 id="decision-evidence-title">Supporting evidence</h3>
           <EvidenceList
             items={evidence.supportive}
             empty="No supporting evidence is available right now."

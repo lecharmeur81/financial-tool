@@ -70,6 +70,8 @@ export async function startStack(): Promise<Stack> {
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
+  // Never leave the server running if the test process dies before `stop()` is reached.
+  process.once("exit", () => child.kill("SIGKILL"));
   child.stdout?.on("data", (d: Buffer) => (output += d.toString()));
   child.stderr?.on("data", (d: Buffer) => (output += d.toString()));
 
