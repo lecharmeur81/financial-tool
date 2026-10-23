@@ -3,10 +3,14 @@ examples, both driven by a stub ``classify_at`` callback (no database, no classi
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 from cfi.regime import history as h
+from cfi.regime.universe import INTERACTIVE_HISTORICAL_CONCURRENCY
 
 DAY = timedelta(days=1)
 T0 = datetime(2026, 6, 1, tzinfo=UTC)
@@ -91,3 +95,77 @@ async def test_historical_examples_empty_when_nothing_matches() -> None:
         max_examples=3,
     )
     assert episodes == []
+
+
+# --- bounded concurrency (GET /regime/current) ---
+def _weeks_stub(log: list[datetime] | None = None) -> h.ClassifyAt:
+    async def classify_at(candidate: datetime) -> tuple[str, Decimal | None]:
+        if log is not None:
+            log.append(candidate)
+        await asyncio.sleep(0)
+        weeks = round((T0 - candidate).days / 7)
+        label = "expansion" if weeks % 3 == 0 else "recovery"
+        return label, Decimal(weeks % 5) / Decimal(10)
+
+    return classify_at
+
+
+async def _examples(classify_at: h.ClassifyAt, **extra: int) -> list[h.Episode]:
+    return await h.historical_examples(
+        classify_at,
+        as_of=T0,
+        current_regime_id="expansion",
+        streak_since=T0 - 2 * DAY,
+        lookback_days=365,
+        step_days=7,
+        min_episode_samples=1,
+        max_examples=50,
+        **extra,
+    )
+
+
+@pytest.mark.parametrize("concurrency", [2, 3, 4, 8, 100])
+async def test_concurrent_examples_equal_the_sequential_result(concurrency: int) -> None:
+    sequential = await _examples(_weeks_stub())
+    assert sequential, "the stub must yield episodes for the comparison to mean anything"
+    assert await _examples(_weeks_stub(), concurrency=concurrency) == sequential
+
+
+async def test_default_concurrency_is_the_original_sequential_order() -> None:
+    log: list[datetime] = []
+    await _examples(_weeks_stub(log))
+    assert log == sorted(log, reverse=True)  # most recent first, one at a time
+
+
+async def test_concurrency_is_bounded() -> None:
+    running = peak = 0
+
+    async def classify_at(candidate: datetime) -> tuple[str, Decimal | None]:
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.001)
+        running -= 1
+        return "recovery", None
+
+    await _examples(classify_at, concurrency=INTERACTIVE_HISTORICAL_CONCURRENCY)
+    assert peak == INTERACTIVE_HISTORICAL_CONCURRENCY == 3
+
+
+async def test_a_failure_is_reraised_unchanged_and_the_rest_are_cancelled() -> None:
+    started = 0
+
+    class BoomError(Exception):
+        pass
+
+    async def classify_at(candidate: datetime) -> tuple[str, Decimal | None]:
+        nonlocal started
+        started += 1
+        if started == 2:
+            raise BoomError
+        await asyncio.sleep(0.05)
+        return "recovery", None
+
+    with pytest.raises(BoomError):
+        await _examples(classify_at, concurrency=3)
+    assert started < 52  # not every remaining sample was run after the failure

@@ -6,8 +6,10 @@ Verified 2026-09-23 against the official documentation (https://www.okx.com/docs
 - ``GET /api/v5/market/candles`` (the latest 1,440 bars) and ``GET /api/v5/market/history-candles``
   (older bars), both with ``instId``, ``bar``, ``after`` (records *earlier* than a timestamp),
   ``before`` and ``limit`` (maximum 100); rate limit 20 requests per 2 seconds;
-- ``bar`` values include 1m, 5m, 15m, 1H and — aligned to UTC — ``4Hutc`` and ``1Dutc`` (plain
-  4H/1D bars follow Hong Kong time, so they are *not* used);
+- ``bar`` values include 1m, 5m, 15m, 1H, 4H and — aligned to UTC — ``1Dutc`` (plain 1D bars follow
+  Hong Kong time, so they are *not* used). OKX has no ``4Hutc``: it rejects it with code 51000
+  "Parameter bar error"; a Hong Kong (UTC+8) 4H bar opens at a multiple of four hours, so plain
+  ``4H`` boundaries already coincide with UTC (the ``utc`` variants exist from 6H upwards);
 - response ``{"code": "0", "msg": "", "data": [[ts, o, h, l, c, vol, volCcy, volCcyQuote,
   confirm], …]}``, newest first; ``ts`` in epoch milliseconds; ``confirm`` "0" = bar not completed;
   ``vol`` in the base currency, ``volCcyQuote`` in the quote currency.
@@ -57,7 +59,7 @@ BARS: dict[str, str] = {
     "5m": "5m",
     "15m": "15m",
     "1h": "1H",
-    "4h": "4Hutc",
+    "4h": "4H",  # not "4Hutc" (rejected, code 51000); 4H bars are UTC-aligned already
     "1d": "1Dutc",
 }
 PAGE_LIMIT = 100
@@ -76,9 +78,9 @@ CAPABILITIES = ProviderCapabilities(
     original_source="okx",
     terms_verified=False,
     notes=(
-        "Public market data, no key. Pairs are quoted in USDT (unit 'usdt'). 4h/1d use the UTC "
-        "variants (4Hutc/1Dutc). May be unreachable from the Philippines (ISP blocking since "
-        "August 2025). Terms of use not yet reviewed by the user."
+        "Public market data, no key. Pairs are quoted in USDT (unit 'usdt'). 1d uses the UTC "
+        "variant (1Dutc); 4h uses 4H, which is UTC-aligned already. May be unreachable from the "
+        "Philippines (ISP blocking since August 2025). Terms of use not yet reviewed by the user."
     ),
 )
 

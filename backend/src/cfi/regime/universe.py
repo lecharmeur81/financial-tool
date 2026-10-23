@@ -52,6 +52,11 @@ HISTORICAL_STEP_DAYS = 7
 #: A sampled run must span at least this many consecutive samples to count as a historical
 #: episode (avoids reporting a single noisy weekly sample as a whole "episode").
 MIN_EPISODE_SAMPLES = 2
+# Interactive requests (GET /regime/current) classify the independent historical samples with at
+# most this many in flight. Kept below the default DB pool size (5) so one request cannot starve it.
+# Offline read-only probes on the live DB: 3 and 4 were indistinguishable within run-to-run noise
+# (3: 7.31 s, 7.72 s; 4: 7.44 s, 6.88 s), so the lower database load wins.
+INTERACTIVE_HISTORICAL_CONCURRENCY = 3
 
 MAX_HISTORICAL_EXAMPLES = 3
 

@@ -236,7 +236,7 @@ class OkxFake(FakeProvider):
         "5m": 300,
         "15m": 900,
         "1H": 3600,
-        "4Hutc": 14400,
+        "4H": 14400,
         "1Dutc": 86400,
     }
 

@@ -306,6 +306,21 @@ def test_coingecko_rejects_non_positive_market_cap() -> None:
 # --------------------------------------------------------------------------- OKX, Bybit, Kraken
 
 
+def test_okx_sends_only_bar_values_okx_accepts_for_every_timeframe() -> None:
+    # OKX rejects "4Hutc" with code 51000 "Parameter bar error" (it has no UTC variant below 6H);
+    # a Hong Kong 4H bar opens on a multiple of four hours, so plain "4H" is already UTC-aligned.
+    adapter = OkxSpot()
+    t = datetime(2026, 9, 1, tzinfo=UTC)
+    sent = {
+        tf: adapter.first_request(
+            ohlcv_dataset("usdt", tf).dataset_id, FetchWindow(t - 24 * H, t, "XRP")
+        ).params["bar"]
+        for tf in ("1m", "5m", "15m", "1h", "4h", "1d")
+    }
+    assert sent == {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1Dutc"}
+    assert "4Hutc" not in sent.values()
+
+
 def test_okx_uses_utc_daily_bars_and_respects_the_confirm_flag() -> None:
     adapter = OkxSpot()
     dataset = ohlcv_dataset("usdt", "1d")

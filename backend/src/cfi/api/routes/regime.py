@@ -25,7 +25,9 @@ from fastapi import APIRouter, Query, Request
 
 from cfi.api.params import resolve_query_times
 from cfi.core.errors import ServiceUnavailableError
+from cfi.core.pit_memo import pit_read_scope
 from cfi.regime.service import RegimeService
+from cfi.regime.universe import INTERACTIVE_HISTORICAL_CONCURRENCY
 
 router = APIRouter(prefix="/api/v1/regime", tags=["regime"])
 
@@ -62,4 +64,11 @@ async def current(
     """The current regime classification: label, confidence, contributing/contradicting metrics,
     regime start date and duration, and historical examples of the same regime."""
     a, k = resolve_query_times(as_of, knowledge_time)
-    return await _service(request).current(as_of=a, knowledge_time=k)
+    # One request-scoped memo (Phase 51): the ~170 historical classifications behind the duration
+    # walk and the examples share revision windows instead of issuing a query per day. Results are
+    # identical (point-in-time reuse is exact-key or provably equivalent); the scope ends with the
+    # request.
+    with pit_read_scope():
+        return await _service(request).current(
+            as_of=a, knowledge_time=k, historical_concurrency=INTERACTIVE_HISTORICAL_CONCURRENCY
+        )

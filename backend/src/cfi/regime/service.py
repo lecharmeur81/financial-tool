@@ -10,6 +10,7 @@ conditions satisfy the regime's own definition, never a probability of future pr
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -145,14 +146,37 @@ class RegimeService:
         )
         return classify(snapshot, rp.parameters(), previous_regime_id=previous_regime_id)
 
-    async def current(self, *, as_of: datetime, knowledge_time: datetime) -> dict[str, Any]:
-        snapshot = await gather_snapshot(
-            self.adapters, asset=BENCHMARK_ASSET, as_of=as_of, knowledge_time=knowledge_time
-        )
+    async def current(
+        self, *, as_of: datetime, knowledge_time: datetime, historical_concurrency: int = 1
+    ) -> dict[str, Any]:
         # Hysteresis (finding #4, ADR-0062): find out what yesterday's own classification was
         # (itself un-hysteresis'd, since it has no "day before that" to check here) and let today's
         # result persist against it rather than flipping on any margin at all.
-        yesterday = await self._classify_at(as_of - timedelta(days=1))
+        # Today's snapshot and yesterday's classification read independently, so with a
+        # concurrency allowance they overlap; failures surface in the original order (snapshot
+        # first) and the sibling is cancelled.
+        if historical_concurrency > 1:
+            snapshot_task = asyncio.ensure_future(
+                gather_snapshot(
+                    self.adapters,
+                    asset=BENCHMARK_ASSET,
+                    as_of=as_of,
+                    knowledge_time=knowledge_time,
+                )
+            )
+            yesterday_task = asyncio.ensure_future(self._classify_at(as_of - timedelta(days=1)))
+            try:
+                snapshot = await snapshot_task
+                yesterday = await yesterday_task
+            except BaseException:
+                snapshot_task.cancel()
+                yesterday_task.cancel()
+                raise
+        else:
+            snapshot = await gather_snapshot(
+                self.adapters, asset=BENCHMARK_ASSET, as_of=as_of, knowledge_time=knowledge_time
+            )
+            yesterday = await self._classify_at(as_of - timedelta(days=1))
         previous_regime_id = yesterday.regime_id if yesterday.status == "ok" else None
         result = classify(snapshot, rp.parameters(), previous_regime_id=previous_regime_id)
 
@@ -187,6 +211,7 @@ class RegimeService:
                 step_days=HISTORICAL_STEP_DAYS,
                 min_episode_samples=MIN_EPISODE_SAMPLES,
                 max_examples=MAX_HISTORICAL_EXAMPLES,
+                concurrency=historical_concurrency,
             )
 
         return {

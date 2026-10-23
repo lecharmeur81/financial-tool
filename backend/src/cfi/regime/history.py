@@ -15,12 +15,38 @@ is none). Two deliberately different, documented performance trade-offs (ADR-005
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
 ClassifyAt = Callable[[datetime], Awaitable[tuple[str, Decimal | None]]]
+
+
+async def _classify_all(
+    classify_at: ClassifyAt, times: list[datetime], concurrency: int
+) -> list[tuple[str, Decimal | None]]:
+    """``classify_at`` for every time, results in the order of ``times``.
+
+    ``concurrency <= 1`` is the original strictly sequential loop. Above 1 the (mutually
+    independent) classifications run with at most ``concurrency`` in flight; the first failure is
+    re-raised unchanged and the remaining ones are cancelled."""
+    if concurrency <= 1 or len(times) <= 1:
+        return [await classify_at(t) for t in times]
+    gate = asyncio.Semaphore(concurrency)
+
+    async def one(t: datetime) -> tuple[str, Decimal | None]:
+        async with gate:
+            return await classify_at(t)
+
+    tasks = [asyncio.ensure_future(one(t)) for t in times]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        raise
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +95,7 @@ async def historical_examples(
     step_days: int,
     min_episode_samples: int,
     max_examples: int,
+    concurrency: int = 1,
 ) -> list[Episode]:
     """Sample backward from just before the current streak began, at ``step_days`` resolution,
     over ``lookback_days``; group consecutive same-label samples into runs; report runs matching
@@ -77,13 +104,19 @@ async def historical_examples(
         return []
     start_before_streak = streak_since - timedelta(days=step_days)
     n_samples = lookback_days // step_days
-    samples: list[tuple[datetime, str, Decimal | None]] = []
+    sample_times: list[datetime] = []
     for i in range(n_samples):
         sample_time = start_before_streak - timedelta(days=step_days * i)
         if sample_time < as_of - timedelta(days=lookback_days):
             break
-        regime_id, confidence = await classify_at(sample_time)
-        samples.append((sample_time, regime_id, confidence))
+        sample_times.append(sample_time)
+    # The samples do not depend on one another (each is classified against the same fixed anchor
+    # regime), so they may run concurrently; the order of ``samples`` is unchanged.
+    classified = await _classify_all(classify_at, sample_times, concurrency)
+    samples = [
+        (t, regime_id, confidence)
+        for t, (regime_id, confidence) in zip(sample_times, classified, strict=True)
+    ]
     # ``samples`` runs most-recent-first; walk it building runs of matching consecutive labels.
     episodes: list[Episode] = []
     i = 0
