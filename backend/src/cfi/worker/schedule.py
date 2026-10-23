@@ -21,6 +21,7 @@ from cfi.macro.sources import sources_for as macro_sources_for
 from cfi.market.sources import ADAPTERS, datasets_for
 from cfi.market_structure.sources import sources_for as market_structure_sources_for
 from cfi.retail.sources import sources_for as retail_sources_for
+from cfi.similarity.precompute import REFRESH_INTERVAL_SECONDS as SIMILARITY_REFRESH_SECONDS
 from cfi.whales.sources import sources_for as whale_sources_for
 
 # Seconds between scheduled runs, per dataset period (or metric for event series).
@@ -206,6 +207,19 @@ def alert_entries() -> dict[str, dict[str, Any]]:
     }
 
 
+def similarity_entries() -> dict[str, dict[str, Any]]:
+    """Refresh the precomputed default Historical Similarity response (``cfi.similarity.
+    precompute``). Reuses the ``alerts`` queue and its dedicated worker (concurrency 1, one task per
+    child) so a ~25 s computation never occupies the ingestion worker."""
+    return {
+        "similarity:refresh": {
+            "task": "similarity.refresh",
+            "schedule": float(SIMILARITY_REFRESH_SECONDS),
+            "options": {"queue": "alerts", "expires": SIMILARITY_REFRESH_SECONDS},
+        }
+    }
+
+
 def beat_schedule(
     provider_ids: list[str],
     institutional_provider_ids: list[str] | None = None,
@@ -225,6 +239,7 @@ def beat_schedule(
     schedule.update(market_structure_entries(market_structure_provider_ids or []))
     schedule.update(brief_entries())
     schedule.update(alert_entries())
+    schedule.update(similarity_entries())
     for item in scheduled_ingestions(provider_ids):
         schedule[f"latest:{item.provider_id}:{item.dataset_id}"] = {
             "task": "market.ingest_latest",

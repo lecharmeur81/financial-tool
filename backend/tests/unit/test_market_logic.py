@@ -186,6 +186,11 @@ def test_schedule_covers_native_datasets_on_the_right_queues() -> None:
             "schedule": 900.0,
             "options": {"queue": "ingest", "expires": 900},
         },
+        "similarity:refresh": {
+            "task": "similarity.refresh",
+            "schedule": 600.0,
+            "options": {"queue": "alerts", "expires": 600},
+        },
     }
     with pytest.raises(ValueError, match="unknown market provider"):
         scheduled_ingestions(["nope"])

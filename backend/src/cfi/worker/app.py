@@ -45,6 +45,8 @@ from cfi.realtime.service import RealtimeIntelligenceService, trigger_cycle_if_d
 from cfi.retail.jobs import ingest_source as ingest_retail_source
 from cfi.retail.sources import source as retail_source
 from cfi.retail.sources import sources_for as retail_sources_for
+from cfi.similarity.precompute import refresh_current as refresh_similarity
+from cfi.similarity.service import SimilarityService
 from cfi.whales.jobs import ingest_source as ingest_whale_source
 from cfi.whales.sources import source as whale_source
 from cfi.whales.sources import sources_for as whale_sources_for
@@ -450,6 +452,29 @@ def alerts_evaluate_task() -> dict[str, Any]:
 
     # run_guarded: a soft-limit interrupt must cancel and finish this cycle (releasing its lock),
     # not leave it suspended on the worker's persistent event loop.
+    return rt.run_guarded(go())
+
+
+@signals.beat_init.connect
+def _kick_similarity(**_: Any) -> None:
+    """Compute the precomputed Similarity result once when beat starts, so a deploy or restart does
+    not leave the default endpoint unavailable for a whole refresh interval."""
+    app.send_task("similarity.refresh", queue="alerts", expires=600)
+
+
+@app.task(name="similarity.refresh", time_limit=120, soft_time_limit=100)
+def similarity_refresh_task() -> dict[str, Any]:
+    """Recompute the default Historical Similarity response and store it in Redis. A failure or
+    soft-limit interrupt writes nothing (the previous entry just ages out); overlapping runs are
+    prevented by a Redis lock inside ``refresh_current``."""
+    rt = runtime()
+
+    async def go() -> dict[str, Any]:
+        service = SimilarityService(rt.engine())
+        return await refresh_similarity(
+            rt.redis(), lambda a, k: service.current(as_of=a, knowledge_time=k)
+        )
+
     return rt.run_guarded(go())
 
 

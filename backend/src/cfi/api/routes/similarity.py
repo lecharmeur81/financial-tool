@@ -25,6 +25,8 @@ from fastapi import APIRouter, Query, Request
 
 from cfi.api.params import resolve_query_times
 from cfi.core.errors import ServiceUnavailableError
+from cfi.core.pit_memo import pit_read_scope
+from cfi.similarity.precompute import read_current
 from cfi.similarity.service import SimilarityService
 
 router = APIRouter(prefix="/api/v1/similarity", tags=["similarity"])
@@ -61,5 +63,16 @@ async def current(
 ) -> dict[str, Any]:
     """The current historical-analogue search: similarity score, regime, forward returns, maximum
     drawdown and volatility per analogue, plus a distribution across analogues per horizon."""
+    if as_of is None and knowledge_time is None:
+        # The default "now" view is precomputed by a scheduled job (about 25 s to compute live,
+        # over the 8 s client timeout): served from Redis with its age, or a controlled 503 when
+        # missing/expired/malformed — never a stale result presented as current, never an
+        # uncontrolled live computation.
+        return await read_current(getattr(request.app.state, "redis", None))
     a, k = resolve_query_times(as_of, knowledge_time)
-    return await _service(request).current(as_of=a, knowledge_time=k)
+    # One request-scoped memo (Phase 51), as for the regime route: the ~103 historical candidate
+    # snapshots and the per-analogue regime lookups share point-in-time reads and revision windows
+    # instead of re-querying. Every read is keyed by its own ``as_of``/``knowledge_time`` (each
+    # candidate's own date), so results are identical; the scope ends with the request.
+    with pit_read_scope():
+        return await _service(request).current(as_of=a, knowledge_time=k)
