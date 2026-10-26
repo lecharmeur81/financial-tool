@@ -38,7 +38,7 @@ def test_celery_app_is_configured_for_safe_task_handling() -> None:
     assert "brief.generate" in worker.app.tasks
     assert "alerts.evaluate" in worker.app.tasks
     queues = {entry["options"]["queue"] for entry in conf.beat_schedule.values()}
-    assert queues == {"ingest_fast", "ingest", "backfill", "ai"}
+    assert queues == {"ingest_fast", "ingest", "backfill", "ai", "alerts"}
     assert "brief:daily" in conf.beat_schedule
     assert conf.beat_schedule["brief:daily"]["options"]["queue"] == "ai"
     assert "alerts:evaluate" in conf.beat_schedule
